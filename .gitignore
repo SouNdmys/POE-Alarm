@@ -1,0 +1,13 @@
+.vs/
+.idea/
+.tools/
+.packages/
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.nupkg
+*.msix
+*.msixbundle

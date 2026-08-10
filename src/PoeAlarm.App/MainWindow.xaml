@@ -1,0 +1,180 @@
+<Window x:Class="PoeAlarm.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="POE Alarm"
+        Width="860"
+        Height="820"
+        MinWidth="760"
+        MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#FF101114"
+        Foreground="#FFF3F3F3"
+        Loaded="OnLoaded"
+        SourceInitialized="OnSourceInitialized"
+        Closing="OnClosing">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="#FFF4F4F4" />
+      <Setter Property="Background" Value="#FF292C32" />
+      <Setter Property="BorderBrush" Value="#FF484C54" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="15,9" />
+      <Setter Property="Margin" Value="0,0,9,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonBorder"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="2"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonBorder" Property="Background" Value="#FF353941" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonBorder" Property="Background" Value="#FF202329" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="ButtonBorder" Property="Background" Value="#FF1D1F24" />
+                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#FF30333A" />
+                <Setter Property="Foreground" Value="#FF70737A" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#FF70737A" />
+          <Setter Property="Background" Value="#FF1D1F24" />
+          <Setter Property="BorderBrush" Value="#FF30333A" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Foreground" Value="#FFF5F5F5" />
+      <Setter Property="Background" Value="#FF181A1F" />
+      <Setter Property="BorderBrush" Value="#FF3A3D45" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="CaretBrush" Value="White" />
+    </Style>
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="#FF17191E" />
+      <Setter Property="BorderBrush" Value="#FF2D3037" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="18" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+  </Window.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <Grid Margin="28,24,28,28">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <StackPanel Grid.Row="0" Margin="0,0,0,22">
+        <TextBlock Text="POE Alarm" FontSize="28" FontWeight="SemiBold" />
+        <TextBlock Margin="0,7,0,0"
+                   Foreground="#FFA6A9B0"
+                   FontSize="14"
+                   Text="整句词缀 OCR · 灰色监控浮窗 · 命中后红窗阻挡鼠标点击" />
+      </StackPanel>
+
+      <Border Grid.Row="1" Style="{StaticResource Card}">
+        <StackPanel>
+          <DockPanel Margin="0,0,0,10" LastChildFill="False">
+            <TextBlock DockPanel.Dock="Left" Text="1  目标整句" FontSize="17" FontWeight="SemiBold" />
+            <Button DockPanel.Dock="Right" Content="从剪贴板粘贴" Click="OnPasteTemplate" Margin="9,0,0,0" />
+          </DockPanel>
+          <TextBox x:Name="TargetAffixTextBox"
+                   Height="86"
+                   AcceptsReturn="True"
+                   TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto"
+                   TextChanged="OnTargetAffixChanged"
+                   ToolTip="直接粘贴 PoEDB 的完整词缀，例如 (6—8)% increased Attack Speed ..." />
+          <TextBlock x:Name="CanonicalPreviewText"
+                     Margin="2,10,2,0"
+                     Foreground="#FF9DA1AA"
+                     FontFamily="Consolas"
+                     TextWrapping="Wrap"
+                     Text="等待输入完整词缀；所有非数字词都会参与匹配。" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="2" Style="{StaticResource Card}">
+        <DockPanel LastChildFill="True">
+          <Button DockPanel.Dock="Right" Content="框选装备提示区域" Click="OnSelectRegion" Margin="16,0,0,0" />
+          <StackPanel>
+            <TextBlock Text="2  监控区域" FontSize="17" FontWeight="SemiBold" />
+            <TextBlock x:Name="RegionText"
+                       Margin="0,8,0,0"
+                       Foreground="#FFAFB2B9"
+                       Text="尚未选择。游戏内悬停装备后按 Ctrl + Shift + F11 最方便。" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <Border Grid.Row="3" Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="3  运行" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,13" />
+          <WrapPanel>
+            <Button x:Name="StartButton" Content="开始监控" Click="OnStartMonitoring" />
+            <Button x:Name="StopButton" Content="停止" Click="OnStopMonitoring" IsEnabled="False" />
+            <Button Content="用截图测试" Click="OnAnalyzeScreenshot" />
+            <Button Content="测试阻挡告警" Click="OnTestAlert" />
+            <Button x:Name="AcknowledgeButton" Content="确认并关闭告警" Click="OnAcknowledgeAlert" IsEnabled="False" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="4" Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="状态" FontSize="17" FontWeight="SemiBold" />
+          <TextBlock x:Name="StatusText"
+                     Margin="0,10,0,0"
+                     Foreground="#FFD4D5D8"
+                     FontSize="15"
+                     Text="待机" />
+          <TextBlock x:Name="LatencyText"
+                     Margin="0,7,0,0"
+                     Foreground="#FF92969F"
+                     FontFamily="Consolas"
+                     Text="尚无扫描数据" />
+          <TextBox x:Name="OcrOutputTextBox"
+                   Margin="0,12,0,0"
+                   Height="96"
+                   IsReadOnly="True"
+                   FontFamily="Consolas"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto"
+                   Text="OCR 识别到的物理行会显示在这里。" />
+        </StackPanel>
+      </Border>
+
+      <TextBlock Grid.Row="5"
+                 Foreground="#FF858991"
+                 FontSize="12"
+                 TextWrapping="Wrap"
+                 Text="Ctrl + Shift + F11 框选区域 · Ctrl + Shift + F12 确认告警。灰色浮窗表示监控中；命中后前台红窗会接收后续鼠标点击。" />
+    </Grid>
+  </ScrollViewer>
+</Window>
