@@ -12,8 +12,8 @@ using PoeAlarm.App.Capture;
 namespace PoeAlarm.App.Monitoring;
 
 /// <summary>
-/// A neutral, click-through heads-up display that proves monitoring is active without using
-/// green/yellow attention signals. It is shown only while the monitor is running.
+/// A pale-green, click-through heads-up display that makes the active monitoring state easy
+/// to notice without competing with the red hit alert. It is shown only while monitoring.
 /// </summary>
 internal sealed class MonitoringHudWindow : Window
 {
@@ -60,7 +60,7 @@ internal sealed class MonitoringHudWindow : Window
             FontFamily = new FontFamily("Segoe UI"),
             FontSize = 13,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(232, 233, 236)),
+            Foreground = new SolidColorBrush(Color.FromRgb(31, 72, 38)),
             Text = "POE Alarm · 监控中",
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -69,7 +69,7 @@ internal sealed class MonitoringHudWindow : Window
         {
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
-            Foreground = new SolidColorBrush(Color.FromRgb(174, 178, 186)),
+            Foreground = new SolidColorBrush(Color.FromRgb(62, 107, 69)),
             HorizontalAlignment = HorizontalAlignment.Right,
             Text = "00:00",
             VerticalAlignment = VerticalAlignment.Center,
@@ -87,7 +87,7 @@ internal sealed class MonitoringHudWindow : Window
         {
             FontFamily = new FontFamily("Segoe UI"),
             FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromRgb(139, 143, 151)),
+            Foreground = new SolidColorBrush(Color.FromRgb(83, 114, 89)),
             Margin = new Thickness(0, 9, 0, 2),
             Text = "当前目标",
         };
@@ -96,7 +96,7 @@ internal sealed class MonitoringHudWindow : Window
         {
             FontFamily = new FontFamily("Segoe UI"),
             FontSize = 12.5,
-            Foreground = Brushes.White,
+            Foreground = new SolidColorBrush(Color.FromRgb(20, 42, 24)),
             LineHeight = 18,
             MaxHeight = 54,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -110,9 +110,9 @@ internal sealed class MonitoringHudWindow : Window
 
         Content = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(232, 24, 26, 31)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(180, 116, 121, 131)),
-            BorderThickness = new Thickness(1),
+            Background = new SolidColorBrush(Color.FromArgb(238, 209, 235, 214)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(245, 77, 139, 88)),
+            BorderThickness = new Thickness(1.5),
             CornerRadius = new CornerRadius(7),
             Padding = new Thickness(13, 10, 13, 11),
             Width = 420,

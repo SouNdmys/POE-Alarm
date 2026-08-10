@@ -306,8 +306,8 @@ public partial class MainWindow : Window
         {
             case MonitorState.Running:
                 StatusText.Text = snapshot.LastLines.Count == 0
-                    ? "正在监控；当前没有蓝色词缀，灰色浮窗会保持显示直到你手动停止。"
-                    : "正在监控；右上角灰色浮窗显示当前目标和运行时间。";
+                    ? "正在监控；当前没有蓝色词缀，淡绿色浮窗会保持显示直到你手动停止。"
+                    : "正在监控；屏幕角落的淡绿色浮窗显示当前目标和运行时间。";
                 break;
             case MonitorState.MatchFound:
                 HideMonitoringHud();
