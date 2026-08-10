@@ -1,0 +1,35 @@
+<Window x:Class="PoeAlarm.App.Selection.RegionSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="#38000000"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Cursor="Cross"
+        KeyDown="OnKeyDown"
+        MouseLeftButtonDown="OnMouseLeftButtonDown"
+        MouseMove="OnMouseMove"
+        MouseLeftButtonUp="OnMouseLeftButtonUp">
+  <Grid>
+    <Canvas x:Name="SelectionCanvas">
+      <Rectangle x:Name="SelectionRectangle"
+                 Visibility="Collapsed"
+                 Stroke="#FFFFFFFF"
+                 StrokeThickness="2"
+                 Fill="#18000000" />
+    </Canvas>
+
+    <Border HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,28,0,0"
+            Padding="18,10"
+            CornerRadius="8"
+            Background="#E6181818">
+      <TextBlock Foreground="White"
+                 FontSize="15"
+                 Text="拖出只包含装备提示框的区域 · Esc 取消" />
+    </Border>
+  </Grid>
+</Window>

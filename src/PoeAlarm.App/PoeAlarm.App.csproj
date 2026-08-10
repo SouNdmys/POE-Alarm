@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.3.0</Version>
+    <AssemblyName>PoeAlarm</AssemblyName>
+    <Product>POE Alarm</Product>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PoeAlarm.Core\PoeAlarm.Core.csproj" />
+  </ItemGroup>
+</Project>
