@@ -94,7 +94,7 @@
         <TextBlock Margin="0,7,0,0"
                    Foreground="#FFA6A9B0"
                    FontSize="14"
-                   Text="整句词缀 OCR · 灰色监控浮窗 · 命中后红窗阻挡鼠标点击" />
+                   Text="整句词缀 OCR · 淡绿色监控浮窗 · 命中后中央红窗阻挡鼠标点击" />
       </StackPanel>
 
       <Border Grid.Row="1" Style="{StaticResource Card}">
@@ -174,7 +174,7 @@
                  Foreground="#FF858991"
                  FontSize="12"
                  TextWrapping="Wrap"
-                 Text="Ctrl + Shift + F11 框选区域 · Ctrl + Shift + F12 确认告警。灰色浮窗表示监控中；命中后前台红窗会接收后续鼠标点击。" />
+                 Text="Ctrl + Shift + F11 框选区域 · Ctrl + Shift + F12 确认告警。淡绿色浮窗表示监控中；命中后中央红窗会接收后续鼠标点击。" />
     </Grid>
   </ScrollViewer>
 </Window>

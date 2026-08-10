@@ -458,70 +458,20 @@ internal sealed class AffixHitOverlayWindow : Window
             return;
         }
 
-        messagePanel.UpdateLayout();
-        var panelPhysicalSize = compositionTarget.TransformToDevice.Transform(
-            new Vector(messagePanel.ActualWidth, messagePanel.ActualHeight));
-        const int margin = 18;
-        var panelWidth = (int)Math.Ceiling(panelPhysicalSize.X);
-        var panelHeight = (int)Math.Ceiling(panelPhysicalSize.Y);
-        var candidates = new[]
-        {
-            new NativeRect
-            {
-                Left = monitorInfo.WorkArea.Right - panelWidth - margin,
-                Top = monitorInfo.WorkArea.Top + margin,
-            },
-            new NativeRect
-            {
-                Left = monitorInfo.WorkArea.Right - panelWidth - margin,
-                Top = monitorInfo.WorkArea.Bottom - panelHeight - margin,
-            },
-            new NativeRect
-            {
-                Left = monitorInfo.WorkArea.Left + margin,
-                Top = monitorInfo.WorkArea.Top + margin,
-            },
-            new NativeRect
-            {
-                Left = monitorInfo.WorkArea.Left + margin,
-                Top = monitorInfo.WorkArea.Bottom - panelHeight - margin,
-            },
-        };
-        for (var index = 0; index < candidates.Length; index++)
-        {
-            candidates[index].Right = candidates[index].Left + panelWidth;
-            candidates[index].Bottom = candidates[index].Top + panelHeight;
-        }
-
-        var selected = candidates[0];
-        if (anchorRegion is { IsValid: true } monitoredRegion)
-        {
-            foreach (var candidate in candidates)
-            {
-                if (!Intersects(candidate, monitoredRegion))
-                {
-                    selected = candidate;
-                    break;
-                }
-            }
-        }
-
-        var selectedCenterPhysicalX =
-            ((selected.Left + selected.Right) / 2.0) - GetSystemMetrics(SmXVirtualScreen);
-        var selectedCenterPhysicalY =
-            ((selected.Top + selected.Bottom) / 2.0) - GetSystemMetrics(SmYVirtualScreen);
-        var selectedCenterDip = compositionTarget.TransformFromDevice.Transform(
-            new Point(selectedCenterPhysicalX, selectedCenterPhysicalY));
+        // Put the confirmation card in the middle of the monitor containing the selected OCR
+        // region. The full virtual-desktop window remains behind it as an invisible input shield.
+        var monitorCenterPhysicalX =
+            ((monitorInfo.WorkArea.Left + monitorInfo.WorkArea.Right) / 2.0) -
+            GetSystemMetrics(SmXVirtualScreen);
+        var monitorCenterPhysicalY =
+            ((monitorInfo.WorkArea.Top + monitorInfo.WorkArea.Bottom) / 2.0) -
+            GetSystemMetrics(SmYVirtualScreen);
+        var monitorCenterDip = compositionTarget.TransformFromDevice.Transform(
+            new Point(monitorCenterPhysicalX, monitorCenterPhysicalY));
         messagePanel.RenderTransform = new TranslateTransform(
-            selectedCenterDip.X - (root.ActualWidth / 2),
-            selectedCenterDip.Y - (root.ActualHeight / 2));
+            monitorCenterDip.X - (root.ActualWidth / 2),
+            monitorCenterDip.Y - (root.ActualHeight / 2));
     }
-
-    private static bool Intersects(NativeRect window, ScreenRegion region) =>
-        window.Left < region.X + region.Width &&
-        window.Right > region.X &&
-        window.Top < region.Y + region.Height &&
-        window.Bottom > region.Y;
 
     private static void SetExactVirtualDesktopBounds(IntPtr windowHandle)
     {
