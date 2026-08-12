@@ -27,7 +27,8 @@
             Padding="18,10"
             CornerRadius="8"
             Background="#E6181818">
-      <TextBlock Foreground="White"
+      <TextBlock x:Name="InstructionText"
+                 Foreground="White"
                  FontSize="15"
                  Text="拖出只包含装备提示框的区域 · Esc 取消" />
     </Border>

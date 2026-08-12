@@ -13,6 +13,32 @@ public interface IAlertService : IDisposable
     /// <summary>Gets whether an alert is currently latched.</summary>
     bool IsActive { get; }
 
+    /// <summary>Gets whether the short pre-recognition input guard is currently requested.</summary>
+    bool IsInputGuardActive { get; }
+
+    /// <summary>
+    /// Applies UI-only alert preferences outside the recognition path. A missing custom WAV
+    /// falls back to the built-in sound; capture exclusion never changes input blocking.
+    /// </summary>
+    void Configure(string? customWavePath, bool excludeOverlayFromCapture);
+
+    /// <summary>
+    /// Prepares the reusable red alert window and, when requested, the pass-through low-level
+    /// mouse guard before monitoring begins so neither is created on the latency-critical path.
+    /// This method may be called from any thread.
+    /// </summary>
+    void Prepare(bool preparePendingInputGuard = false);
+
+    /// <summary>
+    /// Arms the hook-only mouse guard while a changed tooltip frame is being recognized. No WPF
+    /// window is shown, so POE retains mouse hover. It has a fail-open timeout and never starts
+    /// the audible/red alert by itself.
+    /// </summary>
+    void BeginInputGuard(ScreenRegion? anchorRegion = null);
+
+    /// <summary>Releases a pending input guard after OCR decides that the frame did not match.</summary>
+    void ReleaseInputGuard();
+
     /// <summary>
     /// Displays and sounds the alert. Calls made while the alert is active are ignored.
     /// This method may be called from any thread.
@@ -22,7 +48,7 @@ public interface IAlertService : IDisposable
     void Trigger(string? detectedText = null, ScreenRegion? anchorRegion = null);
 
     /// <summary>
-    /// Clears the latched alert, closes the overlay, and stops its sound.
+    /// Clears the latched alert, hides and releases the reusable overlay, and stops its sound.
     /// This method may be called from any thread.
     /// </summary>
     void Acknowledge();

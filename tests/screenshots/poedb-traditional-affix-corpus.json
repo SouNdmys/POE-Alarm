@@ -1,0 +1,1363 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-11",
+  "locale": "zh-TW",
+  "purpose": "PoEDB-derived Traditional Chinese OCR and strict-affix-matching stress corpus. This is text-only reference data, not a screenshot manifest.",
+  "templatePolicy": {
+    "numbers": "PoEDB-provided # placeholders are retained. Concrete tier values from Modifiers_list are replaced with #; explicit leading + or - signs and percent signs are preserved.",
+    "semantics": "All non-numeric wording, punctuation, order, and explicit line breaks are preserved.",
+    "scope": "Public PoEDB pages only. Entries are sampled for OCR risk rather than intended as a complete game database."
+  },
+  "sources": [
+    {
+      "id": "poedb-jewels",
+      "category": "jewel",
+      "url": "https://poedb.tw/tw/Jewels",
+      "accessedAt": "2026-08-11"
+    },
+    {
+      "id": "poedb-abyss-jewels",
+      "category": "abyss-jewel",
+      "url": "https://poedb.tw/tw/Abyss_Jewels",
+      "accessedAt": "2026-08-11"
+    },
+    {
+      "id": "poedb-modifiers-list",
+      "category": "weapon-and-armour",
+      "url": "https://poedb.tw/tw/Modifiers_list",
+      "accessedAt": "2026-08-11"
+    }
+  ],
+  "statistics": {
+    "caseCount": 163,
+    "uniqueTemplateCount": 153,
+    "categoryCounts": {
+      "jewel": 36,
+      "abyss-jewel": 42,
+      "weapon": 39,
+      "armour": 46
+    },
+    "exactDuplicates": {
+      "templateGroupCount": 9,
+      "caseCount": 19,
+      "redundantCaseCount": 10,
+      "unorderedPairCount": 11,
+      "definition": "Same normalized template appearing in more than one sampled item domain. Domain-specific cases are retained intentionally."
+    },
+    "labelledSimilarity": {
+      "groupCount": 41,
+      "caseCount": 148,
+      "unorderedPairCount": 236,
+      "definition": "All unordered pairs within manually labelled similarityGroup families; these are hard negatives, not asserted edit-distance matches."
+    },
+    "stressCoverage": {
+      "nearPairCases": 131,
+      "multiLineCases": 29,
+      "longCases": 36,
+      "rareGlyphCases": 25,
+      "weaponNameCases": 13,
+      "attackVsSpellCases": 13,
+      "noNumberCases": 3
+    },
+    "sourceVerification": {
+      "method": "Each whitespace-insensitive template was checked as an exact substring of its corresponding fetched PoEDB page after replacing concrete Arabic numeric literals and ranges with #.",
+      "verifiedCaseCount": 163,
+      "missingCaseCount": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "jewel-001",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+# 力量",
+      "similarityGroup": "short-attributes",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-002",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+# 敏捷",
+      "similarityGroup": "short-attributes",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-003",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+# 智慧",
+      "similarityGroup": "short-attributes",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-004",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+# 最大能量護盾",
+      "riskTags": ["short", "dense-glyphs"]
+    },
+    {
+      "id": "jewel-005",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+#% 火焰抗性",
+      "similarityGroup": "elemental-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-006",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+#% 冰冷抗性",
+      "similarityGroup": "elemental-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-007",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+#% 閃電抗性",
+      "similarityGroup": "elemental-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-008",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "+#% 混沌抗性",
+      "similarityGroup": "elemental-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "jewel-009",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 火焰傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-010",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 冰冷傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-011",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 閃電傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-012",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 混沌傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-013",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 元素傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-014",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 法術傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-015",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 全域物理傷害",
+      "similarityGroup": "simple-damage-types",
+      "riskTags": ["near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "jewel-016",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 投射物速度",
+      "similarityGroup": "action-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-017",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 圖騰放置速度",
+      "similarityGroup": "action-speeds",
+      "riskTags": ["near-pair", "rare-glyph"]
+    },
+    {
+      "id": "jewel-018",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 地雷投擲速度",
+      "similarityGroup": "action-speeds",
+      "riskTags": ["near-pair", "rare-glyph"]
+    },
+    {
+      "id": "jewel-019",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 攻擊與施放速度",
+      "similarityGroup": "action-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-020",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 暈眩恢復和格擋恢復",
+      "riskTags": ["rare-glyph", "dense-glyphs"]
+    },
+    {
+      "id": "jewel-021",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "#% 攻擊傷害偷取生命",
+      "similarityGroup": "leech-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-022",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "#% 物理攻擊傷害偷取魔力",
+      "similarityGroup": "leech-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-023",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "#% 法術傷害偷取能量護盾",
+      "similarityGroup": "leech-types",
+      "riskTags": ["near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "jewel-024",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "擊中時有 #% 機率使敵人中毒",
+      "similarityGroup": "ailment-on-hit",
+      "riskTags": ["semantic-negative"]
+    },
+    {
+      "id": "jewel-025",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "攻擊有 #% 機率造成流血",
+      "similarityGroup": "ailment-on-hit",
+      "riskTags": ["semantic-negative"]
+    },
+    {
+      "id": "jewel-026",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "#% 機率使用冰冷傷害擊中敵人造成冰凍效果",
+      "similarityGroup": "ailment-on-hit",
+      "riskTags": ["long", "dense-glyphs"]
+    },
+    {
+      "id": "jewel-027",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "每用攻擊擊中一個敵人，獲得 # 能量護盾",
+      "riskTags": ["long", "punctuation"]
+    },
+    {
+      "id": "jewel-028",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "增加 #% 召喚物所造成的傷害",
+      "similarityGroup": "minion-modifiers",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-029",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "召喚物增加 #% 最大生命",
+      "similarityGroup": "minion-modifiers",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-030",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "召喚物增加 #% 攻擊速度",
+      "similarityGroup": "minion-modifiers",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-031",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "召喚物增加 #% 施放速度",
+      "similarityGroup": "minion-modifiers",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-032",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "召喚物有 +#% 全部元素抗性",
+      "similarityGroup": "minion-modifiers",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "jewel-033",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "持匕首類武器時增加 #% 物理傷害",
+      "similarityGroup": "weapon-name-physical",
+      "riskTags": ["rare-glyph", "weapon-name", "near-pair"]
+    },
+    {
+      "id": "jewel-034",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "使用匕首類武器時增加 #% 攻擊速度",
+      "similarityGroup": "weapon-name-speed",
+      "riskTags": ["rare-glyph", "weapon-name", "near-pair"]
+    },
+    {
+      "id": "jewel-035",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "持爪類武器時增加 #% 物理傷害",
+      "similarityGroup": "weapon-name-physical",
+      "riskTags": ["weapon-name", "near-pair"]
+    },
+    {
+      "id": "jewel-036",
+      "category": "jewel",
+      "source": "poedb-jewels",
+      "template": "使用爪類武器時增加 #% 攻擊速度",
+      "similarityGroup": "weapon-name-speed",
+      "riskTags": ["weapon-name", "near-pair"]
+    },
+
+    {
+      "id": "abyss-001",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "+# 最大生命",
+      "similarityGroup": "abyss-resource-pool",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "abyss-002",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "+# 最大魔力",
+      "similarityGroup": "abyss-resource-pool",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "abyss-003",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "+# 最大能量護盾",
+      "similarityGroup": "abyss-resource-pool",
+      "riskTags": ["short", "near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "abyss-004",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 機率避免被暈眩",
+      "similarityGroup": "avoid-ailments",
+      "riskTags": ["near-pair", "rare-glyph"]
+    },
+    {
+      "id": "abyss-005",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 機率避免被冰凍",
+      "similarityGroup": "avoid-ailments",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-006",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 機率避免被感電",
+      "similarityGroup": "avoid-ailments",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-007",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 機率避免被中毒",
+      "similarityGroup": "avoid-ailments",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-008",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 機率避免流血",
+      "similarityGroup": "avoid-ailments",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-009",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "#% 物理傷害轉換為火焰傷害",
+      "riskTags": ["semantic-order"]
+    },
+    {
+      "id": "abyss-010",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "減少 #% 身上元素異常狀態時間",
+      "similarityGroup": "ailment-duration-effect",
+      "riskTags": ["long", "dense-glyphs"]
+    },
+    {
+      "id": "abyss-011",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "增加 #% 冰冷異常狀態效果",
+      "similarityGroup": "ailment-duration-effect",
+      "riskTags": ["near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "abyss-012",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "增加 #% 感電效果",
+      "similarityGroup": "ailment-duration-effect",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-013",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "迷蹤效果下增加 #% 移動速度",
+      "similarityGroup": "conditional-buffs",
+      "riskTags": ["rare-glyph", "conditional"]
+    },
+    {
+      "id": "abyss-014",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "猛攻持續時間內，增加 #% 攻擊和施放速度",
+      "similarityGroup": "conditional-buffs",
+      "riskTags": ["long", "punctuation", "conditional"]
+    },
+    {
+      "id": "abyss-015",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "當你有不潔之力時，增加 #% 物理傷害",
+      "similarityGroup": "conditional-buffs",
+      "riskTags": ["long", "punctuation", "conditional"]
+    },
+    {
+      "id": "abyss-016",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊技能增加 #% 火焰傷害",
+      "similarityGroup": "attack-skill-elements",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-017",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊技能增加 #% 冰冷傷害",
+      "similarityGroup": "attack-skill-elements",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-018",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊技能增加 #% 閃電傷害",
+      "similarityGroup": "attack-skill-elements",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-019",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊技能增加 #% 混沌傷害",
+      "similarityGroup": "attack-skill-elements",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-020",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊技能增加 #% 物理傷害",
+      "similarityGroup": "attack-skill-elements",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-021",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術技能增加 #% 火焰傷害",
+      "similarityGroup": "spell-skill-elements",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "abyss-022",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術技能增加 #% 冰冷傷害",
+      "similarityGroup": "spell-skill-elements",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "abyss-023",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術技能增加 #% 閃電傷害",
+      "similarityGroup": "spell-skill-elements",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "abyss-024",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術技能增加 #% 混沌傷害",
+      "similarityGroup": "spell-skill-elements",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "abyss-025",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術技能增加 #% 物理傷害",
+      "similarityGroup": "spell-skill-elements",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "abyss-026",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊擊中時有 #% 機率嘲諷敵人",
+      "similarityGroup": "hit-debuffs",
+      "riskTags": ["near-pair", "rare-glyph"]
+    },
+    {
+      "id": "abyss-027",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊擊中時有 #% 機率造成致盲",
+      "similarityGroup": "hit-debuffs",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-028",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "法術擊中時有 #% 機率阻礙敵人",
+      "similarityGroup": "hit-debuffs",
+      "riskTags": ["near-pair", "attack-vs-spell", "rare-glyph"]
+    },
+    {
+      "id": "abyss-029",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "攻擊擊中 # 承受物理傷害",
+      "riskTags": ["short", "unusual-order"]
+    },
+    {
+      "id": "abyss-030",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "召喚物增加 #% 移動速度",
+      "similarityGroup": "abyss-minion-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-031",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "召喚物增加 #% 攻擊速度",
+      "similarityGroup": "abyss-minion-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-032",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "召喚物增加 #% 施放速度",
+      "similarityGroup": "abyss-minion-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-033",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "增加 #% 召喚物命中值",
+      "similarityGroup": "abyss-minion-speeds",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "abyss-034",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持匕首時 +#% 暴擊加成",
+      "similarityGroup": "abyss-weapon-crit",
+      "riskTags": ["weapon-name", "rare-glyph", "near-pair"]
+    },
+    {
+      "id": "abyss-035",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "使用匕首類武器時增加 #% 命中值",
+      "similarityGroup": "abyss-dagger-mods",
+      "riskTags": ["weapon-name", "rare-glyph", "near-pair"]
+    },
+    {
+      "id": "abyss-036",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "使用匕首類武器時增加 #% 攻擊速度",
+      "similarityGroup": "abyss-dagger-mods",
+      "riskTags": ["weapon-name", "rare-glyph", "near-pair"]
+    },
+    {
+      "id": "abyss-037",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持爪時 +#% 暴擊加成",
+      "similarityGroup": "abyss-weapon-crit",
+      "riskTags": ["weapon-name", "near-pair"]
+    },
+    {
+      "id": "abyss-038",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "使用爪類武器時增加 #% 命中值",
+      "similarityGroup": "abyss-claw-mods",
+      "riskTags": ["weapon-name", "near-pair"]
+    },
+    {
+      "id": "abyss-039",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持盾時，增加 #% 法術暴擊率",
+      "similarityGroup": "shield-staff-spell-crit",
+      "riskTags": ["weapon-name", "punctuation", "near-pair"]
+    },
+    {
+      "id": "abyss-040",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持盾時，+#% 法術暴擊加成",
+      "similarityGroup": "shield-staff-spell-crit",
+      "riskTags": ["weapon-name", "punctuation", "near-pair"]
+    },
+    {
+      "id": "abyss-041",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持長杖時，增加 #% 法術暴擊率",
+      "similarityGroup": "shield-staff-spell-crit",
+      "riskTags": ["weapon-name", "punctuation", "near-pair"]
+    },
+    {
+      "id": "abyss-042",
+      "category": "abyss-jewel",
+      "source": "poedb-abyss-jewels",
+      "template": "持長杖時，+#% 法術暴擊加成",
+      "similarityGroup": "shield-staff-spell-crit",
+      "riskTags": ["weapon-name", "punctuation", "near-pair"]
+    },
+
+    {
+      "id": "weapon-001",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害",
+      "similarityGroup": "weapon-basic-stats",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "weapon-002",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 攻擊速度",
+      "similarityGroup": "weapon-basic-stats",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "weapon-003",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 暴擊率",
+      "similarityGroup": "weapon-basic-stats",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "weapon-004",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 全域暴擊加成",
+      "similarityGroup": "weapon-basic-stats",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "weapon-005",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 火焰傷害",
+      "similarityGroup": "weapon-added-elements",
+      "riskTags": ["near-pair", "two-numbers"]
+    },
+    {
+      "id": "weapon-006",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 冰冷傷害",
+      "similarityGroup": "weapon-added-elements",
+      "riskTags": ["near-pair", "two-numbers"]
+    },
+    {
+      "id": "weapon-007",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 閃電傷害",
+      "similarityGroup": "weapon-added-elements",
+      "riskTags": ["near-pair", "two-numbers"]
+    },
+    {
+      "id": "weapon-008",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 混沌傷害",
+      "similarityGroup": "weapon-added-elements",
+      "riskTags": ["near-pair", "two-numbers"]
+    },
+    {
+      "id": "weapon-009",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "法術附加 # 至 # 火焰傷害",
+      "similarityGroup": "spell-added-elements",
+      "riskTags": ["near-pair", "attack-vs-spell", "two-numbers"]
+    },
+    {
+      "id": "weapon-010",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "法術附加 # 至 # 冰冷傷害",
+      "similarityGroup": "spell-added-elements",
+      "riskTags": ["near-pair", "attack-vs-spell", "two-numbers"]
+    },
+    {
+      "id": "weapon-011",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "法術附加 # 至 # 閃電傷害",
+      "similarityGroup": "spell-added-elements",
+      "riskTags": ["near-pair", "attack-vs-spell", "two-numbers"]
+    },
+    {
+      "id": "weapon-012",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "法術附加 # 至 # 混沌傷害",
+      "similarityGroup": "spell-added-elements",
+      "riskTags": ["near-pair", "attack-vs-spell", "two-numbers"]
+    },
+    {
+      "id": "weapon-013",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊穿透 #% 火焰抗性",
+      "similarityGroup": "weapon-penetration",
+      "riskTags": ["near-pair", "long"]
+    },
+    {
+      "id": "weapon-014",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊穿透 #% 冰冷抗性",
+      "similarityGroup": "weapon-penetration",
+      "riskTags": ["near-pair", "long"]
+    },
+    {
+      "id": "weapon-015",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊穿透 #% 閃電抗性",
+      "similarityGroup": "weapon-penetration",
+      "riskTags": ["near-pair", "long"]
+    },
+    {
+      "id": "weapon-016",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊穿透 #% 混沌抗性",
+      "similarityGroup": "weapon-penetration",
+      "riskTags": ["near-pair", "long"]
+    },
+    {
+      "id": "weapon-017",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 火焰傷害\n使用此武器攻擊穿透 #% 火焰抗性",
+      "similarityGroup": "compound-added-penetration",
+      "riskTags": ["multi-line", "near-pair", "long"]
+    },
+    {
+      "id": "weapon-018",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 冰冷傷害\n使用此武器攻擊穿透 #% 冰冷抗性",
+      "similarityGroup": "compound-added-penetration",
+      "riskTags": ["multi-line", "near-pair", "long"]
+    },
+    {
+      "id": "weapon-019",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 閃電傷害\n使用此武器攻擊穿透 #% 閃電抗性",
+      "similarityGroup": "compound-added-penetration",
+      "riskTags": ["multi-line", "near-pair", "long"]
+    },
+    {
+      "id": "weapon-020",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "附加 # 至 # 混沌傷害\n使用此武器攻擊穿透 #% 混沌抗性",
+      "similarityGroup": "compound-added-penetration",
+      "riskTags": ["multi-line", "near-pair", "long"]
+    },
+    {
+      "id": "weapon-021",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊，每 # 點力量附加 # 至 # 火焰傷害",
+      "similarityGroup": "attribute-scaled-added-damage",
+      "riskTags": ["long", "punctuation", "three-numbers"]
+    },
+    {
+      "id": "weapon-022",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "每 # 點敏捷，使用此武器攻擊附加 # 至 # 冰冷傷害",
+      "similarityGroup": "attribute-scaled-added-damage",
+      "riskTags": ["long", "punctuation", "three-numbers"]
+    },
+    {
+      "id": "weapon-023",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "使用此武器攻擊，每 # 點智慧附加 # 至 # 閃電傷害",
+      "similarityGroup": "attribute-scaled-added-damage",
+      "riskTags": ["long", "punctuation", "three-numbers"]
+    },
+    {
+      "id": "weapon-024",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害\n增加 #% 攻擊速度",
+      "similarityGroup": "compound-physical-local",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "weapon-025",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害\n增加 #% 暴擊率",
+      "similarityGroup": "compound-physical-local",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "weapon-026",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害\n+# 命中值",
+      "similarityGroup": "compound-physical-local",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "weapon-027",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害\n增加 #% 投射物速度",
+      "similarityGroup": "compound-physical-local",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "weapon-028",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 物理傷害\n+#% 全域暴擊加成",
+      "similarityGroup": "compound-physical-local",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "weapon-029",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的快速攻擊輔助\n增加 #% 攻擊速度",
+      "similarityGroup": "socketed-support-speed",
+      "riskTags": ["multi-line", "long", "near-pair"]
+    },
+    {
+      "id": "weapon-030",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的快速施放輔助\n增加 #% 施放速度",
+      "similarityGroup": "socketed-support-speed",
+      "riskTags": ["multi-line", "long", "near-pair"]
+    },
+    {
+      "id": "weapon-031",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的火焰穿透輔助\n增加 #% 火焰傷害",
+      "similarityGroup": "socketed-support-penetration",
+      "riskTags": ["multi-line", "long", "near-pair"]
+    },
+    {
+      "id": "weapon-032",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的冰冷穿透輔助\n增加 #% 冰冷傷害",
+      "similarityGroup": "socketed-support-penetration",
+      "riskTags": ["multi-line", "long", "near-pair"]
+    },
+    {
+      "id": "weapon-033",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的閃電穿透輔助\n增加 #% 閃電傷害",
+      "similarityGroup": "socketed-support-penetration",
+      "riskTags": ["multi-line", "long", "near-pair"]
+    },
+    {
+      "id": "weapon-034",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的機率中毒輔助\n擊中時有 #% 機率使敵人中毒",
+      "similarityGroup": "socketed-support-ailment",
+      "riskTags": ["multi-line", "long", "semantic-repeat"]
+    },
+    {
+      "id": "weapon-035",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的機率流血輔助\n擊中時 #% 機率造成流血",
+      "similarityGroup": "socketed-support-ailment",
+      "riskTags": ["multi-line", "long", "semantic-repeat"]
+    },
+    {
+      "id": "weapon-036",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "當你擊殺稀有怪物，有 #% 機率獲得它其中 # 個詞綴，持續 # 秒",
+      "riskTags": ["long", "punctuation", "three-numbers", "rare-glyph"]
+    },
+    {
+      "id": "weapon-037",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "此武器擊中時有 #% 機率無視敵人的物理傷害減免",
+      "riskTags": ["long", "semantic-order"]
+    },
+    {
+      "id": "weapon-038",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "近戰打擊擊中時以易燃詛咒敵人，且無視詛咒上限",
+      "riskTags": ["long", "no-number", "rare-glyph", "punctuation"]
+    },
+    {
+      "id": "weapon-039",
+      "category": "weapon",
+      "source": "poedb-modifiers-list",
+      "template": "投射物根據每次穿透敵人，增加 #% 擊中和異常狀態傷害",
+      "riskTags": ["long", "punctuation", "dense-glyphs"]
+    },
+
+    {
+      "id": "armour-001",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲",
+      "similarityGroup": "defence-types",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-002",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 閃避值",
+      "similarityGroup": "defence-types",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-003",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 能量護盾",
+      "similarityGroup": "defence-types",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-004",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲與閃避",
+      "similarityGroup": "defence-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "armour-005",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲與能量護盾",
+      "similarityGroup": "defence-types",
+      "riskTags": ["near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "armour-006",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 閃避與能量護盾",
+      "similarityGroup": "defence-types",
+      "riskTags": ["near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "armour-007",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲、閃避與能量護盾",
+      "similarityGroup": "defence-types",
+      "riskTags": ["long", "near-pair", "punctuation"]
+    },
+    {
+      "id": "armour-008",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 保護",
+      "similarityGroup": "defence-types",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-009",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph"]
+    },
+    {
+      "id": "armour-010",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 閃避值\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph"]
+    },
+    {
+      "id": "armour-011",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 能量護盾\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph"]
+    },
+    {
+      "id": "armour-012",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲與閃避\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph"]
+    },
+    {
+      "id": "armour-013",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲與能量護盾\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph", "dense-glyphs"]
+    },
+    {
+      "id": "armour-014",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 閃避與能量護盾\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "near-pair", "rare-glyph", "dense-glyphs"]
+    },
+    {
+      "id": "armour-015",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "增加 #% 護甲、閃避與能量護盾\n增加 #% 暈眩恢復和格擋恢復",
+      "similarityGroup": "compound-defence-recovery",
+      "riskTags": ["multi-line", "long", "near-pair", "rare-glyph"]
+    },
+    {
+      "id": "armour-016",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 點護甲",
+      "similarityGroup": "flat-defences",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-017",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 點閃避值",
+      "similarityGroup": "flat-defences",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-018",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 最大能量護盾",
+      "similarityGroup": "flat-defences",
+      "riskTags": ["short", "near-pair", "dense-glyphs"]
+    },
+    {
+      "id": "armour-019",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 點護甲\n+# 點閃避值",
+      "similarityGroup": "flat-defence-compounds",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "armour-020",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 點護甲\n+# 最大能量護盾",
+      "similarityGroup": "flat-defence-compounds",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "armour-021",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 點閃避值\n+# 最大能量護盾",
+      "similarityGroup": "flat-defence-compounds",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "armour-022",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 最大能量護盾\n+# 最大生命",
+      "similarityGroup": "flat-resource-compounds",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "armour-023",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+# 最大能量護盾\n+# 最大魔力",
+      "similarityGroup": "flat-resource-compounds",
+      "riskTags": ["multi-line", "near-pair"]
+    },
+    {
+      "id": "armour-024",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 壓抑法術傷害率",
+      "riskTags": ["rare-glyph", "dense-glyphs"]
+    },
+    {
+      "id": "armour-025",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "#% 攻擊傷害格擋率",
+      "similarityGroup": "block-types",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "armour-026",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "#% 法術傷害格擋率",
+      "similarityGroup": "block-types",
+      "riskTags": ["near-pair", "attack-vs-spell"]
+    },
+    {
+      "id": "armour-027",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 火焰抗性",
+      "similarityGroup": "armour-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-028",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 冰冷抗性",
+      "similarityGroup": "armour-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-029",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 閃電抗性",
+      "similarityGroup": "armour-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-030",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 混沌抗性",
+      "similarityGroup": "armour-resistances",
+      "riskTags": ["short", "near-pair"]
+    },
+    {
+      "id": "armour-031",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "+#% 全部元素抗性",
+      "similarityGroup": "armour-resistances",
+      "riskTags": ["near-pair"]
+    },
+    {
+      "id": "armour-032",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "你擊殺的敵人有 #% 機率爆炸，造成他們最大生命十分之一的物理傷害",
+      "similarityGroup": "enemy-explosions",
+      "riskTags": ["long", "punctuation", "dense-glyphs"]
+    },
+    {
+      "id": "armour-033",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "被你擊殺的敵人會爆炸，造成 #% 它們生命的物理傷害",
+      "similarityGroup": "enemy-explosions",
+      "riskTags": ["long", "punctuation", "semantic-negative"]
+    },
+    {
+      "id": "armour-034",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "承受 #% 的擊中物理傷害視為火焰傷害",
+      "similarityGroup": "physical-taken-as",
+      "riskTags": ["near-pair", "semantic-order"]
+    },
+    {
+      "id": "armour-035",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "承受 #% 的擊中物理傷害視為冰冷傷害",
+      "similarityGroup": "physical-taken-as",
+      "riskTags": ["near-pair", "semantic-order"]
+    },
+    {
+      "id": "armour-036",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "承受 #% 的擊中物理傷害視為閃電傷害",
+      "similarityGroup": "physical-taken-as",
+      "riskTags": ["near-pair", "semantic-order"]
+    },
+    {
+      "id": "armour-037",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "承受 #% 的擊中物理傷害視為混沌傷害",
+      "similarityGroup": "physical-taken-as",
+      "riskTags": ["near-pair", "semantic-order"]
+    },
+    {
+      "id": "armour-038",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "你的移動速度加成不會讓你降至基礎速度以下",
+      "riskTags": ["long", "no-number", "semantic-negative"]
+    },
+    {
+      "id": "armour-039",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "每 # 點智慧 +# 最大魔力",
+      "riskTags": ["two-numbers", "unusual-order"]
+    },
+    {
+      "id": "armour-040",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "施放時，有 #% 機率無視暈眩",
+      "similarityGroup": "hit-control-effects",
+      "riskTags": ["punctuation", "rare-glyph"]
+    },
+    {
+      "id": "armour-041",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "流血狀態下移動不再承受額外的傷害",
+      "riskTags": ["long", "no-number", "semantic-negative"]
+    },
+    {
+      "id": "armour-042",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "法術擊中時有 #% 機率阻礙敵人",
+      "similarityGroup": "hit-control-effects",
+      "riskTags": ["attack-vs-spell", "rare-glyph"]
+    },
+    {
+      "id": "armour-043",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "攻擊擊中時有 #% 機率造成癱瘓",
+      "similarityGroup": "hit-control-effects",
+      "riskTags": ["attack-vs-spell", "rare-glyph"]
+    },
+    {
+      "id": "armour-044",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "插槽中寶石被等級 # 的召喚物生命輔助\n召喚物增加 #% 最大生命",
+      "riskTags": ["multi-line", "long", "semantic-repeat"]
+    },
+    {
+      "id": "armour-045",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "你和你的召喚物減少承受 #% 反射元素傷害",
+      "similarityGroup": "reflected-damage",
+      "riskTags": ["long", "semantic-order"]
+    },
+    {
+      "id": "armour-046",
+      "category": "armour",
+      "source": "poedb-modifiers-list",
+      "template": "你和你的召喚物減少承受 #% 反射物理傷害",
+      "similarityGroup": "reflected-damage",
+      "riskTags": ["long", "near-pair", "semantic-order"]
+    }
+  ]
+}

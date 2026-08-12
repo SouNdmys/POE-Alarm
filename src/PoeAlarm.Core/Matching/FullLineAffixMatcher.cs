@@ -9,13 +9,25 @@ namespace PoeAlarm.Core.Matching;
 public sealed class FullLineAffixMatcher
 {
     public const int MaximumPhysicalLineSpan = 4;
+    public const int MaximumSupportedPhysicalLineSpan = 8;
 
     private readonly AffixToken[] _templateTokens;
+    private readonly int _maximumPhysicalLineSpan;
 
-    public FullLineAffixMatcher(string template)
+    public FullLineAffixMatcher(
+        string template,
+        int maximumPhysicalLineSpan = MaximumPhysicalLineSpan)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(template);
+        if (maximumPhysicalLineSpan is < 1 or > MaximumSupportedPhysicalLineSpan)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumPhysicalLineSpan),
+                $"The line span must be between 1 and {MaximumSupportedPhysicalLineSpan}.");
+        }
 
+        SourceTemplate = template.Trim();
+        _maximumPhysicalLineSpan = maximumPhysicalLineSpan;
         Template = AffixCanonicalizer.Normalize(template);
         if (!Template.HasWords)
         {
@@ -25,7 +37,11 @@ public sealed class FullLineAffixMatcher
         _templateTokens = [.. Template.Tokens];
     }
 
+    public string SourceTemplate { get; }
+
     public CanonicalAffix Template { get; }
+
+    public int MaximumLineSpan => _maximumPhysicalLineSpan;
 
     public bool IsMatch(string? candidate)
     {
@@ -76,7 +92,9 @@ public sealed class FullLineAffixMatcher
             // Values remain structural even though their magnitudes are ignored.
             // In particular, a missing leading "<NUM> to" can never be recovered
             // by the word-boundary tolerance below.
-            if (_templateTokens[expectedIndex].Kind != candidate.Tokens[actualIndex].Kind)
+            var expectedValue = _templateTokens[expectedIndex];
+            var actualValue = candidate.Tokens[actualIndex];
+            if (expectedValue.Kind != actualValue.Kind)
             {
                 return false;
             }
@@ -87,20 +105,25 @@ public sealed class FullLineAffixMatcher
     }
 
     /// <summary>
-    /// Tests every group of one to four adjacent OCR lines. Blank lines are logical
-    /// boundaries and are never crossed.
+    /// Tests every adjacent OCR-line group up to the span configured for this matcher.
+    /// Blank lines are logical boundaries and are never crossed.
     /// </summary>
     public bool TryFindMatch(
         IReadOnlyList<string> physicalLines,
+        out LogicalAffixMatch? match) =>
+        TryFindMatch(physicalLines, out match, _maximumPhysicalLineSpan);
+
+    public bool TryFindMatch(
+        IReadOnlyList<string> physicalLines,
         out LogicalAffixMatch? match,
-        int maximumLineSpan = MaximumPhysicalLineSpan)
+        int maximumLineSpan)
     {
         ArgumentNullException.ThrowIfNull(physicalLines);
-        if (maximumLineSpan is < 1 or > MaximumPhysicalLineSpan)
+        if (maximumLineSpan is < 1 or > MaximumSupportedPhysicalLineSpan)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(maximumLineSpan),
-                $"The line span must be between 1 and {MaximumPhysicalLineSpan}.");
+                $"The line span must be between 1 and {MaximumSupportedPhysicalLineSpan}.");
         }
 
         for (var start = 0; start < physicalLines.Count; start++)
