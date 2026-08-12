@@ -9,10 +9,17 @@ namespace PoeAlarm.App.Recognition;
 public sealed class PoeTextPreprocessor
 {
     private const int BytesPerPixel = 4;
+    private readonly PoeTextPreprocessorSettings _settings;
     private readonly List<byte[]> _bandBuffers = [];
     private byte[] _combinedBuffer = [];
     private byte[] _maskBuffer = [];
     private int[] _rowInkBuffer = [];
+
+    public PoeTextPreprocessor(PoeTextPreprocessorSettings? settings = null)
+    {
+        _settings = settings ?? PoeTextPreprocessorSettings.Default;
+        _settings.Validate();
+    }
 
     /// <summary>
     /// Finds individual physical text rows. Small row images keep Windows OCR latency low even
@@ -23,9 +30,12 @@ public sealed class PoeTextPreprocessor
         ArgumentNullException.ThrowIfNull(source);
         ValidateScale(scale);
 
-        var mask = BuildBlueMask(source, out var fingerprint);
+        var mask = BuildBlueMask(source, out _);
         var rowInk = GetRowInkBuffer(source.Height);
-        Array.Clear(rowInk, 0, source.Height);
+        // The reusable buffer may be taller than the current ROI after the user redraws a
+        // smaller region. Clear its full logical length because FindRowBands scans the buffer;
+        // otherwise stale rows below the new frame can become an out-of-bounds phantom band.
+        Array.Clear(rowInk);
         for (var y = 0; y < source.Height; y++)
         {
             var row = y * source.Width;
@@ -97,7 +107,6 @@ public sealed class PoeTextPreprocessor
                 maximumX,
                 maximumY,
                 scale,
-                fingerprint ^ (ulong)band.Start,
                 prepared.Count,
                 band.Start,
                 band.End));
@@ -113,7 +122,6 @@ public sealed class PoeTextPreprocessor
                 source.Width - 1,
                 source.Height - 1,
                 scale,
-                fingerprint ^ 0x9E3779B97F4A7C15UL,
                 bufferSlot: -1,
                 logicalTop: 0,
                 logicalBottom: source.Height - 1,
@@ -121,6 +129,25 @@ public sealed class PoeTextPreprocessor
         }
 
         return prepared;
+    }
+
+    /// <summary>
+    /// Computes the same blue-text mask fingerprint used by preprocessing without running OCR.
+    /// This intentionally ignores the translucent tooltip background so animated scenery does
+    /// not look like a new crafting result.
+    /// </summary>
+    public ulong ComputeBlueTextFingerprint(CapturedFrame source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        _ = BuildBlueMask(source, out var fingerprint);
+
+        // Include the ROI dimensions because line wrapping decisions depend on the outer frame,
+        // even when the detected glyph pixels themselves are identical.
+        fingerprint ^= (ulong)source.Width;
+        fingerprint *= 1099511628211UL;
+        fingerprint ^= (ulong)source.Height;
+        fingerprint *= 1099511628211UL;
+        return fingerprint;
     }
 
     /// <summary>Creates one combined mask for diagnostics or a conservative OCR fallback.</summary>
@@ -166,7 +193,6 @@ public sealed class PoeTextPreprocessor
             Math.Min(source.Width - 1, maximumX + margin),
             Math.Min(source.Height - 1, maximumY + margin),
             scale,
-            fingerprint,
             bufferSlot: -1,
             logicalTop: minimumY,
             logicalBottom: maximumY);
@@ -247,13 +273,23 @@ public sealed class PoeTextPreprocessor
                 var red = source.BgraPixels[pixel + 2];
 
                 var dominance = blue - Math.Max(red, green);
-                var balancedWarmChannels = Math.Abs(red - green) <= 72;
-                if (blue < 105 || dominance < 18 || !balancedWarmChannels)
+                var balancedWarmChannels = Math.Abs(red - green) <= _settings.MaximumWarmChannelDifference;
+                if (blue < _settings.MinimumBlue ||
+                    dominance < _settings.MinimumBlueDominance ||
+                    !balancedWarmChannels)
                 {
                     continue;
                 }
 
-                var intensity = (byte)Math.Clamp(72 + (dominance * 3), 0, 255);
+                var intensity = _settings.IntensityMode switch
+                {
+                    BlueMaskIntensityMode.Dominance => (byte)Math.Clamp(72 + (dominance * 3), 0, 255),
+                    BlueMaskIntensityMode.BoostedDominance => (byte)Math.Clamp(96 + (dominance * 4), 0, 255),
+                    BlueMaskIntensityMode.BlueChannel => blue,
+                    BlueMaskIntensityMode.Binary => byte.MaxValue,
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported blue-mask intensity mode: {_settings.IntensityMode}"),
+                };
                 mask[maskRow + x] = intensity;
                 fingerprint ^= (ulong)((x * 397) ^ y ^ (intensity >> 5));
                 fingerprint *= 1099511628211UL;
@@ -271,7 +307,6 @@ public sealed class PoeTextPreprocessor
         int maximumX,
         int maximumY,
         int scale,
-        ulong fingerprint,
         int bufferSlot,
         int logicalTop,
         int logicalBottom,
@@ -284,6 +319,11 @@ public sealed class PoeTextPreprocessor
         var outputStride = checked(outputWidth * BytesPerPixel);
         var byteLength = checked(outputStride * outputHeight);
         var output = GetOutputBuffer(bufferSlot, byteLength);
+        var fingerprint = 14695981039346656037UL;
+        fingerprint ^= (ulong)outputWidth;
+        fingerprint *= 1099511628211UL;
+        fingerprint ^= (ulong)outputHeight;
+        fingerprint *= 1099511628211UL;
 
         for (var outputY = 0; outputY < outputHeight; outputY++)
         {
@@ -295,6 +335,14 @@ public sealed class PoeTextPreprocessor
                 var sourceX = minimumX + (outputX / scale);
                 var outputPixel = outputRow + (outputX * BytesPerPixel);
                 var intensity = mask[(sourceY * source.Width) + sourceX];
+
+                if (intensity != 0)
+                {
+                    fingerprint ^= (ulong)((outputY * outputWidth) + outputX + 1);
+                    fingerprint *= 1099511628211UL;
+                    fingerprint ^= (ulong)(intensity >> 4);
+                    fingerprint *= 1099511628211UL;
+                }
 
                 // The tooltip is translucent, so inventory stack counts and icons can sit
                 // directly behind an affix (for example an unrelated white "2" between
@@ -316,7 +364,11 @@ public sealed class PoeTextPreprocessor
             fingerprint,
             logicalTop,
             logicalBottom,
-            isFallback);
+            isFallback,
+            Math.Clamp((logicalTop - minimumY) * scale, 0, outputHeight - 1),
+            Math.Clamp((((logicalBottom - minimumY) + 1) * scale) - 1, 0, outputHeight - 1),
+            minimumX,
+            maximumX);
     }
 
     private int[] GetRowInkBuffer(int requiredLength)
@@ -363,4 +415,44 @@ public sealed class PoeTextPreprocessor
     }
 
     private readonly record struct RowBand(int Start, int End);
+}
+
+public sealed record PoeTextPreprocessorSettings(
+    int MinimumBlue,
+    int MinimumBlueDominance,
+    int MaximumWarmChannelDifference,
+    BlueMaskIntensityMode IntensityMode = BlueMaskIntensityMode.Dominance)
+{
+    public static PoeTextPreprocessorSettings Default { get; } = new(105, 18, 72);
+
+    internal void Validate()
+    {
+        if (MinimumBlue is < 0 or > 255)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MinimumBlue));
+        }
+
+        if (MinimumBlueDominance is < 0 or > 255)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MinimumBlueDominance));
+        }
+
+        if (MaximumWarmChannelDifference is < 0 or > 255)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumWarmChannelDifference));
+        }
+
+        if (!Enum.IsDefined(IntensityMode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(IntensityMode));
+        }
+    }
+}
+
+public enum BlueMaskIntensityMode
+{
+    Dominance,
+    BoostedDominance,
+    BlueChannel,
+    Binary,
 }

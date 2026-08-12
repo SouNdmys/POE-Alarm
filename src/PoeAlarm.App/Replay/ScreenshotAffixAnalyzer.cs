@@ -12,6 +12,7 @@ namespace PoeAlarm.App.Replay;
 /// </summary>
 public sealed class ScreenshotAffixAnalyzer
 {
+    private const int MaximumContinuationScans = 128;
     private readonly IOcrRecognizer _ocrRecognizer;
     private readonly ScreenshotFrameLoader _frameLoader;
 
@@ -31,12 +32,30 @@ public sealed class ScreenshotAffixAnalyzer
         ScreenRegion? cropRegion = null,
         CancellationToken cancellationToken = default)
     {
+        return await AnalyzeAsync(
+                imagePath,
+                affixTemplate,
+                cropRegion,
+                FullLineAffixMatcher.MaximumPhysicalLineSpan,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<ScreenshotAffixAnalysis> AnalyzeAsync(
+        string imagePath,
+        string affixTemplate,
+        ScreenRegion? cropRegion,
+        int maximumPhysicalLineSpan,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(imagePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(affixTemplate);
         cancellationToken.ThrowIfCancellationRequested();
 
         // Compile before doing file I/O so an invalid template fails immediately.
-        var matcher = new FullLineAffixMatcher(affixTemplate);
+        var matcher = new FullLineAffixMatcher(
+            affixTemplate,
+            maximumPhysicalLineSpan);
         var resolvedPath = Path.GetFullPath(imagePath);
 
         var loadWatch = Stopwatch.StartNew();
@@ -45,12 +64,38 @@ public sealed class ScreenshotAffixAnalyzer
             .ConfigureAwait(false);
         loadWatch.Stop();
 
-        var ocrResult = await _ocrRecognizer
-            .RecognizeAsync(frame, cancellationToken)
-            .ConfigureAwait(false);
+        var preprocessingElapsed = TimeSpan.Zero;
+        var recognitionElapsed = TimeSpan.Zero;
+        OcrRecognitionResult? ocrResult = null;
+        LogicalAffixMatch? match = null;
+        for (var scan = 0; scan < MaximumContinuationScans; scan++)
+        {
+            ocrResult = await _ocrRecognizer
+                .RecognizeAsync(frame, matcher, cancellationToken)
+                .ConfigureAwait(false);
+            preprocessingElapsed += ocrResult.PreprocessingElapsed;
+            recognitionElapsed += ocrResult.RecognitionElapsed;
 
-        cancellationToken.ThrowIfCancellationRequested();
-        matcher.TryFindMatch(ocrResult.Lines, out var match);
+            cancellationToken.ThrowIfCancellationRequested();
+            matcher.TryFindMatch(ocrResult.Lines, out match);
+            if (match is null &&
+                ocrResult.TargetAssistedMatch is { } assisted &&
+                string.Equals(assisted.CanonicalText, matcher.Template.Text, StringComparison.Ordinal))
+            {
+                match = assisted;
+            }
+
+            if (match is not null || !ocrResult.RequiresRescan)
+            {
+                break;
+            }
+        }
+
+        if (ocrResult is null || (ocrResult.RequiresRescan && match is null))
+        {
+            throw new InvalidDataException(
+                $"OCR did not finish after {MaximumContinuationScans} progressive screenshot scans.");
+        }
 
         return new ScreenshotAffixAnalysis(
             resolvedPath,
@@ -59,8 +104,8 @@ public sealed class ScreenshotAffixAnalyzer
             frame.Height,
             ocrResult.Lines,
             loadWatch.Elapsed,
-            ocrResult.PreprocessingElapsed,
-            ocrResult.RecognitionElapsed,
+            preprocessingElapsed,
+            recognitionElapsed,
             match);
     }
 }

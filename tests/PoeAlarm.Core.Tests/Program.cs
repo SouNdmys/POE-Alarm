@@ -27,7 +27,12 @@ var tests = new (string Name, Action Run)[]
     ("Percent and plain numbers are distinct", PercentAndPlainNumbersAreDistinct),
     ("Negative and non-negative slots are distinct", NegativeAndNonNegativeSlotsAreDistinct),
     ("Values and tiers are intentionally ignored", ValuesAndTiersAreIgnored),
+    ("POE2 standalone and rolled values are ignored", Poe2ValuesAreIgnored),
+    ("POE2 profile supports up to eight wrapped lines", Poe2EightLineTargetsAreSupported),
     ("Invalid line spans are rejected", InvalidLineSpansAreRejected),
+    ("Traditional Chinese numeric slots normalize", TraditionalChineseNumericSlotsNormalize),
+    ("Traditional Chinese OCR spaces and wrapping normalize", TraditionalChineseSpacingAndWrappingNormalize),
+    ("Traditional Chinese full semantics stay strict", TraditionalChineseFullSemanticsStayStrict),
 };
 
 var failures = new List<string>();
@@ -236,10 +241,83 @@ static void ValuesAndTiersAreIgnored()
     True(matcher.IsMatch("+159 to Armour and 3.5 Life per second"));
 }
 
+static void Poe2ValuesAreIgnored()
+{
+    var projectiles = new FullLineAffixMatcher(
+        "Monsters fire 2 additional Projectiles");
+    True(projectiles.IsMatch("Monsters fire 2 additional Projectiles"));
+    True(projectiles.IsMatch("Monsters fire 3 additional Projectiles"));
+
+    var reward = new FullLineAffixMatcher(
+        "20% more Waystones found in Area");
+    True(reward.IsMatch("20% more Waystones found in Area"));
+    True(reward.IsMatch("25% more Waystones found in Area"));
+
+    var mixed = new FullLineAffixMatcher(
+        "(10-15)% increased Monster Damage while Monsters fire 2 additional Projectiles");
+    True(mixed.IsMatch(
+        "13% increased Monster Damage while Monsters fire 2 additional Projectiles"));
+    True(mixed.IsMatch(
+        "13% increased Monster Damage while Monsters fire 3 additional Projectiles"));
+}
+
+static void Poe2EightLineTargetsAreSupported()
+{
+    var matcher = new FullLineAffixMatcher(
+        "Monsters deal increased Damage and fire additional Projectiles while the Area contains dangerous terrain",
+        maximumPhysicalLineSpan: 8);
+    string[] lines =
+    [
+        "Monsters deal",
+        "increased Damage",
+        "and fire",
+        "additional Projectiles",
+        "while the Area",
+        "contains",
+        "dangerous",
+        "terrain",
+    ];
+
+    True(matcher.TryFindMatch(lines, out var match));
+    Equal(8, match!.PhysicalLineCount);
+}
+
 static void InvalidLineSpansAreRejected()
 {
     var matcher = new FullLineAffixMatcher("#% increased Attack Speed");
-    Throws<ArgumentOutOfRangeException>(() => matcher.TryFindMatch(["8% increased Attack Speed"], out _, 5));
+    Throws<ArgumentOutOfRangeException>(() => matcher.TryFindMatch(["8% increased Attack Speed"], out _, 9));
+}
+
+static void TraditionalChineseNumericSlotsNormalize()
+{
+    var matcher = new FullLineAffixMatcher("若你近期有暴擊，增加 (6—8)% 攻擊速度");
+
+    True(matcher.IsMatch("若你近期有暴擊，增加8%攻擊速度"));
+    True(matcher.IsMatch("若你近期有暴擊，增加 7％ 攻擊速度"));
+    True(matcher.IsMatch("若你近期有暴擊·增加8%攻擊速度"));
+
+    var flatValueMatcher = new FullLineAffixMatcher("增加 (10—20) 點護甲");
+    True(flatValueMatcher.IsMatch("增加17點護甲"));
+}
+
+static void TraditionalChineseSpacingAndWrappingNormalize()
+{
+    var matcher = new FullLineAffixMatcher("若你近期有暴擊，增加 (6—8)% 攻擊速度");
+
+    True(matcher.IsMatch("若 你 近 期 有 暴 擊，增 加 8% 攻 擊 速 度"));
+    True(matcher.TryFindMatch(
+        ["若你近期有暴擊，增加8%", "攻擊速度"],
+        out var wrapped));
+    Equal(2, wrapped!.PhysicalLineCount);
+}
+
+static void TraditionalChineseFullSemanticsStayStrict()
+{
+    var matcher = new FullLineAffixMatcher("若你近期有暴擊，增加 (6—8)% 攻擊速度");
+
+    False(matcher.IsMatch("若你近期有擊殺，增加8%攻擊速度"));
+    False(matcher.IsMatch("若你近期有暴擊，增加8%施放速度"));
+    False(matcher.IsMatch("若你近期有暴擊，增加8%攻擊傷害"));
 }
 
 static void True(bool condition)

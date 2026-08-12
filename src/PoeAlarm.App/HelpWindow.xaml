@@ -1,0 +1,290 @@
+<Window x:Class="PoeAlarm.App.HelpWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="560"
+        Height="700"
+        MinHeight="560"
+        MaxHeight="820"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#FFF5F8F7"
+        Foreground="#FF15251F"
+        FontFamily="Segoe UI Variable Text, Segoe UI"
+        FontSize="14">
+  <Window.Resources>
+    <Style x:Key="StepCard" TargetType="Border">
+      <Setter Property="Background" Value="#FFFFFFFF" />
+      <Setter Property="BorderBrush" Value="#FFDCE6E2" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="14,11" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
+    <Style x:Key="StepNumber" TargetType="Border">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="CornerRadius" Value="14" />
+      <Setter Property="Background" Value="#FFE3F2EC" />
+      <Setter Property="Margin" Value="0,0,13,0" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+
+    <Style x:Key="StepHeading" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#FF173D31" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="StepBody" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,5,0,0" />
+      <Setter Property="Foreground" Value="#FF53635D" />
+      <Setter Property="LineHeight" Value="19" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="CommandBox" TargetType="TextBox">
+      <Setter Property="Margin" Value="0,7,0,0" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Background" Value="#FFF5F8F7" />
+      <Setter Property="BorderBrush" Value="#FFD2DFDA" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="#FF24433A" />
+      <Setter Property="FontFamily" Value="Cascadia Mono, Consolas" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style TargetType="Button">
+      <Setter Property="MinWidth" Value="96" />
+      <Setter Property="Padding" Value="18,9" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#FF267A61" />
+      <Setter Property="BorderBrush" Value="#FF267A61" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonBorder"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonBorder" Property="Background" Value="#FF1E684F" />
+                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#FF1E684F" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonBorder" Property="Background" Value="#FF185541" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled">
+    <Grid Margin="22,18,22,20">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <TextBlock x:Name="TitleText"
+                 Grid.Row="0"
+                 FontFamily="Segoe UI Variable Display, Segoe UI"
+                 FontSize="22"
+                 FontWeight="SemiBold"
+                 Foreground="#FF14372C"
+                 TextWrapping="Wrap" />
+
+      <TextBlock x:Name="IntroductionText"
+                 Grid.Row="1"
+                 Margin="0,5,0,13"
+                 Foreground="#FF62716C"
+                 FontSize="14"
+                 TextWrapping="Wrap" />
+
+      <Border Grid.Row="2" Style="{StaticResource StepCard}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource StepNumber}">
+            <TextBlock Text="1"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="#FF24634F"
+                       FontWeight="Bold" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock x:Name="Step1TitleText" Style="{StaticResource StepHeading}" />
+            <TextBlock x:Name="Step1BodyText" Style="{StaticResource StepBody}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="3" Style="{StaticResource StepCard}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource StepNumber}">
+            <TextBlock Text="2"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="#FF24634F"
+                       FontWeight="Bold" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock x:Name="Step2TitleText" Style="{StaticResource StepHeading}" />
+            <TextBlock x:Name="Step2BodyText" Style="{StaticResource StepBody}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="4" Style="{StaticResource StepCard}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource StepNumber}">
+            <TextBlock Text="3"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="#FF24634F"
+                       FontWeight="Bold" />
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock x:Name="Step3TitleText" Style="{StaticResource StepHeading}" />
+            <TextBlock x:Name="Step3BodyText" Style="{StaticResource StepBody}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="5"
+              Margin="0,2,0,12"
+              Padding="13,10"
+              Background="#FFE7F5EF"
+              BorderBrush="#FFB7DFCF"
+              BorderThickness="1"
+              CornerRadius="10">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0"
+                  Width="23"
+                  Height="23"
+                  Margin="0,0,10,0"
+                  CornerRadius="12"
+                  Background="#FF2D8065"
+                  VerticalAlignment="Top">
+            <TextBlock Text="✓"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="White"
+                       FontSize="13"
+                       FontWeight="Bold" />
+          </Border>
+          <TextBlock x:Name="TipText"
+                     Grid.Column="1"
+                     Foreground="#FF285A49"
+                     LineHeight="20"
+                     TextWrapping="Wrap" />
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="6" Style="{StaticResource StepCard}">
+        <StackPanel>
+          <TextBlock x:Name="OcrInstallTitleText" Style="{StaticResource StepHeading}" />
+          <TextBlock x:Name="OcrInstallBodyText" Style="{StaticResource StepBody}" />
+          <TextBox x:Name="OcrInstallCommandTextBox"
+                   Style="{StaticResource CommandBox}" />
+          <TextBox x:Name="OcrVerifyCommandTextBox"
+                   Style="{StaticResource CommandBox}" />
+          <TextBlock x:Name="OcrInstallSuccessText"
+                     Margin="0,7,0,0"
+                     Foreground="#FF267A61"
+                     FontWeight="SemiBold"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="7"
+              Margin="0,2,0,16"
+              Padding="16,13"
+              Background="#FFFFFFFF"
+              BorderBrush="#FFDCE6E2"
+              BorderThickness="1"
+              CornerRadius="12">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock>
+              <Run x:Name="AuthorLabelRun" Foreground="#FF62716C" />
+              <Run Text="  " />
+              <Run Text="SouNd" FontWeight="SemiBold" Foreground="#FF173D31" />
+            </TextBlock>
+            <TextBlock Margin="0,7,0,0">
+              <Run x:Name="ContactLabelRun" Foreground="#FF62716C" />
+              <Run Text="  " />
+              <Hyperlink NavigateUri="mailto:soundmys1994@gmail.com"
+                         RequestNavigate="OnContactNavigate"
+                         Foreground="#FF267A61">
+                soundmys1994@gmail.com
+              </Hyperlink>
+            </TextBlock>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Margin="18,0,0,0">
+            <TextBlock x:Name="SupportTitleText"
+                       Foreground="#FF173D31"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="SupportBodyText"
+                       Margin="0,5,0,0"
+                       Foreground="#FF62716C"
+                       FontSize="12"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Button x:Name="CloseButton"
+              Grid.Row="8"
+              HorizontalAlignment="Right"
+              IsDefault="True"
+              IsCancel="True"
+              Click="OnCloseClick" />
+    </Grid>
+  </ScrollViewer>
+</Window>

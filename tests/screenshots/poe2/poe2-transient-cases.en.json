@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "screenshots": [
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.32.35.35.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 14,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-en-presence-cold",
+          "band": 3,
+          "text": "Allies in your Presence deal 12 to 18 Added Attack Cold Damage",
+          "template": "Allies in your Presence deal # to # Added Attack Cold Damage",
+          "category": "long-two-number"
+        }
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.33.07.63.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 20,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-en-attack-speed",
+          "band": 6,
+          "text": "21% increased Attack Speed",
+          "template": "#% increased Attack Speed",
+          "category": "short-target"
+        }
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.34.00.86.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 10,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-en-cold-attack-damage",
+          "band": 2,
+          "text": "Adds 11 to 20 Cold Damage to Attacks",
+          "template": "Adds # to # Cold Damage to Attacks",
+          "category": "medium-two-number"
+        }
+      ]
+    }
+  ]
+}

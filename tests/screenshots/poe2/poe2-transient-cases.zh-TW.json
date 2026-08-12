@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "screenshots": [
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.36.01.10.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 14,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-granted-skill",
+          "band": 2,
+          "text": "賦予技能：等級 18 劇烈爆發",
+          "template": "賦予技能：等級 # 劇烈爆發",
+          "category": "prefix-icon-line"
+        },
+        {
+          "id": "poe2-presence-cold",
+          "band": 3,
+          "text": "處於你存在範圍中的友方造成12至18額外攻擊冰冷傷害",
+          "template": "處於你存在範圍中的友方造成 # 至 # 額外攻擊冰冷傷害",
+          "category": "long-two-number"
+        }
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.36.36.69.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 18,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-attack-speed",
+          "band": 6,
+          "text": "增加21%攻擊速度",
+          "template": "增加 #% 攻擊速度",
+          "category": "short-target"
+        },
+        {
+          "id": "poe2-shock-magnitude",
+          "band": 10,
+          "text": "增加15%你所施加之感電的幅度",
+          "template": "增加 #% 你所施加之感電的幅度",
+          "category": "rare-glyph-long"
+        }
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.36.55.05.png",
+      "roi": [1150, 250, 1250, 850],
+      "expectedBandCount": 11,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "poe2-triple-defence",
+          "band": 3,
+          "text": "增加18%護甲值、閃避和能量護盾",
+          "template": "增加 #% 護甲值、閃避和能量護盾",
+          "category": "long-punctuation"
+        }
+      ]
+    }
+  ]
+}

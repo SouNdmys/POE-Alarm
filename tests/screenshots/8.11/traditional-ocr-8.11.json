@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "locale": "zh-TW",
+  "layout": "native 2560x1440 screenshots without Alt advanced modifier details",
+  "roi": [0, 99, 1131, 928],
+  "screenshots": [
+    {
+      "image": "Path of Exile Screenshot 2026.08.11 - 22.55.55.41.png",
+      "cases": [
+        "增加 #% 暈眩恢復和格擋恢復",
+        "減少 #% 敵人暈眩門檻",
+        "+# 最大魔力",
+        "增加 #% 藥劑充能獲取",
+        "增加 #% 藥劑魔力恢復率"
+      ]
+    },
+    {
+      "image": "Path of Exile Screenshot 2026.08.11 - 22.56.16.06.png",
+      "cases": [
+        "+# 智慧",
+        "增加 #% 能量護盾",
+        "+#% 火焰抗性",
+        "+#% 冰冷抗性"
+      ]
+    },
+    {
+      "image": "Path of Exile Screenshot 2026.08.11 - 22.56.23.01.png",
+      "cases": [
+        "+# 敏捷",
+        "+# 點閃避值",
+        "持盾時法術附加 # 至 # 閃電傷害",
+        "擊殺時有 #% 機率獲得 # 秒迷蹤效果"
+      ]
+    },
+    {
+      "image": "Path of Exile Screenshot 2026.08.11 - 22.56.34.99.png",
+      "cases": [
+        "+#% 全域暴擊加成",
+        "持雙手武器時法術附加 # 至 # 冰冷傷害",
+        "持盾時法術附加 # 至 # 物理傷害",
+        "若近期沒有造成暴擊，增加 #% 暴擊率"
+      ]
+    },
+    {
+      "image": "Path of Exile Screenshot 2026.08.11 - 22.56.42.29.png",
+      "cases": [
+        "+#% 火焰與冰冷抗性",
+        "+# 敏捷",
+        "+# 點閃避值",
+        "+#% 火焰抗性",
+        "+#% 冰冷抗性"
+      ]
+    },
+    {
+      "image": "native-alt-advanced-modifiers.png",
+      "layout": "Alt advanced modifier details",
+      "cases": [
+        "增加 #% 閃避與能量護盾",
+        "增加 #% 暈眩恢復和格擋恢復",
+        "+# 最大生命",
+        "+#% 冰冷抗性",
+        "+#% 火焰抗性"
+      ]
+    }
+  ]
+}

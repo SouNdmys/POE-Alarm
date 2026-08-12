@@ -33,7 +33,7 @@ public sealed class GlobalHotKeyRegistration : IDisposable
         if (!RegisterHotKey(_windowHandle, _identifier, (uint)modifiers | 0x4000U, virtualKey))
         {
             _source.RemoveHook(WindowProcedure);
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "The acknowledgement hotkey is already in use.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The global hotkey is already in use.");
         }
     }
 

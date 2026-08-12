@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using PoeAlarm.App.Capture;
+using PoeAlarm.App.Localization;
 
 namespace PoeAlarm.App.Selection;
 
@@ -13,6 +14,7 @@ public partial class RegionSelectionWindow : Window
     public RegionSelectionWindow()
     {
         InitializeComponent();
+        InstructionText.Text = UiText.Current.SelectionInstruction;
 
         Left = SystemParameters.VirtualScreenLeft;
         Top = SystemParameters.VirtualScreenTop;

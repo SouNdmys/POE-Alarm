@@ -43,10 +43,22 @@ public static class AffixCanonicalizer
                 continue;
             }
 
+            // Chinese text normally has no word separators, and OCR may insert spaces between
+            // arbitrary glyphs or at a wrapped physical line. Tokenizing Han ideographs one by
+            // one keeps exact character semantics while making those presentation spaces inert.
+            // It also prevents a number directly beside a Chinese character from being consumed
+            // as an alphanumeric "word" by the English OCR-confusion recovery below.
+            if (IsHanIdeograph(current))
+            {
+                tokens.Add(new AffixToken(AffixTokenKind.Word, current.ToString()));
+                index++;
+                continue;
+            }
+
             if (IsWordStart(normalized, index))
             {
                 var end = index + 1;
-                while (end < normalized.Length && IsWordCharacter(normalized[end]))
+                while (end < normalized.Length && IsNonHanWordCharacter(normalized[end]))
                 {
                     end++;
                 }
@@ -146,9 +158,11 @@ public static class AffixCanonicalizer
             return false;
         }
 
-        for (var cursor = index + 1; cursor < text.Length && IsWordCharacter(text[cursor]); cursor++)
+        for (var cursor = index + 1;
+             cursor < text.Length && IsNonHanWordCharacter(text[cursor]);
+             cursor++)
         {
-            if (char.IsLetter(text[cursor]))
+            if (char.IsLetter(text[cursor]) && !IsHanIdeograph(text[cursor]))
             {
                 return true;
             }
@@ -159,4 +173,12 @@ public static class AffixCanonicalizer
 
     private static bool IsWordCharacter(char character) =>
         char.IsLetterOrDigit(character) || character == '\'';
+
+    private static bool IsNonHanWordCharacter(char character) =>
+        !IsHanIdeograph(character) && IsWordCharacter(character);
+
+    private static bool IsHanIdeograph(char character) =>
+        character is >= '\u3400' and <= '\u4DBF' or
+        >= '\u4E00' and <= '\u9FFF' or
+        >= '\uF900' and <= '\uFAFF';
 }

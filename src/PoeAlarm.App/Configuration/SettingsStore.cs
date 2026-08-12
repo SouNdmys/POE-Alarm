@@ -25,26 +25,29 @@ public sealed class SettingsStore
     {
         if (!File.Exists(_settingsPath))
         {
-            return new AppSettings();
+            return new AppSettings().Normalize();
         }
 
         try
         {
             await using var stream = File.OpenRead(_settingsPath);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions, cancellationToken)
-                   ?? new AppSettings();
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(
+                stream,
+                JsonOptions,
+                cancellationToken);
+            return (settings ?? new AppSettings()).Normalize();
         }
         catch (JsonException)
         {
-            return new AppSettings();
+            return new AppSettings().Normalize();
         }
         catch (IOException)
         {
-            return new AppSettings();
+            return new AppSettings().Normalize();
         }
         catch (UnauthorizedAccessException)
         {
-            return new AppSettings();
+            return new AppSettings().Normalize();
         }
     }
 
@@ -57,7 +60,11 @@ public sealed class SettingsStore
         var temporaryPath = _settingsPath + ".tmp";
         await using (var stream = File.Create(temporaryPath))
         {
-            await JsonSerializer.SerializeAsync(stream, settings, JsonOptions, cancellationToken);
+            await JsonSerializer.SerializeAsync(
+                stream,
+                settings.Normalize(),
+                JsonOptions,
+                cancellationToken);
         }
 
         File.Move(temporaryPath, _settingsPath, overwrite: true);

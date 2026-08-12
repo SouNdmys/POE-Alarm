@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "coordinateSystem": "source-image pixels; top-left origin; roi is x,y,width,height",
+  "preprocessing": {
+    "implementation": "PoeTextPreprocessor.PrepareBlueAffixBands",
+    "scale": 1,
+    "minimumBlue": 100,
+    "minimumBlueDominance": 14,
+    "maximumWarmChannelDifference": 72,
+    "validatedBandIndices": true,
+    "validationNote": "A one-pixel inset on every ROI retained the same band count and case indices."
+  },
+  "screenshots": [
+    {
+      "image": "Weixin Image_20260810210846_5712_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "rare belt at left",
+      "roi": [415, 170, 280, 220],
+      "expectedBandCount": 5,
+      "ignoredBands": [0],
+      "ignoredBandNotes": {
+        "0": "Tiny blue-mask leakage from the rare-item title decoration; not an affix."
+      },
+      "excludedSourceLines": [
+        {
+          "text": "增加 20% 傷害",
+          "template": "增加 #% 傷害",
+          "reason": "The fractured/warm-gold modifier is intentionally excluded by the configured blue-only mask."
+        }
+      ],
+      "cases": [
+        {
+          "id": "rare-belt-global-physical-damage",
+          "band": 1,
+          "text": "增加 12% 全域物理傷害",
+          "template": "增加 #% 全域物理傷害",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "rare-belt-life-regeneration",
+          "band": 2,
+          "text": "85.2 每秒生命回復",
+          "template": "# 每秒生命回復",
+          "category": "decimal-number"
+        },
+        {
+          "id": "rare-belt-cold-resistance",
+          "band": 3,
+          "text": "+40% 冰冷抗性",
+          "template": "+#% 冰冷抗性",
+          "category": "signed-percent"
+        },
+        {
+          "id": "rare-belt-stun-block-recovery",
+          "band": 4,
+          "text": "增加 24% 暈眩恢復和格擋恢復",
+          "template": "增加 #% 暈眩恢復和格擋恢復",
+          "category": "numeric-percent"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810210846_5712_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "Mageblood at center",
+      "roi": [710, 115, 442, 325],
+      "expectedBandCount": 8,
+      "ignoredBands": [0],
+      "ignoredBandNotes": {
+        "0": "The blue +20% value inside the gray quality property; not an affix."
+      },
+      "cases": [
+        {
+          "id": "mageblood-strength",
+          "band": 1,
+          "text": "+40 力量",
+          "template": "+# 力量",
+          "category": "signed-number"
+        },
+        {
+          "id": "mageblood-dexterity",
+          "band": 2,
+          "text": "+56 敏捷",
+          "template": "+# 敏捷",
+          "category": "signed-number"
+        },
+        {
+          "id": "mageblood-fire-resistance",
+          "band": 3,
+          "text": "+22% 火焰抗性",
+          "template": "+#% 火焰抗性",
+          "category": "signed-percent-pair"
+        },
+        {
+          "id": "mageblood-cold-resistance",
+          "band": 4,
+          "text": "+16% 冰冷抗性",
+          "template": "+#% 冰冷抗性",
+          "category": "signed-percent-pair"
+        },
+        {
+          "id": "mageblood-magic-utility-flasks-cannot-be-used",
+          "band": 5,
+          "text": "魔法功能藥劑不能使用",
+          "template": "魔法功能藥劑不能使用",
+          "category": "no-number-semantic"
+        },
+        {
+          "id": "mageblood-leftmost-flasks-applied",
+          "band": 6,
+          "text": "最左邊 4 的魔法功能藥劑持續套用它的藥劑效果至你身上",
+          "template": "最左邊 # 的魔法功能藥劑持續套用它的藥劑效果至你身上",
+          "category": "long-line-numeric-slot"
+        },
+        {
+          "id": "mageblood-flask-effects-cannot-be-removed",
+          "band": 7,
+          "text": "魔法功能藥劑效果不能被移除",
+          "template": "魔法功能藥劑效果不能被移除",
+          "category": "no-number-semantic"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810210856_5713_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "Murderous Eye Jewel at left",
+      "roi": [115, 115, 390, 255],
+      "expectedBandCount": 3,
+      "ignoredBands": [],
+      "cases": [
+        {
+          "id": "abyss-jewel-added-physical-to-attacks",
+          "band": 0,
+          "text": "攻擊附加 1 至 3 物理傷害",
+          "template": "攻擊附加 # 至 # 物理傷害",
+          "category": "two-numbers"
+        },
+        {
+          "id": "abyss-jewel-maximum-life",
+          "band": 1,
+          "text": "+21 最大生命",
+          "template": "+# 最大生命",
+          "category": "signed-number"
+        },
+        {
+          "id": "abyss-jewel-added-cold-with-maces-sceptres",
+          "band": 2,
+          "text": "錘和權杖攻擊附加 10 至 19 冰冷傷害",
+          "template": "錘和權杖攻擊附加 # 至 # 冰冷傷害",
+          "category": "two-numbers-long-line"
+        }
+      ]
+    }
+  ]
+}

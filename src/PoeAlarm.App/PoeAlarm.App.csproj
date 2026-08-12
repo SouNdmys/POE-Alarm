@@ -5,11 +5,36 @@
     <UseWPF>true</UseWPF>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.3.1</Version>
+    <Version>0.6.1</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyName>PoeAlarm</AssemblyName>
     <Product>POE Alarm</Product>
+    <Authors>SouNd</Authors>
+    <Company>SouNd</Company>
+    <Copyright>Copyright © 2026 SouNd</Copyright>
+    <Description>Fast full-affix OCR alerts for Path of Exile 1 and Path of Exile 2.</Description>
+    <PackageProjectUrl>https://github.com/SouNdmys/POE-Alarm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SouNdmys/POE-Alarm.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PoeAlarm.Core\PoeAlarm.Core.csproj" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
   </ItemGroup>
+  <ItemGroup>
+    <None Remove="Assets\Ocr\PP-OCRv5_mobile_rec.onnx" />
+    <None Remove="Assets\Ocr\ppocrv5_dict.txt" />
+    <EmbeddedResource Include="Assets\Ocr\PP-OCRv5_mobile_rec.onnx"
+                      LogicalName="PoeAlarm.Ocr.PP-OCRv5_mobile_rec.onnx" />
+    <EmbeddedResource Include="Assets\Ocr\ppocrv5_dict.txt"
+                      LogicalName="PoeAlarm.Ocr.ppocrv5_dict.txt" />
+  </ItemGroup>
+  <Target Name="RemoveNativeImportLibrariesFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <!-- NuGet ships linker-only .lib files beside the runtime DLL. They are never needed by
+           this managed application and must not appear as misleading single-file sidecars. -->
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
 </Project>

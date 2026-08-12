@@ -68,8 +68,7 @@ static async Task<int> RunAsync(ProbeOptions options)
     }
 
     var language = new Language(options.LanguageTag);
-    var engine = OcrEngine.TryCreateFromLanguage(language)
-        ?? OcrEngine.TryCreateFromUserProfileLanguages();
+    var engine = OcrEngine.TryCreateFromLanguage(language);
     if (engine is null)
     {
         var installed = string.Join(", ", OcrEngine.AvailableRecognizerLanguages.Select(item => item.LanguageTag));

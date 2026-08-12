@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "coordinateSystem": "source-image pixels; top-left origin; roi is x,y,width,height",
+  "preprocessing": {
+    "implementation": "PoeTextPreprocessor.PrepareBlueAffixBands",
+    "scale": 1,
+    "minimumBlue": 100,
+    "minimumBlueDominance": 14,
+    "maximumWarmChannelDifference": 72,
+    "validatedBandIndices": true
+  },
+  "screenshots": [
+    {
+      "image": "Weixin Image_20260810210942_5718_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "碎石 真視 / 漆彩之盔",
+      "roi": [458, 42, 274, 324],
+      "expectedBandCount": 10,
+      "ignoredBands": [0, 1, 2, 3],
+      "cases": [
+        {
+          "id": "painted-helmet-strength",
+          "band": 4,
+          "text": "+53 力量",
+          "template": "+# 力量",
+          "category": "signed-number"
+        },
+        {
+          "id": "painted-helmet-accuracy",
+          "band": 5,
+          "text": "+514 命中值",
+          "template": "+# 命中值",
+          "category": "signed-number"
+        },
+        {
+          "id": "painted-helmet-armour",
+          "band": 6,
+          "text": "+73 點護甲",
+          "template": "+# 點護甲",
+          "category": "signed-number"
+        },
+        {
+          "id": "painted-helmet-evasion",
+          "band": 7,
+          "text": "+65 點閃避值",
+          "template": "+# 點閃避值",
+          "category": "signed-number"
+        },
+        {
+          "id": "painted-helmet-armour-evasion-percent",
+          "band": 8,
+          "text": "增加 38% 護甲與閃避",
+          "template": "增加 #% 護甲與閃避",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "painted-helmet-stun-block-recovery",
+          "band": 9,
+          "text": "增加 15% 暈眩恢復和格擋恢復",
+          "template": "增加 #% 暈眩恢復和格擋恢復",
+          "category": "numeric-percent"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810210942_5718_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "神怒之眼[8.04d] / 鷹喙之面",
+      "roi": [747, 24, 542, 360],
+      "expectedBandCount": 8,
+      "ignoredBands": [0, 1, 2],
+      "cases": [
+        {
+          "id": "eagle-mask-spell-suppression",
+          "band": 3,
+          "text": "+17% 壓抑法術傷害率",
+          "template": "+#% 壓抑法術傷害率",
+          "category": "signed-percent"
+        },
+        {
+          "id": "eagle-mask-dexterity",
+          "band": 4,
+          "text": "+97 敏捷",
+          "template": "+# 敏捷",
+          "category": "signed-number"
+        },
+        {
+          "id": "eagle-mask-evasion-energy-shield",
+          "band": 5,
+          "text": "增加 140% 閃避與能量護盾",
+          "template": "增加 #% 閃避與能量護盾",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "eagle-mask-evasion-applies-to-spell-damage",
+          "band": 6,
+          "text": "對你閃避值的增減同時會套用至法術傷害",
+          "template": "對你閃避值的增減同時會套用至法術傷害",
+          "category": "long-no-number-semantic"
+        },
+        {
+          "id": "eagle-mask-physical-damage-reduction-zero",
+          "band": 7,
+          "text": "物理傷害減免為零",
+          "template": "物理傷害減免為零",
+          "category": "no-number-semantic"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810210950_5719_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "亡體之幕 / 亡者護甲",
+      "roi": [76, 195, 274, 396],
+      "expectedBandCount": 9,
+      "ignoredBands": [0, 1, 2],
+      "cases": [
+        {
+          "id": "shroud-spell-critical-multiplier",
+          "band": 3,
+          "text": "+24% 法術傷害的暴擊加成",
+          "template": "+#% 法術傷害的暴擊加成",
+          "category": "signed-percent"
+        },
+        {
+          "id": "shroud-attack-damage-block",
+          "band": 4,
+          "text": "6% 攻擊傷害格擋率",
+          "template": "#% 攻擊傷害格擋率",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "shroud-evasion-energy-shield-percent",
+          "band": 5,
+          "text": "增加 39% 閃避與能量護盾",
+          "template": "增加 #% 閃避與能量護盾",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "shroud-maximum-mana",
+          "band": 6,
+          "text": "+71 最大魔力",
+          "template": "+# 最大魔力",
+          "category": "signed-number"
+        },
+        {
+          "id": "shroud-fire-resistance",
+          "band": 7,
+          "text": "+41% 火焰抗性",
+          "template": "+#% 火焰抗性",
+          "category": "signed-percent"
+        },
+        {
+          "id": "shroud-stun-block-recovery",
+          "band": 8,
+          "text": "增加 17% 暈眩恢復和格擋恢復",
+          "template": "增加 #% 暈眩恢復和格擋恢復",
+          "category": "numeric-percent"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810210950_5719_114.png",
+      "imageSize": [1920, 1032],
+      "tooltip": "術痕 真實之衛 / 亡者護甲",
+      "roi": [365, 195, 549, 397],
+      "expectedBandCount": 11,
+      "ignoredBands": [0, 1, 2],
+      "cases": [
+        {
+          "id": "true-guard-attribute-modifier-magnitude",
+          "band": 3,
+          "text": "增加 8% 變動能力詞綴的大小",
+          "template": "增加 #% 變動能力詞綴的大小",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "true-guard-flat-intelligence",
+          "band": 4,
+          "text": "+45 智慧",
+          "template": "+# 智慧",
+          "category": "signed-number"
+        },
+        {
+          "id": "true-guard-intelligence-percent",
+          "band": 5,
+          "text": "增加 12% 智慧",
+          "template": "增加 #% 智慧",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "true-guard-evasion",
+          "band": 6,
+          "text": "+279 點閃避值",
+          "template": "+# 點閃避值",
+          "category": "signed-number"
+        },
+        {
+          "id": "true-guard-energy-shield",
+          "band": 7,
+          "text": "+61 最大能量護盾",
+          "template": "+# 最大能量護盾",
+          "category": "signed-number"
+        },
+        {
+          "id": "true-guard-maximum-life",
+          "band": 8,
+          "text": "+26 最大生命",
+          "template": "+# 最大生命",
+          "category": "signed-number"
+        },
+        {
+          "id": "true-guard-explode-on-kill",
+          "band": 9,
+          "text": "你擊殺的敵人有 22% 機率爆炸，造成他們最大生命十分之一的物理傷害",
+          "template": "你擊殺的敵人有 #% 機率爆炸，造成他們最大生命十分之一的物理傷害",
+          "category": "long-line-semantic"
+        },
+        {
+          "id": "true-guard-all-attributes",
+          "band": 10,
+          "text": "增加 6% 所有屬性",
+          "template": "增加 #% 所有屬性",
+          "category": "numeric-percent"
+        }
+      ]
+    }
+  ]
+}

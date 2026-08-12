@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "locale": "en-US",
+  "game": "Path of Exile 2",
+  "layout": "native 2560x1440 screenshots; fixed ROI covering the complete item tooltip affix area",
+  "roi": [1150, 250, 1410, 850],
+  "screenshots": [
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.32.35.35.png",
+      "cases": [
+        "Grants Skill: Level # Fulmination",
+        "Allies in your Presence deal # to # Added Attack Cold Damage",
+        "Allies in your Presence have #% increased Cast Speed",
+        "#% reduced Attribute Requirements",
+        "Minions have #% increased maximum Life"
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.32.40.23.png",
+      "cases": [
+        "+# to Dexterity",
+        "+# to maximum Energy Shield",
+        "+# to Spirit",
+        "#% increased Rarity of Items found",
+        "+# to Level of all Minion Skills",
+        "+# to Strength",
+        "#% of Damage taken Recouped as Life"
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.33.00.68.png",
+      "cases": [
+        "#% increased Energy Shield",
+        "+# to maximum Mana",
+        "#% increased Rarity of Items found",
+        "+#% to Cold Resistance",
+        "+#% to Chaos Resistance"
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.33.07.63.png",
+      "cases": [
+        "#% increased Physical Damage",
+        "Adds # to # Lightning Damage",
+        "#% increased Elemental Damage with Attacks",
+        "#% increased Attack Speed",
+        "+# to Level of all Melee Skills",
+        "Causes #% increased Stun Buildup",
+        "#% increased Lightning Damage",
+        "#% increased Magnitude of Shock you inflict"
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.33.39.21.png",
+      "cases": [
+        "+# to maximum Energy Shield",
+        "#% increased Energy Shield",
+        "+# to maximum Mana",
+        "#% increased Critical Hit Chance for Spells",
+        "#% increased Cast Speed",
+        "+#% to Fire and Chaos Resistances"
+      ]
+    },
+    {
+      "image": "Path of Exile 2 Screenshot 2026.08.12 - 12.34.00.86.png",
+      "cases": [
+        "#% increased Armour, Evasion and Energy Shield",
+        "Adds # to # Cold Damage to Attacks",
+        "Adds # to # Lightning Damage to Attacks",
+        "+# to Accuracy Rating",
+        "+# to Level of all Melee Skills",
+        "+# to Intelligence",
+        "Gain # Mana per Enemy Killed"
+      ]
+    }
+  ]
+}

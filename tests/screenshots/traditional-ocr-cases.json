@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "coordinateSystem": "source-image pixels; top-left origin; roi is x,y,width,height",
+  "preprocessing": {
+    "implementation": "PoeTextPreprocessor.PrepareBlueAffixBands",
+    "scale": 1,
+    "validatedBandIndices": true
+  },
+  "screenshots": [
+    {
+      "image": "Weixin Image_20260810204138_5682_114.png",
+      "imageSize": [1920, 1032],
+      "roi": [860, 20, 500, 540],
+      "expectedBandCount": 14,
+      "ignoredBands": [0, 1, 2, 3, 4],
+      "cases": [
+        {
+          "id": "weapon-variable-mana-modifier",
+          "band": 5,
+          "text": "增加 8% 變動魔力詞綴的大小",
+          "template": "增加 #% 變動魔力詞綴的大小",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "weapon-strength-dexterity",
+          "band": 6,
+          "text": "+50 力量和敏捷",
+          "template": "+# 力量和敏捷",
+          "category": "signed-number"
+        },
+        {
+          "id": "weapon-intelligence-requirement",
+          "band": 7,
+          "text": "+200 智慧需求",
+          "template": "+# 智慧需求",
+          "category": "signed-number"
+        },
+        {
+          "id": "weapon-physical-damage",
+          "band": 8,
+          "text": "增加 244% 物理傷害",
+          "template": "增加 #% 物理傷害",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "weapon-attack-speed",
+          "band": 9,
+          "text": "增加 11% 攻擊速度",
+          "template": "增加 #% 攻擊速度",
+          "category": "short-target"
+        },
+        {
+          "id": "weapon-critical-strike-chance",
+          "band": 10,
+          "text": "增加 160% 暴擊率",
+          "template": "增加 #% 暴擊率",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "weapon-critical-no-extra-damage",
+          "band": 11,
+          "text": "此武器暴擊不造成額外傷害",
+          "template": "此武器暴擊不造成額外傷害",
+          "category": "no-number-semantic"
+        },
+        {
+          "id": "weapon-shrine-on-kill",
+          "band": 12,
+          "text": "當你擊殺稀有或傳奇敵人時，獲得 1 種隨機神殿增益效果 30 秒",
+          "template": "當你擊殺稀有或傳奇敵人時，獲得 # 種隨機神殿增益效果 # 秒",
+          "category": "long-line-two-numbers"
+        },
+        {
+          "id": "weapon-mana-per-intelligence",
+          "band": 13,
+          "text": "每 2 點智慧 +1 最大魔力",
+          "template": "每 # 點智慧 +# 最大魔力",
+          "category": "two-numbers"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810204152_5683_114.png",
+      "imageSize": [1920, 1032],
+      "roi": [1255, 125, 320, 455],
+      "expectedBandCount": 15,
+      "ignoredBands": [0, 1, 2, 3, 4],
+      "cases": [
+        {
+          "id": "gloves-rage-on-hit",
+          "band": 5,
+          "text": "攻擊擊中時獲得 1 層盛怒",
+          "template": "攻擊擊中時獲得 # 層盛怒",
+          "category": "numeric-slot"
+        },
+        {
+          "id": "gloves-cold-exposure",
+          "band": 6,
+          "text": "擊中時造成冰冷曝曬，-11% 冰冷抗性",
+          "template": "擊中時造成冰冷曝曬，-#% 冰冷抗性",
+          "category": "negative-percent-punctuation"
+        },
+        {
+          "id": "gloves-intelligence",
+          "band": 7,
+          "text": "+60 智慧",
+          "template": "+# 智慧",
+          "category": "signed-number"
+        },
+        {
+          "id": "gloves-added-fire-damage",
+          "band": 8,
+          "text": "攻擊附加 5 至 12 火焰傷害",
+          "template": "攻擊附加 # 至 # 火焰傷害",
+          "category": "two-numbers"
+        },
+        {
+          "id": "gloves-maximum-mana",
+          "band": 9,
+          "text": "+72 最大魔力",
+          "template": "+# 最大魔力",
+          "category": "signed-number"
+        },
+        {
+          "id": "gloves-fire-resistance",
+          "band": 10,
+          "text": "+36% 火焰抗性",
+          "template": "+#% 火焰抗性",
+          "category": "signed-percent-pair"
+        },
+        {
+          "id": "gloves-cold-resistance",
+          "band": 11,
+          "text": "+46% 冰冷抗性",
+          "template": "+#% 冰冷抗性",
+          "category": "signed-percent-pair"
+        },
+        {
+          "id": "gloves-damage-against-chilled",
+          "band": 12,
+          "text": "擊中冰緩敵人增加 38% 傷害",
+          "template": "擊中冰緩敵人增加 #% 傷害",
+          "category": "numeric-percent"
+        },
+        {
+          "id": "gloves-projectile-speed",
+          "band": 13,
+          "text": "增加 20% 投射物速度",
+          "template": "增加 #% 投射物速度",
+          "category": "shared-prefix-pair"
+        },
+        {
+          "id": "gloves-projectile-damage",
+          "band": 14,
+          "text": "增加 15% 投射物傷害",
+          "template": "增加 #% 投射物傷害",
+          "category": "shared-prefix-pair"
+        }
+      ]
+    },
+    {
+      "image": "Weixin Image_20260810204206_5684_114.png",
+      "imageSize": [1920, 1032],
+      "roi": [1330, 295, 420, 400],
+      "expectedBandCount": 8,
+      "ignoredBands": [0],
+      "cases": [
+        {
+          "id": "cluster-eight-passives",
+          "band": 1,
+          "text": "附加 8 個天賦",
+          "template": "附加 # 個天賦",
+          "category": "short-target"
+        },
+        {
+          "id": "cluster-jewel-sockets",
+          "band": 2,
+          "text": "2 個附加的天賦為珠寶插槽",
+          "template": "# 個附加的天賦為珠寶插槽",
+          "category": "numeric-slot"
+        },
+        {
+          "id": "cluster-small-cold-damage",
+          "band": 3,
+          "text": "附加的小型天賦給予：增加 12% 冰冷傷害",
+          "template": "附加的小型天賦給予：增加 #% 冰冷傷害",
+          "category": "shared-prefix-semantic"
+        },
+        {
+          "id": "cluster-small-life-regeneration",
+          "band": 4,
+          "text": "附加的小天賦給予：每秒回復 0.1% 生命",
+          "template": "附加的小天賦給予：每秒回復 #% 生命",
+          "category": "shared-prefix-semantic"
+        },
+        {
+          "id": "cluster-snowstorm",
+          "band": 5,
+          "text": "1 個附加天賦為拂雪",
+          "template": "# 個附加天賦為拂雪",
+          "category": "shared-prefix-semantic"
+        },
+        {
+          "id": "cluster-sadist",
+          "band": 6,
+          "text": "1 個附加的天賦為施虐者",
+          "template": "# 個附加的天賦為施虐者",
+          "category": "shared-prefix-semantic"
+        },
+        {
+          "id": "cluster-widespread-destruction",
+          "band": 7,
+          "text": "1 個附加的天賦為毀滅擴散",
+          "template": "# 個附加的天賦為毀滅擴散",
+          "category": "shared-prefix-semantic"
+        }
+      ]
+    }
+  ]
+}
