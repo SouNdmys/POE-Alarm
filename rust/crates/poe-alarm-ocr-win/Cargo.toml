@@ -1,0 +1,31 @@
+[package]
+name = "poe-alarm-ocr-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Windows.Media.Ocr adapter for POE Alarm BGRA captures"
+
+[dependencies]
+poe-alarm-core = { path = "../poe-alarm-core" }
+poe-alarm-vision = { path = "../poe-alarm-vision" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = [
+    "Foundation",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Win32_Foundation",
+    "Win32_System_WinRT",
+    "Win32_System_Threading",
+] }
+
+[[bin]]
+name = "winrt-ocr-probe"
+path = "src/bin/winrt_ocr_probe.rs"
+
+[[bin]]
+name = "structured-screenshot-probe"
+path = "src/bin/structured_screenshot_probe.rs"

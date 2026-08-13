@@ -1,0 +1,13 @@
+[package]
+name = "poe-alarm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Allocation-conscious POE Alarm affix matcher and composite rule engine"
+
+[dependencies]
+serde.workspace = true
+serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+
+[dev-dependencies]

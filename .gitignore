@@ -6,6 +6,8 @@
 .dotnet-cli/
 **/bin/
 **/obj/
+rust/target/
+rust/target-*/
 artifacts/
 TestResults/
 # Local gameplay captures are large and may contain private desktop details. Keep the
