@@ -28,6 +28,7 @@ public sealed class LatchedAlertService : IAlertService
     private bool isGuardedRedHandoff;
     private bool isGuardedFailurePending;
     private bool guardedPassCycleReady;
+    private bool guardedPassCycleAcknowledgementPending;
     private TimeSpan guardedDecisionWatchdogTimeout;
     private bool isDisposed;
     private bool excludeOverlayFromCapture;
@@ -220,12 +221,14 @@ public sealed class LatchedAlertService : IAlertService
                     {
                         isGuardedFailurePending = true;
                         guardedPassCycleReady = false;
+                        guardedPassCycleAcknowledgementPending = false;
                         guardGeneration = ++generation;
                         armFailed = true;
                     }
                     else
                     {
                         guardedPassCycleReady = false;
+                        guardedPassCycleAcknowledgementPending = false;
                         guardGeneration = ++generation;
                         guardedDecisionWatchdogTimeout = watchdogTimeout;
                         refreshOnly = true;
@@ -245,6 +248,7 @@ public sealed class LatchedAlertService : IAlertService
                 isInputGuardActive = false;
                 isGuardedAlertActive = true;
                 isGuardedOverlayPresented = false;
+                guardedPassCycleAcknowledgementPending = false;
                 guardGeneration = ++generation;
                 if (!pendingMouseInputGuard.Arm())
                 {
@@ -326,11 +330,21 @@ public sealed class LatchedAlertService : IAlertService
                 return;
             }
 
+            if (isActive && isGuardedRedHandoff)
+            {
+                // A Guarded red hand-off fault synchronously re-enters here through the monitor's
+                // InputGuardReleased event. Complete the latched-alert terminal state now; the
+                // outer fail-open completion may be invalidated by this release generation.
+                isActive = false;
+                sound.Stop();
+            }
+
             isGuardedAlertActive = false;
             isGuardedOverlayPresented = false;
             isGuardedRedHandoff = false;
             isGuardedFailurePending = false;
             guardedPassCycleReady = false;
+            guardedPassCycleAcknowledgementPending = false;
             releaseGeneration = ++generation;
             pendingMouseInputGuard.Release();
         }
@@ -400,6 +414,16 @@ public sealed class LatchedAlertService : IAlertService
             if (isDisposed || isActive || !isGuardedAlertActive || isGuardedFailurePending)
             {
                 return false;
+            }
+
+            if (guardedPassCycleAcknowledgementPending)
+            {
+                // Continue installs the one-shot gate before hiding the yellow overlay. The
+                // monitoring transition immediately repeats this request as its acknowledgement.
+                // Consume that acknowledgement even if the allowed Down/Up has already completed;
+                // re-entering the native state machine here would otherwise pass a second click.
+                guardedPassCycleAcknowledgementPending = false;
+                return true;
             }
 
             if (guardedPassCycleReady)
@@ -481,6 +505,7 @@ public sealed class LatchedAlertService : IAlertService
             isGuardedOverlayPresented = false;
             isGuardedRedHandoff = true;
             guardedPassCycleReady = false;
+            guardedPassCycleAcknowledgementPending = false;
             triggerGeneration = ++generation;
         }
 
@@ -553,6 +578,7 @@ public sealed class LatchedAlertService : IAlertService
                 isGuardedRedHandoff = false;
                 isGuardedFailurePending = false;
                 guardedPassCycleReady = false;
+                guardedPassCycleAcknowledgementPending = false;
                 generation++;
                 sound.Stop();
                 transitionedToAcknowledged = wasAlertActive;
@@ -597,6 +623,7 @@ public sealed class LatchedAlertService : IAlertService
             isGuardedRedHandoff = false;
             isGuardedFailurePending = false;
             guardedPassCycleReady = false;
+            guardedPassCycleAcknowledgementPending = false;
             generation++;
             pendingMouseInputGuard.CausativeClickCompleted -= OnCausativeClickCompleted;
             sound.Stop();
@@ -912,6 +939,8 @@ public sealed class LatchedAlertService : IAlertService
                 isGuardedOverlayPresented = false;
                 isGuardedRedHandoff = false;
                 isGuardedFailurePending = false;
+                guardedPassCycleReady = false;
+                guardedPassCycleAcknowledgementPending = false;
                 generation++;
                 sound.Stop();
                 pendingMouseInputGuard.Release();
@@ -1089,6 +1118,7 @@ public sealed class LatchedAlertService : IAlertService
                     guardedPassCycleReady = true;
                     isGuardedOverlayPresented = false;
                     generation++;
+                    guardedPassCycleAcknowledgementPending = true;
                     callback = GuardedContinueRequested;
                 }
             }
@@ -1097,6 +1127,7 @@ public sealed class LatchedAlertService : IAlertService
                 isGuardedAlertActive = false;
                 isGuardedOverlayPresented = false;
                 guardedPassCycleReady = false;
+                guardedPassCycleAcknowledgementPending = false;
                 generation++;
                 pendingMouseInputGuard.Release();
                 callback = GuardedStopRequested;

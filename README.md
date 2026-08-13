@@ -52,7 +52,7 @@ Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0"
 
 快速模式仍直接调用 0.6.1 的单目标识别接口，旧 `settings.json` 会迁移为快速模式且无需手工操作。结构化规则按 POE1 / POE2 分别保存；真实制作回放仍属于正式发布门禁。POE1 English 使用单次严格批量 OCR，POE2 English 保留变化帧的双 Windows 引擎确认；繁中 Windows OCR 与内置 Paddle 路径均已实现共享多目标局部复核。每个扫描批次的恢复工作单元有固定上限，目标数量不会导致重复整帧 OCR；普通与辅助转录共享物理行身份，不能把同一词缀重复计数。快速模式原有路径、阈值与鼠标状态机不变。Mirror Tier 安全模式作为独立 `MonitoringPolicy` 接入：当前仅在具备 changed-frame 指纹链路的 POE2 English 与繁中识别器上开放；命中时红停，目标相关但数值缺失/冲突或局部复核未决时黄停，稳定帧严格判定为安全不命中后，输入闸门只放行下一次完整制作点击，并在该次抬起时原子拦截后续点击。POE1 English 仍保持 0.6.1 无预判闸门的合同，不用未验证的单次 OCR 冒充 Mirror 安全。完整范围、延后项与验收标准见 [vNext 规则引擎与安全监控计划](docs/VNEXT_RULE_ENGINE_PLAN.md)。
 
-PoEDB / PoE2DB 与 GGG 官网 Mirror Service 组合语料当前覆盖 14 个来源、7 个场景（其中 6 个真实镜装组合），共 34/34：13 个正例、21 个负例，包含 OR 第二分支、少一条、近邻词缀、数值边界与 Hybrid 同一 modifier 不重复计数。详情和来源链接见 [Mirror 复合规则语料](docs/MIRROR_RULE_CORPUS.md)。这证明规则表达与计数可覆盖这些制作目标，不等同于每个装备都做过实机 OCR 回放。
+PoEDB / PoE2DB 与 GGG 官网 Mirror Service 组合语料当前覆盖 14 个来源、7 个场景（其中 6 个真实镜装组合），共 36/36：15 个正例、21 个负例，包含 OR 第二分支、普通非 Alt tooltip、少一条、近邻词缀、数值边界与 Hybrid 同一 modifier 不重复计数。详情和来源链接见 [Mirror 复合规则语料](docs/MIRROR_RULE_CORPUS.md)。这证明规则表达与识别结果物理身份契约可覆盖这些制作目标，不等同于每个装备都做过实机 OCR 回放。
 
 ## 匹配规则
 

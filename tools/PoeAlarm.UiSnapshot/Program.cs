@@ -13,6 +13,7 @@ using PoeAlarm.App.Alerts;
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Configuration;
 using PoeAlarm.App.Monitoring;
+using PoeAlarm.App.Monitoring.Policies;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.App.RulesUi;
 using PoeAlarm.Core.Matching;
@@ -136,6 +137,7 @@ internal static class Program
             if (assertBatchOcrContract)
             {
                 AssertBatchOcrContract();
+                AssertGuardedCandidateEvidenceIntegrationAsync().GetAwaiter().GetResult();
             }
 
             if (assertBatchOcrSynthetic)
@@ -672,6 +674,14 @@ internal static class Program
 
     private static void AssertBatchOcrContract()
     {
+        AssertStructuredFallbackSelection();
+        var boundedPlan = BoundedLocalizedRecoveryPlanner.Plan(
+            new[] { "band-1", "band-2", "band-3", "band-4" },
+            maximumWorkUnits: 2);
+        Assert(boundedPlan.WorkItems.SequenceEqual(["band-1", "band-2"]) &&
+               boundedPlan.DeferredItems.SequenceEqual(["band-3", "band-4"]),
+            "Bounded localized recovery must spend two work units and retain every later candidate as unresolved evidence.");
+
         var duplicateA = new FullLineAffixMatcher("+# to maximum Life");
         var duplicateB = new FullLineAffixMatcher("+# to maximum Life");
         var speed = new FullLineAffixMatcher("#% increased Attack Speed");
@@ -683,6 +693,33 @@ internal static class Program
                Poe2EnglishRecognizer.CreateTargetSetKey(
                    Poe2EnglishRecognizer.NormalizeTargetSet([speed, duplicateB])),
             "Batch target-set cache keys must not depend on input order or duplicate rules.");
+
+        var confirmedEvidence = new OcrRecognitionResult(
+            ["117% increased Spell Damage"],
+            TimeSpan.FromMilliseconds(1),
+            TimeSpan.FromMilliseconds(2),
+            CandidateEvidence:
+            [
+                new OcrCandidateEvidence(
+                    "band:confirmed",
+                    "117% increased Spell Damage",
+                    "#% increased Spell Damage",
+                    OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                    10,
+                    30),
+            ]);
+        var confirmedCache = new Poe2EnglishRecognizer.ConfirmedNoMatch(
+            0xC0FFEEUL,
+            "spell-damage",
+            confirmedEvidence);
+        var cachedEvidence = Poe2EnglishRecognizer.TryReuseConfirmedBatchEvidence(
+            confirmedCache,
+            fingerprint: 0xC0FFEEUL,
+            targetKey: "spell-damage");
+        Assert(cachedEvidence is { WasCached: true, RequiresRescan: false } &&
+               cachedEvidence.BatchCandidateEvidence.Count == 1,
+            "A confirmed POE2 batch frame containing a lexical target must reuse its complete " +
+            "evidence; numeric/group rules are re-evaluated by the caller without another OCR pass.");
 
         var result = new OcrRecognitionResult(
             ["+70 to maximum Life"],
@@ -746,12 +783,57 @@ internal static class Program
         Console.WriteLine("PASS: batch OCR API/identity/capability contract");
     }
 
+    private static void AssertStructuredFallbackSelection()
+    {
+        var regular = new PreparedFrame(100, 60, 400, new byte[4], 4, 1, 20, 80);
+        var fallback = new PreparedFrame(200, 160, 800, new byte[4], 4, 2, 0, 159, IsFallback: true);
+
+        var duplicateView = StructuredBandSelection.SelectIncludedIndices(
+            [regular, fallback],
+            index => index == 0
+                ? "179% increased Physical Damage"
+                : "179(170-179)% increased Physical Damage");
+        Assert(duplicateView.SequenceEqual([0]),
+            "Structured OCR must not expose a full-ROI fallback as a second modifier when a regular band produced text.");
+        var duplicateRules = RuleCompiler.Compile(new RuleSetDefinition(
+            "fallback identity",
+            [new AcceptableResultGroup(
+                "needs two physical modifiers",
+                ResultGroupMode.All,
+                [new AffixCondition("first", "#% increased Physical Damage"),
+                 new AffixCondition("second", "#% increased Physical Damage")])]));
+        Assert(!duplicateRules.Evaluate(
+                duplicateView.Select(_ => "179% increased Physical Damage").ToArray(),
+                assistedObservations: [],
+                physicalLineIdentities: duplicateView
+                    .Select((_, index) => new PhysicalLineIdentity(index, "regular-band"))
+                    .ToArray())
+            .IsMatch,
+            "One regular/fallback view of a modifier must not satisfy two repeated conditions.");
+
+        var fallbackOnly = StructuredBandSelection.SelectIncludedIndices(
+            [regular, fallback],
+            index => index == 1 ? "179% increased Physical Damage" : null);
+        Assert(fallbackOnly.SequenceEqual([1]),
+            "Structured OCR must retain fallback-only target evidence when oversized regular bands produced no text.");
+
+        var mixedUniqueFallback = StructuredBandSelection.SelectIncludedIndices(
+            [regular, fallback],
+            index => index == 0
+                ? "+70 to maximum Life"
+                : "179% increased Physical Damage");
+        Assert(mixedUniqueFallback.SequenceEqual([0, 1]),
+            "An unrelated regular row must not hide the only target text available from an oversized fallback.");
+    }
+
     private static async Task AssertBatchOcrSyntheticAsync()
     {
         var frame = RenderSyntheticAffix("匕首攻擊附加 13 至 27 閃電傷害");
         var matching = new FullLineAffixMatcher("匕首攻擊附加 # 至 # 閃電傷害");
+        var nearTarget = new FullLineAffixMatcher("匕首攻擊附加 # 至 # 冰冷傷害");
         var unrelated = Enumerable.Range(0, 24)
             .Select(index => new FullLineAffixMatcher($"測試批次詞綴{index}增加 # 點力量"))
+            .Append(nearTarget)
             .Append(matching)
             .ToArray();
         using var recognizer = new WindowsChineseOcrRecognizer();
@@ -761,10 +843,15 @@ internal static class Program
             "Windows Chinese batch OCR must run one shared full-frame layout pass.");
         Assert(recognizer.BatchLocalizedWorkUnitCount <= 2,
             "Windows Chinese batch recovery must remain capped at two physical work units.");
+        Assert(recognizer.BatchLocalizedWorkUnitCount > 0,
+            "Synthetic batch OCR must execute the production localized-recovery path.");
         Assert(matching.TryFindMatch(first.Lines, out _) ||
                first.BatchAssistedObservations.Any(item =>
                    item.CanonicalTarget == matching.Template.Text),
             "A strict synthetic target must be visible to batch recognition.");
+        Assert(first.BatchCandidateEvidence.Any(item =>
+                   item.CandidateTarget == nearTarget.Template.Text),
+            "A conservatively localized but unverified near-target must remain visible to Guarded.");
 
         _ = recognizer.ComputeFrameFingerprint(frame);
         var reordered = unrelated.Reverse().Concat([matching]).ToArray();
@@ -777,6 +864,43 @@ internal static class Program
             $"PASS: synthetic multi-target OCR; targets={reordered.Length}, " +
             $"primaryPasses={recognizer.BatchPrimaryPassCount}, " +
             $"localizedUnits={recognizer.BatchLocalizedWorkUnitCount}");
+    }
+
+    private static async Task AssertGuardedCandidateEvidenceIntegrationAsync()
+    {
+        var recognizer = new GuardedCandidateEvidenceRecognizer();
+        await using var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
+        var paused = new TaskCompletionSource<GuardedDecisionEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        monitor.GuardedDecisionChanged += (_, decision) =>
+        {
+            if (decision.Decision == GuardedDecisionKind.Uncertain)
+            {
+                paused.TrySetResult(decision);
+            }
+        };
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "guarded unresolved candidate",
+            [new AcceptableResultGroup(
+                "target",
+                ResultGroupMode.Any,
+                [new AffixCondition("life", "+# to maximum Life")])]));
+
+        monitor.Start(
+            rules,
+            new ScreenRegion(0, 0, 1, 1),
+            new GuardedMonitoringPolicy(new GuardedPolicyOptions
+            {
+                RequiredStableFrames = 1,
+                RequiredConsistentRecognitions = 1,
+                DecisionTimeout = TimeSpan.FromSeconds(1),
+            }));
+        var decision = await paused.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(decision.UncertaintyReason ==
+               GuardedUncertaintyReason.TargetLexicalCandidateUnverified &&
+               monitor.GuardedState == GuardedSessionState.PausedUncertain,
+            "A final localized candidate from batch OCR must be consumed as a Guarded yellow-stop.");
+        await monitor.StopAsync();
     }
 
     private static async Task AssertStructuredMonitorAsync()
@@ -2104,8 +2228,32 @@ internal static class Program
                 "The yellow Guarded overlay must never start the red looping sound.");
         }
 
+        var stateField = typeof(PendingMouseInputGuard).GetField(
+            "_state",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Pending hook state field is missing.");
+        var pendingState = (MouseInputGuardStateMachine)(stateField.GetValue(pendingGuard)
+                           ?? throw new InvalidOperationException("Pending hook state is missing."));
+        var completionMethod = typeof(LatchedAlertService).GetMethod(
+            "OnCausativeClickCompleted",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Causative completion handler is missing.");
         var continueRaised = false;
-        service.GuardedContinueRequested += (_, _) => continueRaised = true;
+        var duplicateAwaitAccepted = false;
+        service.GuardedContinueRequested += (_, _) =>
+        {
+            continueRaised = true;
+            Assert(!pendingState.ProcessButton(MouseButtonBits.Left, isDown: true).Suppress,
+                "Continue's deliberately allowed click Down was unexpectedly consumed.");
+            var completed = pendingState.ProcessButton(MouseButtonBits.Left, isDown: false);
+            Assert(!completed.Suppress && completed.CausativeClickCompleted,
+                "Continue's deliberately allowed click did not complete its one-shot cycle.");
+            completionMethod.Invoke(service, [pendingGuard, EventArgs.Empty]);
+
+            // This is the exact production ordering when a very fast complete click lands after
+            // the overlay is hidden but before ContinueGuarded raises its duplicate pass request.
+            duplicateAwaitAccepted = service.AwaitNextGuardedClick(TimeSpan.FromSeconds(3));
+        };
         var continueButton = (System.Windows.Controls.Button)(typeof(AffixHitOverlayWindow).GetField(
             "acknowledgementButton",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!);
@@ -2121,8 +2269,8 @@ internal static class Program
             TimeSpan.FromSeconds(2),
             "Guarded Continue callback was not raised after click-tail absorption.");
         Assert(service.IsGuardedAlertActive && !overlay.IsVisible && !overlay.IsHitTestVisible &&
-               pendingGuard.Mode == MouseInputGuardMode.AwaitingCausativeClick,
-            "Continue callback must observe the replacement one-click Guarded gate already active.");
+               duplicateAwaitAccepted && pendingGuard.Mode == MouseInputGuardMode.Guarding,
+            "Continue's duplicate pass-cycle acknowledgement re-armed a second allowed click.");
 
         service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
         service.ShowGuardedUncertain(
@@ -2276,7 +2424,13 @@ internal static class Program
         service.Prepare(preparePendingInputGuard: true);
         service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
         GuardedAlertFailOpenEventArgs? failure = null;
-        service.GuardedFailOpen += (_, e) => failure = e;
+        service.GuardedFailOpen += (_, e) =>
+        {
+            failure = e;
+            // Match MainWindow's production re-entry: faulting the monitor synchronously raises
+            // InputGuardReleased before the service's outer fail-open completion resumes.
+            service.ReleaseGuardedInputGuard();
+        };
 
         // Trigger from a monitor-like worker while this STA deliberately cannot run the queued
         // red presentation. A Guarded red hand-off is terminally different from the legacy Fast
@@ -2500,6 +2654,46 @@ internal static class Program
                 TimeSpan.Zero,
                 TimeSpan.Zero));
         }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class GuardedCandidateEvidenceRecognizer
+        : IOcrRecognizer, IFrameFingerprintProvider
+    {
+        private static readonly string CanonicalTarget =
+            AffixCanonicalizer.Normalize("+# to maximum Life").Text;
+
+        public StructuredRuleOcrSupport StructuredRuleSupport =>
+            StructuredRuleOcrSupport.StrictBatch;
+
+        public ulong ComputeFrameFingerprint(CapturedFrame frame) => 0xCA11D1D8UL;
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Guarded candidate fixture expected batch OCR.");
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            IReadOnlyList<FullLineAffixMatcher> targets,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new OcrRecognitionResult(
+                ["unrelated"],
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                CandidateEvidence:
+                [
+                    new OcrCandidateEvidence(
+                        "band-deferred",
+                        "to maximum Life",
+                        CanonicalTarget,
+                        OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                        10,
+                        30),
+                ]));
 
         public void Dispose()
         {

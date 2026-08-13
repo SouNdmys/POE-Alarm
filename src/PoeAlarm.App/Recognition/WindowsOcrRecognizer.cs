@@ -86,18 +86,29 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
 
         // Windows English OCR has no target-conditioned inference. One exhaustive pass is the
         // complete verified path; every strict rule is evaluated later against these shared lines.
-        var result = await RecognizeAsync(frame, cancellationToken).ConfigureAwait(false);
-        return !_retainBandRecognitionDetails
-            ? result
-            : result with
-            {
-                PhysicalLines = CreatePhysicalLineMap(result.Lines, _lastRecognizedBands),
-            };
+        var result = await RecognizeInternalAsync(
+                frame,
+                retainBandDetails: true,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var structuredLines = CreateStructuredLogicalLines(_lastRecognizedBands, frame.Width);
+        return result with
+        {
+            Lines = structuredLines,
+            PhysicalLines = CreatePhysicalLineMap(structuredLines, _lastRecognizedBands),
+        };
     }
 
     public async Task<OcrRecognitionResult> RecognizeAsync(
         Capture.CapturedFrame frame,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await RecognizeInternalAsync(frame, _retainBandRecognitionDetails, cancellationToken)
+            .ConfigureAwait(false);
+
+    private async Task<OcrRecognitionResult> RecognizeInternalAsync(
+        Capture.CapturedFrame frame,
+        bool retainBandDetails,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(frame);
 
@@ -110,7 +121,8 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
             var preprocessingElapsed = stopwatch.Elapsed;
             var fingerprint = CombineFingerprints(preparedBands);
 
-            if (_hasCachedRecognition && fingerprint == _lastFingerprint)
+            if (_hasCachedRecognition && fingerprint == _lastFingerprint &&
+                (!retainBandDetails || _lastRecognizedBands.Count > 0 || _lastLines.Count == 0))
             {
                 return new OcrRecognitionResult(
                     _lastLines,
@@ -129,7 +141,7 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
 
             stopwatch.Restart();
             var lines = new List<string>(preparedBands.Count);
-            List<WindowsRecognizedBand>? recognizedBands = _retainBandRecognitionDetails
+            List<WindowsRecognizedBand>? recognizedBands = retainBandDetails
                 ? new List<WindowsRecognizedBand>(preparedBands.Count)
                 : null;
             int? previousBottom = null;
@@ -278,9 +290,9 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
     {
         var result = new List<OcrPhysicalLine>();
         var searchStart = 0;
-        foreach (var band in recognizedBands.Where(static item => !item.Frame.IsFallback))
+        foreach (var projection in CreateStructuredBandProjection(recognizedBands))
         {
-            foreach (var bandLine in band.Lines)
+            foreach (var bandLine in projection.Lines)
             {
                 var lineIndex = -1;
                 for (var index = searchStart; index < lines.Count; index++)
@@ -299,16 +311,96 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
 
                 result.Add(new OcrPhysicalLine(
                     lineIndex,
-                    $"win:{band.Frame.ContentFingerprint:x16}:{band.Frame.SourceTop}:" +
-                    $"{band.Frame.SourceBottom}:{band.Frame.SourceLeft}:{band.Frame.SourceRight}",
-                    band.Frame.SourceTop,
-                    band.Frame.SourceBottom));
+                    CreatePhysicalBandId(projection.Frame),
+                    projection.Frame.SourceTop,
+                    projection.Frame.SourceBottom));
                 searchStart = lineIndex + 1;
             }
         }
 
         return result;
     }
+
+    private static IReadOnlyList<string> CreateStructuredLogicalLines(
+        IReadOnlyList<WindowsRecognizedBand> recognizedBands,
+        int roiWidth)
+    {
+        var lines = new List<string>();
+        int? previousBottom = null;
+        var previousHeight = 0;
+        var previousWidth = 0;
+        foreach (var projection in CreateStructuredBandProjection(recognizedBands))
+        {
+            var prepared = projection.Frame;
+            if (prepared.IsFallback)
+            {
+                AddLogicalBoundary(lines);
+                foreach (var recognizedLine in projection.Lines)
+                {
+                    lines.Add(recognizedLine);
+                    AddLogicalBoundary(lines);
+                }
+
+                previousBottom = null;
+                previousHeight = 0;
+                previousWidth = 0;
+                continue;
+            }
+
+            var currentHeight = prepared.SourceBottom - prepared.SourceTop + 1;
+            if (previousBottom is not null)
+            {
+                var gap = prepared.SourceTop - previousBottom.Value - 1;
+                var closeEnoughForWrapping = gap <= Math.Max(12, Math.Max(previousHeight, currentHeight));
+                var previousLineFilledTooltip = previousWidth >= roiWidth * 0.70;
+                if (!closeEnoughForWrapping || !previousLineFilledTooltip)
+                {
+                    AddLogicalBoundary(lines);
+                }
+            }
+
+            lines.AddRange(projection.Lines);
+            previousBottom = prepared.SourceBottom;
+            previousHeight = currentHeight;
+            previousWidth = prepared.Width;
+        }
+
+        return lines;
+    }
+
+    private static IReadOnlyList<StructuredBandProjection> CreateStructuredBandProjection(
+        IReadOnlyList<WindowsRecognizedBand> recognizedBands)
+    {
+        var regularCanonical = recognizedBands
+            .Where(static band => !band.Frame.IsFallback)
+            .SelectMany(static band => band.Lines)
+            .Select(static line => AffixCanonicalizer.Normalize(line).Text)
+            .Where(static line => !string.IsNullOrWhiteSpace(line))
+            .ToHashSet(StringComparer.Ordinal);
+        var projections = new List<StructuredBandProjection>();
+        foreach (var band in recognizedBands)
+        {
+            var lines = band.Lines
+                .Where(static line => !string.IsNullOrWhiteSpace(line))
+                .Where(line => !band.Frame.IsFallback ||
+                               !regularCanonical.Contains(AffixCanonicalizer.Normalize(line).Text))
+                .ToArray();
+            if (lines.Length > 0)
+            {
+                projections.Add(new StructuredBandProjection(band.Frame, lines));
+            }
+        }
+
+        return projections;
+    }
+
+    private static string CreatePhysicalBandId(PreparedFrame band) =>
+        $"win:{band.ContentFingerprint:x16}:{band.SourceTop}:" +
+        $"{band.SourceBottom}:{band.SourceLeft}:{band.SourceRight}";
+
+    private sealed record StructuredBandProjection(
+        PreparedFrame Frame,
+        IReadOnlyList<string> Lines);
 
     private void CacheBandRecognition(BandCacheKey key, string[] lines)
     {

@@ -178,9 +178,9 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
                 .Select(static group => new BatchRefinementBandJob(
                     group.First().Candidate,
                     group.Select(static item => item.Target).ToArray()))
-                .Take(2)
                 .ToArray();
-            foreach (var job in jobs)
+            var plan = BoundedLocalizedRecoveryPlanner.Plan(jobs, maximumWorkUnits: 2);
+            foreach (var job in plan.WorkItems)
             {
                 _batchLocalizedWorkUnitCount++;
                 var recovery = await RefineCandidateBatchAsync(
@@ -231,6 +231,32 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
                         ClassifyCandidateEvidence(observed, unresolved),
                         (int)Math.Floor(job.Candidate.Bounds.Top),
                         (int)Math.Ceiling(job.Candidate.Bounds.Bottom)));
+                }
+            }
+
+            // Keep the expensive refinement ceiling independent of target count, while preserving
+            // every remaining conservative locator as unresolved evidence for Guarded yellow-stop.
+            foreach (var job in plan.DeferredItems)
+            {
+                var bandId = CreateDetectedBandId(
+                    detectedLines,
+                    job.Candidate.StartLine,
+                    job.Candidate.LineCount,
+                    prepared.ContentFingerprint);
+                var observed = string.Join(' ', detectedLines
+                    .Skip(job.Candidate.StartLine)
+                    .Take(job.Candidate.LineCount)
+                    .Select(line => NormalizeChineseNumericDashes(line.Text.Trim())));
+                var bounds = job.Candidate.Bounds;
+                foreach (var target in job.Targets)
+                {
+                    candidateEvidence.Add(new OcrCandidateEvidence(
+                        bandId,
+                        observed,
+                        target.Template.Text,
+                        OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                        (int)Math.Floor(bounds.Top),
+                        (int)Math.Ceiling(bounds.Bottom)));
                 }
             }
 

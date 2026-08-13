@@ -774,11 +774,39 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
         var previousHeight = 0;
         var previousWidth = 0;
 
+        var includedBands = StructuredBandSelection.SelectIncludedIndices(
+                preparedBands,
+                index => recognitions[index] is { } recognition &&
+                         !string.IsNullOrWhiteSpace(recognition.Batch.Recognition.Text)
+                    ? recognition.Batch.Recognition.Text
+                    : null)
+            .ToHashSet();
+
         for (var bandIndex = 0; bandIndex < preparedBands.Count; bandIndex++)
         {
             var prepared = preparedBands[bandIndex];
             var recognized = recognitions[bandIndex];
-            if (recognized is null || string.IsNullOrWhiteSpace(recognized.Batch.Recognition.Text))
+            if (prepared.IsFallback && !includedBands.Contains(bandIndex) && recognized is not null)
+            {
+                // The full ROI overlaps one or more regular bands. Never let it become another
+                // modifier, but preserve target-related support so Guarded pauses yellow rather
+                // than treating an ambiguous fallback-only hit as a safe NoMatch.
+                foreach (var target in recognized.Batch.TargetSupports
+                             .Where(static pair => pair.Value.ShapeCompatible ||
+                                                   pair.Value.StronglySupported))
+                {
+                    candidateItems.Add(new OcrCandidateEvidence(
+                        CreateBandId(prepared),
+                        recognized.Batch.Recognition.Text,
+                        target.Key,
+                        ClassifyBatchCandidate(recognized.Batch.Recognition.Text, target.Key),
+                        prepared.SourceTop,
+                        prepared.SourceBottom));
+                }
+            }
+
+            if (!includedBands.Contains(bandIndex) || recognized is null ||
+                string.IsNullOrWhiteSpace(recognized.Batch.Recognition.Text))
             {
                 AddLogicalBoundary(lines);
                 previousBottom = null;

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generatedAt": "2026-08-13",
-  "purpose": "Reproducible RuleSet evaluation corpus using real PoEDB/PoE2DB modifier text and real mirror-service item combinations. It tests deterministic text-rule evaluation, not OCR accuracy or crafting feasibility.",
+  "purpose": "Reproducible RuleSet evaluation corpus using real PoEDB/PoE2DB modifier text and real mirror-service item combinations. Most cases test deterministic text-rule evaluation; one cross-layer contract passes an OcrRecognitionResult into the production assisted/physical-identity projection. It does not test OCR accuracy or crafting feasibility.",
   "limitations": [
     "Normal non-Alt tooltips do not expose the word fractured (or the modifier tier/name), so fractured provenance is deliberately metadata only and is never a rule condition.",
     "Quality, catalysts, runes, enchantments and other modifier-magnitude effects can change displayed values; thresholds here apply to the displayed value only.",
@@ -319,14 +319,24 @@
               {"name":"speed","template":"#% increased Attack Speed","numericConstraints":[{"mode":"AtLeast","minimum":23}]},
               {"name":"melee-skills","template":"+# to Level of all Melee Skills","numericConstraints":[{"mode":"AtLeast","minimum":7}]}
             ]
+          },
+          {
+            "name": "hybrid-physical-identity-contract",
+            "mode": "AtLeast",
+            "requiredCount": 2,
+            "conditions": [
+              {"name":"hybrid-primary-view","template":"#% increased Physical Damage","numericConstraints":[{"mode":"Exactly","expected":78}]},
+              {"name":"hybrid-assisted-view","template":"#% increased Physical Damage","numericConstraints":[{"mode":"Exactly","expected":78}]}
+            ]
           }
         ]
       },
       "cases": [
         {"id":"listed-prefix-package-positive","expectedMatch":true,"expectedGroup":"physical-prefix-package","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]},
+        {"id":"listed-normal-tooltip-positive","expectedMatch":true,"expectedGroup":"physical-prefix-package","tags":["positive","actual-listing","normal-tooltip"],"lines":["178% increased Physical Damage","78% increased Physical Damage","+192 to Accuracy Rating","Adds 55 to 94 Physical Damage"]},
         {"id":"listed-suffix-pair-positive","expectedMatch":true,"expectedGroup":"finishing-suffix-pair","tags":["positive","or-branch"],"lines":["23(23-25)% increased Attack Speed","+7 to Level of all Melee Skills","25(20-25)% chance to gain Onslaught on Killing Hits with this Weapon"]},
         {"id":"one-short-hybrid-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating"]},
-        {"id":"hybrid-one-count-negative","expectedMatch":false,"tags":["one-modifier-one-count"],"lines":["78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]},
+        {"id":"hybrid-one-count-negative","expectedMatch":false,"tags":["one-modifier-one-count","ocr-identity-contract","normal-tooltip"],"lines":["78% increased Physical Damage","+192 to Accuracy Rating","Adds 55 to 94 Physical Damage"],"physicalLines":[{"lineIndex":0,"physicalBandId":"hybrid-band","sourceTop":100,"sourceBottom":120},{"lineIndex":1,"physicalBandId":"hybrid-band","sourceTop":100,"sourceBottom":120},{"lineIndex":2,"physicalBandId":"flat-band","sourceTop":121,"sourceBottom":140}],"assistedObservations":[{"physicalBandId":"hybrid-band","originalText":"78% increased Physical Damage","canonicalTarget":"#% increased Physical Damage","sourceTop":100,"sourceBottom":120,"relatedPhysicalBandIds":["hybrid-band"]}]},
         {"id":"hybrid-missing-second-line-negative","expectedMatch":false,"tags":["one-short-negative","near-neighbour-negative"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","Adds 55(37-55) to 94(63-94) Physical Damage"]},
         {"id":"pure-physical-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["169(160-169)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]}
       ]
@@ -393,6 +403,7 @@
       },
       "cases": [
         {"id":"listed-item-positive","expectedMatch":true,"expectedGroup":"all-four-caster-lines","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["114(105-119)% increased Lightning Damage","Gain 27(25-27)% of Damage as Extra Lightning Damage","117(105-119)% increased Spell Damage","+5 to Level of all Lightning Spell Skills","39(35-39)% increased Critical Spell Damage Bonus","34(33-35)% increased Cast Speed"]},
+        {"id":"listed-normal-tooltip-positive","expectedMatch":true,"expectedGroup":"all-four-caster-lines","tags":["positive","actual-listing","normal-tooltip"],"lines":["114% increased Lightning Damage","Gain 27% of Damage as Extra Lightning Damage","117% increased Spell Damage","+5 to Level of all Lightning Spell Skills","39% increased Critical Spell Damage Bonus","34% increased Cast Speed"]},
         {"id":"exact-boundaries-positive","expectedMatch":true,"expectedGroup":"all-four-caster-lines","tags":["positive","numeric-boundary-inclusive"],"lines":["105% increased Lightning Damage","105% increased Spell Damage","35% increased Critical Spell Damage Bonus","33% increased Cast Speed"]},
         {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["114% increased Lightning Damage","117% increased Spell Damage","39% increased Critical Spell Damage Bonus"]},
         {"id":"global-crit-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["114% increased Lightning Damage","117% increased Spell Damage","39% increased Global Critical Damage Bonus","34% increased Cast Speed"]},

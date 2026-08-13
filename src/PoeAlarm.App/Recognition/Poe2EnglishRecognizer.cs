@@ -200,18 +200,13 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             _pendingNoMatch = null;
             _confirmedNoMatch = null;
 
-            if (_confirmedBatchNoMatch is { } confirmed &&
-                confirmed.Fingerprint == fingerprint &&
-                string.Equals(confirmed.TargetKey, targetKey, StringComparison.Ordinal))
+            if (TryReuseConfirmedBatchEvidence(
+                    _confirmedBatchNoMatch,
+                    fingerprint,
+                    targetKey) is { } cachedConfirmation)
             {
                 _pendingBatchRecovery = null;
-                return confirmed.Result with
-                {
-                    PreprocessingElapsed = TimeSpan.Zero,
-                    RecognitionElapsed = TimeSpan.Zero,
-                    WasCached = true,
-                    RequiresRescan = false,
-                };
+                return cachedConfirmation;
             }
 
             var confirmingSameFrame = _pendingBatchNoMatch is { } pending &&
@@ -229,7 +224,6 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 .RecognizeAsync(frame, targetSet, cancellationToken)
                 .ConfigureAwait(false);
             _batchPrimaryPassCount++;
-            var hasStrictTarget = HasAnyStrictTarget(result.Lines, targetSet);
             var batchRecovery = confirmingSameFrame && _pendingBatchRecovery is not null
                 ? _pendingBatchRecovery
                 : await TryRecoverLocalizedBandsAsync(
@@ -244,13 +238,20 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 AssistedObservations = batchRecovery.Assisted,
                 CandidateEvidence = SelectBatchCandidateEvidence(
                     confirmingSameFrame,
-                    batchRecovery.Candidates),
+                    result.BatchCandidateEvidence
+                        .Concat(batchRecovery.Candidates)
+                        .GroupBy(static candidate =>
+                            $"{candidate.PhysicalBandId}\n{candidate.CandidateTarget}",
+                            StringComparer.Ordinal)
+                        .Select(static group => group.First())
+                        .ToArray()),
+                // POE2 assisted observations use the poe2: band namespace. Re-project the
+                // structured Windows lines into that same namespace so a primary transcript and
+                // its localized alternative remain one physical modifier for one-to-one rules.
                 PhysicalLines = CreatePhysicalLineMap(
                     result.Lines,
                     windows.LastRecognizedBands),
             };
-            hasStrictTarget |= batchRecovery.Assisted.Count > 0;
-
             if (!confirmingSameFrame)
             {
                 // A lexical target can still fail a numeric constraint or an AtLeast group in
@@ -281,11 +282,13 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 TargetAssistedMatch = null,
                 RequiresRescan = false,
             };
-            // A strict target can still fail a numeric constraint or AtLeast group in the caller.
-            // Cache only a lexical non-match; a candidate frame must remain re-evaluable.
-            _confirmedBatchNoMatch = hasStrictTarget
-                ? null
-                : new ConfirmedNoMatch(fingerprint, targetKey, final);
+            // This result is already the independent confirmation for this fingerprint and
+            // target set. Cache the complete evidence even when a lexical target is present:
+            // numeric constraints and result groups are evaluated by the caller on every scan,
+            // so re-running both OCR engines cannot change that decision while the frame stays
+            // identical. Keeping the final evidence avoids a continuous two-engine loop on an
+            // ordinary item that contains one target word but misses its roll/group threshold.
+            _confirmedBatchNoMatch = new ConfirmedNoMatch(fingerprint, targetKey, final);
             return final;
         }
         finally
@@ -430,12 +433,13 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             .Select(static group => new BatchRecoveryBandJob(
                 group.First().Band,
                 group.Select(static item => item.Target).ToArray()))
-            .Take(2)
             .ToArray();
         if (jobs.Length == 0)
         {
             return BatchLocalizedRecovery.Empty;
         }
+
+        var plan = BoundedLocalizedRecoveryPlanner.Plan(jobs, maximumWorkUnits: 2);
 
         PaddleCtcSession session;
         try
@@ -448,13 +452,18 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
         }
         catch
         {
-            return BatchLocalizedRecovery.Empty;
+            // Windows already localized conservative target-like rows. If the independent
+            // verifier is unavailable, preserve every one as uncertainty instead of converting
+            // a verifier failure into an authoritative NoMatch.
+            var unavailableCandidates = new List<OcrCandidateEvidence>();
+            AddUnverifiedCandidateEvidence(unavailableCandidates, jobs);
+            return new BatchLocalizedRecovery([], unavailableCandidates, TimeSpan.Zero);
         }
 
         var watch = Stopwatch.StartNew();
         var assisted = new List<OcrAssistedObservation>();
         var candidates = new List<OcrCandidateEvidence>();
-        foreach (var job in jobs)
+        foreach (var job in plan.WorkItems)
         {
             _batchLocalizedWorkUnitCount++;
             cancellationToken.ThrowIfCancellationRequested();
@@ -491,8 +500,33 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             }
         }
 
+        // The expensive verifier remains bounded, but every conservative Windows-localized band
+        // stays visible to Guarded. Silently dropping item 3+ would turn an unverified target-like
+        // row into an unsafe NoMatch.
+        AddUnverifiedCandidateEvidence(candidates, plan.DeferredItems);
+
         watch.Stop();
         return new BatchLocalizedRecovery(assisted, candidates, watch.Elapsed);
+    }
+
+    private static void AddUnverifiedCandidateEvidence(
+        ICollection<OcrCandidateEvidence> candidates,
+        IEnumerable<BatchRecoveryBandJob> jobs)
+    {
+        foreach (var job in jobs)
+        {
+            var bandId = CreateBandId(job.Band.Frame);
+            foreach (var target in job.Targets)
+            {
+                candidates.Add(new OcrCandidateEvidence(
+                    bandId,
+                    string.Join(' ', job.Band.Lines),
+                    target.Template.Text,
+                    OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                    job.Band.Frame.SourceTop,
+                    job.Band.Frame.SourceBottom));
+            }
+        }
     }
 
     private static IReadOnlyList<OcrPhysicalLine> CreatePhysicalLineMap(
@@ -586,10 +620,21 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
         }));
     }
 
-    internal static bool HasAnyStrictTarget(
-        IReadOnlyList<string> lines,
-        IReadOnlyList<FullLineAffixMatcher> targets) =>
-        targets.Any(target => target.TryFindMatch(lines, out _));
+    internal static OcrRecognitionResult? TryReuseConfirmedBatchEvidence(
+        ConfirmedNoMatch? cache,
+        ulong fingerprint,
+        string targetKey) =>
+        cache is ConfirmedNoMatch confirmed &&
+        confirmed.Fingerprint == fingerprint &&
+        string.Equals(confirmed.TargetKey, targetKey, StringComparison.Ordinal)
+            ? confirmed.Result with
+            {
+                PreprocessingElapsed = TimeSpan.Zero,
+                RecognitionElapsed = TimeSpan.Zero,
+                WasCached = true,
+                RequiresRescan = false,
+            }
+            : null;
 
     private static bool HasOneLocalizedLexicalCandidate(
         IReadOnlyList<string> lines,
@@ -712,7 +757,7 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
         string TargetKey,
         bool RecoveryAttempted);
 
-    private sealed record ConfirmedNoMatch(
+    internal sealed record ConfirmedNoMatch(
         ulong Fingerprint,
         string TargetKey,
         OcrRecognitionResult Result);
