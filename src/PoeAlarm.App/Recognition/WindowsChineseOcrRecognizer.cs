@@ -814,6 +814,7 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
 
     private static string NormalizeChineseNumericDashes(string text)
     {
+        text = OcrNumericPresentationNormalizer.Normalize(text);
         var firstCandidate = text.IndexOf('一');
         if (firstCandidate < 0)
         {

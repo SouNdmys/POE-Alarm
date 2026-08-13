@@ -139,9 +139,9 @@
                       SelectedValuePath="Tag"
                       SelectionChanged="OnRuleModeChanged"
                       Style="{StaticResource GlassComboBox}"
-                      ToolTip="快速模式保留原有整句匹配；多词缀模式支持多个可接受结果与数值约束。">
-              <ComboBoxItem x:Name="QuickRuleModeOption" Tag="Quick" Content="快速模式（单条整句）" />
-              <ComboBoxItem x:Name="StructuredRuleModeOption" Tag="Structured" Content="多词缀命中模式" />
+                      ToolTip="只需监控一条词缀时选单词缀；需要多种停手结果或指定数值时选组合规则。">
+              <ComboBoxItem x:Name="QuickRuleModeOption" Tag="Quick" Content="单词缀" />
+              <ComboBoxItem x:Name="StructuredRuleModeOption" Tag="Structured" Content="多词缀组合" />
             </ComboBox>
           </Grid>
 
@@ -189,8 +189,8 @@
                            Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="12"
                            TextWrapping="Wrap"
-                           Text="命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。"
-                           ToolTip="命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。" />
+                           Text="命中任意一种停手结果就会报警。同一条词缀不会重复计数。"
+                           ToolTip="命中任意一种停手结果就会报警。同一条词缀不会重复计数。" />
               </StackPanel>
               <Button x:Name="EditStructuredRulesButton"
                       Grid.Column="1"
@@ -213,15 +213,15 @@
                        Margin="0,0,12,0"
                        VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}"
-                       Text="识别语言" />
+                       Text="游戏语言" />
             <ComboBox x:Name="OcrLanguageComboBox"
                       Grid.Column="1"
                       SelectedIndex="0"
                       SelectedValuePath="Tag"
                       SelectionChanged="OnOcrLanguageChanged"
                       Style="{StaticResource GlassComboBox}"
-                      ToolTip="English 使用 Windows OCR；繁體中文优先使用 Windows 中文 OCR，必要时自动使用内置兼容引擎。">
-              <ComboBoxItem x:Name="EnglishOcrOption" Tag="en" Content="English（稳定）" />
+                      ToolTip="请选择游戏内词缀使用的语言。这与程序界面语言相互独立。">
+              <ComboBoxItem x:Name="EnglishOcrOption" Tag="en" Content="英文（稳定）" />
               <ComboBoxItem x:Name="TraditionalChineseOcrOption" Tag="zh-TW" Content="繁體中文（快速识别）" />
             </ComboBox>
           </Grid>
@@ -311,16 +311,16 @@
                        Margin="0,0,12,0"
                        VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}"
-                       Text="保护策略" />
+                       Text="点击保护" />
             <ComboBox x:Name="MonitoringPolicyComboBox"
                       Grid.Column="1"
                       SelectedIndex="0"
                       SelectedValuePath="Tag"
                       SelectionChanged="OnMonitoringPolicyChanged"
                       Style="{StaticResource GlassComboBox}"
-                      ToolTip="快速模式维持原有低延迟；Mirror Tier 安全会在画面变化后拦住下一次点击，直到规则判定完成。">
-              <ComboBoxItem x:Name="FastMonitoringPolicyOption" Tag="Fast" Content="快速保护（原模式）" />
-              <ComboBoxItem x:Name="GuardedMonitoringPolicyOption" Tag="Guarded" Content="Mirror Tier 安全" />
+                      ToolTip="快速模式适合日常连点；谨慎模式会在每次制作后先拦住下一次点击，确认结果后再放行。">
+              <ComboBoxItem x:Name="FastMonitoringPolicyOption" Tag="Fast" Content="快速模式" />
+              <ComboBoxItem x:Name="GuardedMonitoringPolicyOption" Tag="Guarded" Content="谨慎模式" />
             </ComboBox>
           </Grid>
 
@@ -328,7 +328,7 @@
                      Margin="2,0,2,10"
                      Foreground="{StaticResource TextSecondaryBrush}"
                      FontSize="12"
-                     Text="快速保护维持 0.6.1 的低延迟识别与点击行为。"
+                     Text="保持低延迟识别，适合日常高频制作。"
                      TextWrapping="Wrap" />
 
           <Grid>
@@ -415,7 +415,7 @@
                     IsExpanded="False"
                     Style="{StaticResource GlassExpander}">
             <Expander.Header>
-              <TextBlock x:Name="OcrDetailsHeaderText" Text="识别详情" />
+              <TextBlock x:Name="OcrDetailsHeaderText" Text="识别到的文字" />
             </Expander.Header>
             <StackPanel Margin="10,0,0,1">
               <TextBlock x:Name="LatencyText"
@@ -430,7 +430,7 @@
                        TextWrapping="Wrap"
                        VerticalScrollBarVisibility="Auto"
                        Style="{StaticResource GlassReadOnlyTextBox}"
-                       Text="OCR 识别到的物理行会显示在这里。" />
+                       Text="识别到的词缀文字会显示在这里。" />
             </StackPanel>
           </Expander>
         </StackPanel>

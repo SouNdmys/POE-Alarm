@@ -28,6 +28,15 @@ public interface IAlertService : IDisposable
     /// </summary>
     event EventHandler<GuardedAlertFailOpenEventArgs>? GuardedFailOpen;
 
+    /// <summary>
+    /// Raised after the one allowed Guarded crafting click has delivered its final button-up and
+    /// the native gate has atomically returned to blocking subsequent clicks.
+    /// </summary>
+    event EventHandler? GuardedCausativeClickCompleted;
+
+    /// <summary>Raised after the one allowed Guarded button-down has reached the game.</summary>
+    event EventHandler? GuardedCausativeClickStarted;
+
     /// <summary>Gets whether an alert is currently latched.</summary>
     bool IsActive { get; }
 

@@ -67,6 +67,8 @@ internal sealed class PendingMouseInputGuard : IDisposable
     /// </summary>
     public event EventHandler? CausativeClickCompleted;
 
+    public event EventHandler? CausativeClickStarted;
+
     internal bool IsInstalled => Volatile.Read(ref _hookHandle) != IntPtr.Zero;
 
     internal MouseInputGuardMode Mode => _state.Mode;
@@ -360,23 +362,32 @@ internal sealed class PendingMouseInputGuard : IDisposable
         // Guarded owner. A slow subscriber therefore cannot delay the exact release we promised
         // to pass through. The packed state was already changed to Guarding by the successful CAS.
         var nextHookResult = CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        if (decision.CausativeClickStarted)
+        {
+            RaiseCausativeClickEvent(
+                CausativeClickStarted,
+                MouseInputGuardMode.WaitingForExistingRelease);
+        }
         if (decision.CausativeClickCompleted)
         {
-            RaiseCausativeClickCompleted();
+            RaiseCausativeClickEvent(
+                CausativeClickCompleted,
+                MouseInputGuardMode.Guarding);
         }
 
         return nextHookResult;
     }
 
-    private void RaiseCausativeClickCompleted()
+    private void RaiseCausativeClickEvent(
+        EventHandler? handlers,
+        MouseInputGuardMode expectedMode)
     {
         if (Volatile.Read(ref _stopAfterDrain) != 0 ||
-            _state.Mode != MouseInputGuardMode.Guarding)
+            _state.Mode != expectedMode)
         {
             return;
         }
 
-        var handlers = CausativeClickCompleted;
         if (handlers is null)
         {
             return;
@@ -576,7 +587,8 @@ internal static class MouseButtonBits
 internal readonly record struct MouseInputGuardDecision(
     bool Suppress,
     bool BecameReleased,
-    bool CausativeClickCompleted = false);
+    bool CausativeClickCompleted = false,
+    bool CausativeClickStarted = false);
 
 /// <summary>
 /// Lock-free packed state used by the low-level callback. Keeping the transition logic free of
@@ -733,6 +745,7 @@ internal sealed class MouseInputGuardStateMachine
             var suppress = false;
             var becameReleased = false;
             var causativeClickCompleted = false;
+            var causativeClickStarted = false;
 
             if (isDown)
             {
@@ -744,6 +757,7 @@ internal sealed class MouseInputGuardStateMachine
                     // puts the gate back into Guarding.
                     mode = MouseInputGuardMode.WaitingForExistingRelease;
                     causativeCycle = true;
+                    causativeClickStarted = true;
                 }
                 else if (mode is MouseInputGuardMode.Guarding or
                          MouseInputGuardMode.DrainingToAwait ||
@@ -796,7 +810,8 @@ internal sealed class MouseInputGuardStateMachine
                 return new MouseInputGuardDecision(
                     suppress,
                     becameReleased,
-                    causativeClickCompleted);
+                    causativeClickCompleted,
+                    causativeClickStarted);
             }
         }
     }

@@ -5,6 +5,7 @@ using PoeAlarm.App.Capture;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.App.Replay;
 using PoeAlarm.Core.Matching;
+using PoeAlarm.Core.Rules;
 
 const string defaultScreenshot =
     @"C:\Users\SouNd\AppData\Local\Temp\codex-clipboard-446a1078-4b4d-4e80-bc85-71221b93a242.png";
@@ -42,6 +43,24 @@ if (legacyManifestArgument >= 0)
 
 var useTraditionalChinese = args.Any(argument =>
     argument.Equals("--zh", StringComparison.OrdinalIgnoreCase));
+var structuredNumericArgument = Array.FindIndex(args, argument =>
+    argument.Equals("--structured-at-least", StringComparison.OrdinalIgnoreCase));
+decimal? structuredMinimum = null;
+var parsedMinimum = 0m;
+if (structuredNumericArgument >= 0 &&
+    (structuredNumericArgument + 1 >= args.Length ||
+     !decimal.TryParse(
+         args[structuredNumericArgument + 1],
+         System.Globalization.NumberStyles.Number,
+         System.Globalization.CultureInfo.InvariantCulture,
+         out parsedMinimum)))
+{
+    throw new ArgumentException("--structured-at-least requires an invariant decimal value.");
+}
+else if (structuredNumericArgument >= 0)
+{
+    structuredMinimum = parsedMinimum;
+}
 var scaleArgument = Array.FindIndex(args, argument =>
     argument.Equals("--scale", StringComparison.OrdinalIgnoreCase));
 var ocrScale = 1;
@@ -62,6 +81,12 @@ for (var index = 0; index < args.Length; index++)
     }
 
     if (args[index].Equals("--scale", StringComparison.OrdinalIgnoreCase))
+    {
+        index++;
+        continue;
+    }
+
+    if (args[index].Equals("--structured-at-least", StringComparison.OrdinalIgnoreCase))
     {
         index++;
         continue;
@@ -104,6 +129,31 @@ Console.WriteLine($"Recognizer: {(recognizer is WindowsChineseOcrRecognizer chin
     ? chinese.RecognizerLanguageTag
     : ((WindowsOcrRecognizer)recognizer).RecognizerLanguageTag)}");
 var analyzer = new ScreenshotAffixAnalyzer(recognizer);
+if (structuredMinimum is { } minimum)
+{
+    var rules = RuleCompiler.Compile(new RuleSetDefinition(
+        "screenshot probe",
+        [
+            new AcceptableResultGroup(
+                "result",
+                ResultGroupMode.Any,
+                [
+                    new AffixCondition(
+                        "target",
+                        template,
+                        [NumericConstraint.AtLeast(minimum)]),
+                ]),
+        ]));
+    var structuredResult = await analyzer.AnalyzeRulesAsync(screenshot, rules, crop);
+    var condition = structuredResult.Evaluation.Groups.Single().Conditions.Single();
+    Console.WriteLine(
+        $"Structured rule: match={structuredResult.IsMatch}; " +
+        $"observed=\"{condition.ObservedText}\"; " +
+        $"values={string.Join(',', condition.ActualValues.Select(value =>
+            value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "missing"))}");
+    return structuredResult.IsMatch ? 0 : 1;
+}
+
 var result = await analyzer.AnalyzeAsync(screenshot, template, crop);
 var unchangedResult = await recognizer.RecognizeAsync(
     diagnosticFrame,

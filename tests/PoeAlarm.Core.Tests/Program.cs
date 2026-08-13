@@ -298,6 +298,13 @@ static void TraditionalChineseNumericSlotsNormalize()
 
     var flatValueMatcher = new FullLineAffixMatcher("增加 (10—20) 點護甲");
     True(flatValueMatcher.IsMatch("增加17點護甲"));
+
+    var decimalMatcher = new FullLineAffixMatcher("+(3.11—3.8)%暴擊率");
+    True(decimalMatcher.IsMatch("+ 3 · 73 % 暴 擊 率"));
+    True(decimalMatcher.IsMatch("+3 ∙ 73%暴擊率"));
+
+    var listSeparatorMatcher = new FullLineAffixMatcher("增加 (3—4) 點力量和 (73—74) 點敏捷");
+    True(listSeparatorMatcher.IsMatch("增加 3・73 點力量和敏捷") is false);
 }
 
 static void TraditionalChineseSpacingAndWrappingNormalize()

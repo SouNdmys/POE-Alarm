@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("group maximum is enforced", GroupMaximumIsEnforced),
     ("condition maximum is enforced", ConditionMaximumIsEnforced),
     ("empty rule set receives an editable starter group", EmptyRuleSetGetsStarterGroup),
+    ("player-facing copy stays plain and language-consistent", PlayerFacingCopyStaysPlain),
 };
 
 var passed = 0;
@@ -226,6 +227,23 @@ static void EmptyRuleSetGetsStarterGroup()
     Assert(editor.Groups.Count == 1, "Starter result was not added.");
     Assert(editor.Groups[0].Conditions.Count == 1, "Starter condition was not added.");
     Assert(!editor.TryBuildDefinition(out _, out _), "An empty starter template was saved.");
+}
+
+static void PlayerFacingCopyStaysPlain()
+{
+    var chinese = RuleEditorStrings.For(isEnglish: false);
+    var english = RuleEditorStrings.For(isEnglish: true);
+
+    Assert(!chinese.DisplayValueWarning.Contains("Catalyst", StringComparison.OrdinalIgnoreCase) &&
+           !chinese.DisplayValueWarning.Contains("tooltip", StringComparison.OrdinalIgnoreCase) &&
+           !chinese.OrExplanation.Contains("OR", StringComparison.Ordinal),
+        "Chinese rule-editor copy contains avoidable English jargon.");
+    Assert(!chinese.TemplateHelp.Contains("数值槽", StringComparison.Ordinal) &&
+           !chinese.NumericSlotsFoundFormat.Contains("数值槽", StringComparison.Ordinal),
+        "Chinese rule-editor copy exposes the numeric-slot implementation term.");
+    Assert(!english.DisplayValueWarning.Any(character =>
+            character is >= '\u3400' and <= '\u9FFF'),
+        "English rule-editor copy contains Chinese characters.");
 }
 
 static RuleSetDefinition RuleSet(AcceptableResultGroup group) =>
