@@ -59,16 +59,6 @@ internal sealed class PendingMouseInputGuard : IDisposable
         _hookProcedure = HookProcedure;
     }
 
-    /// <summary>
-    /// Raised on the low-level hook thread after the one deliberately pass-through causative
-    /// click has delivered its final button-up and the gate has atomically returned to Guarding.
-    /// Handlers must return promptly. One failing handler is isolated from every other handler
-    /// and from the native hook callback.
-    /// </summary>
-    public event EventHandler? CausativeClickCompleted;
-
-    public event EventHandler? CausativeClickStarted;
-
     internal bool IsInstalled => Volatile.Read(ref _hookHandle) != IntPtr.Zero;
 
     internal MouseInputGuardMode Mode => _state.Mode;
@@ -101,32 +91,6 @@ internal sealed class PendingMouseInputGuard : IDisposable
             _lifecycleGeneration++;
             Volatile.Write(ref _stopAfterDrain, 0);
             _state.Arm();
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Keeps the hook installed while allowing exactly one future physical button cycle through
-    /// to the game. The final button-up of that cycle atomically returns the hook to Guarding, so
-    /// a second click cannot slip through while capture notices the first click's changed frame.
-    /// A button already held when this method is called is drained as pre-existing input and does
-    /// not count as the allowed causative click.
-    /// </summary>
-    public bool AwaitNextCausativeClick()
-    {
-        lock (_lifecycleGate)
-        {
-            if (_disposed || !EnsureInstalledLocked())
-            {
-                return false;
-            }
-
-            // Invalidate a pending idle uninstall or drain fail-open. Awaiting a user click is an
-            // intentional, unbounded pass-through phase; the upper Guarded owner starts its
-            // decision watchdog only after CausativeClickCompleted.
-            _lifecycleGeneration++;
-            Volatile.Write(ref _stopAfterDrain, 0);
-            _state.AwaitNextCausativeClick();
             return true;
         }
     }
@@ -339,9 +303,8 @@ internal sealed class PendingMouseInputGuard : IDisposable
             case WmMouseWheel:
             case WmMouseHorizontalWheel:
                 decision = new MouseInputGuardDecision(
-                    _state.ShouldSuppressWheel,
-                    BecameReleased: false,
-                    CausativeClickCompleted: false);
+                    _state.Mode == MouseInputGuardMode.Guarding,
+                    BecameReleased: false);
                 break;
             default:
                 return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
@@ -353,58 +316,9 @@ internal sealed class PendingMouseInputGuard : IDisposable
             ScheduleIdleUninstall(generation);
         }
 
-        if (decision.Suppress)
-        {
-            return new IntPtr(1);
-        }
-
-        // Let the causative Up traverse the rest of the native hook chain before notifying the
-        // Guarded owner. A slow subscriber therefore cannot delay the exact release we promised
-        // to pass through. The packed state was already changed to Guarding by the successful CAS.
-        var nextHookResult = CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
-        if (decision.CausativeClickStarted)
-        {
-            RaiseCausativeClickEvent(
-                CausativeClickStarted,
-                MouseInputGuardMode.WaitingForExistingRelease);
-        }
-        if (decision.CausativeClickCompleted)
-        {
-            RaiseCausativeClickEvent(
-                CausativeClickCompleted,
-                MouseInputGuardMode.Guarding);
-        }
-
-        return nextHookResult;
-    }
-
-    private void RaiseCausativeClickEvent(
-        EventHandler? handlers,
-        MouseInputGuardMode expectedMode)
-    {
-        if (Volatile.Read(ref _stopAfterDrain) != 0 ||
-            _state.Mode != expectedMode)
-        {
-            return;
-        }
-
-        if (handlers is null)
-        {
-            return;
-        }
-
-        foreach (EventHandler handler in handlers.GetInvocationList())
-        {
-            try
-            {
-                handler(this, EventArgs.Empty);
-            }
-            catch
-            {
-                // A subscriber must never unwind through WH_MOUSE_LL. The Guarded service has
-                // its own fail-open watchdog for a notification it cannot act upon.
-            }
-        }
+        return decision.Suppress
+            ? new IntPtr(1)
+            : CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
     }
 
     private void ForceReleaseAndStop()
@@ -569,9 +483,6 @@ internal enum MouseInputGuardMode
     WaitingForExistingRelease,
     Guarding,
     Draining,
-    AwaitingCausativeClick,
-    WaitingForExistingReleaseThenAwait,
-    DrainingToAwait,
 }
 
 internal static class MouseButtonBits
@@ -584,11 +495,7 @@ internal static class MouseButtonBits
     public const int All = Left | Right | Middle | X1 | X2;
 }
 
-internal readonly record struct MouseInputGuardDecision(
-    bool Suppress,
-    bool BecameReleased,
-    bool CausativeClickCompleted = false,
-    bool CausativeClickStarted = false);
+internal readonly record struct MouseInputGuardDecision(bool Suppress, bool BecameReleased);
 
 /// <summary>
 /// Lock-free packed state used by the low-level callback. Keeping the transition logic free of
@@ -599,9 +506,8 @@ internal sealed class MouseInputGuardStateMachine
     private const int PhysicalShift = 0;
     private const int SuppressedShift = 8;
     private const int ModeShift = 16;
-    private const int CausativeCycleShift = 24;
     private const int ButtonMask = MouseButtonBits.All;
-    private const int ModeMask = 0x7;
+    private const int ModeMask = 0x3;
 
     private int _packedState;
 
@@ -611,14 +517,11 @@ internal sealed class MouseInputGuardStateMachine
 
     public int SuppressedButtons => DecodeSuppressed(Volatile.Read(ref _packedState));
 
-    public bool ShouldSuppressWheel => SuppressesNewInput(Mode);
-
     public void InitializeReleased(int physicalButtons) =>
         Volatile.Write(ref _packedState, Pack(
             physicalButtons & ButtonMask,
             suppressed: 0,
-            MouseInputGuardMode.Released,
-            causativeCycle: false));
+            MouseInputGuardMode.Released));
 
     public void Arm()
     {
@@ -637,50 +540,7 @@ internal sealed class MouseInputGuardStateMachine
             var nextMode = (physical & ~suppressed) != 0
                 ? MouseInputGuardMode.WaitingForExistingRelease
                 : MouseInputGuardMode.Guarding;
-            var next = Pack(
-                physical,
-                suppressed,
-                nextMode,
-                causativeCycle: false);
-            if (Interlocked.CompareExchange(ref _packedState, next, current) == current)
-            {
-                return;
-            }
-        }
-    }
-
-    public void AwaitNextCausativeClick()
-    {
-        while (true)
-        {
-            var current = Volatile.Read(ref _packedState);
-            var mode = DecodeMode(current);
-            var causativeCycle = DecodeCausativeCycle(current);
-
-            // Repeated upper-layer transitions are deliberately idempotent once the next cycle
-            // is already pending. If a completed decision races the currently allowed causative
-            // chord, reclassify that chord as pre-existing: its remaining Up still passes, then a
-            // fresh complete causative cycle is awaited for the next decision.
-            if (mode is MouseInputGuardMode.AwaitingCausativeClick or
-                MouseInputGuardMode.WaitingForExistingReleaseThenAwait or
-                MouseInputGuardMode.DrainingToAwait)
-            {
-                return;
-            }
-
-            var physical = DecodePhysical(current);
-            var suppressed = DecodeSuppressed(current);
-            var nextMode = suppressed != 0
-                ? MouseInputGuardMode.DrainingToAwait
-                : physical != 0 ||
-                  (mode == MouseInputGuardMode.WaitingForExistingRelease && causativeCycle)
-                    ? MouseInputGuardMode.WaitingForExistingReleaseThenAwait
-                    : MouseInputGuardMode.AwaitingCausativeClick;
-            var next = Pack(
-                physical,
-                suppressed,
-                nextMode,
-                causativeCycle: false);
+            var next = Pack(physical, suppressed, nextMode);
             if (Interlocked.CompareExchange(ref _packedState, next, current) == current)
             {
                 return;
@@ -699,11 +559,7 @@ internal sealed class MouseInputGuardStateMachine
             var nextMode = suppressed == 0
                 ? MouseInputGuardMode.Released
                 : MouseInputGuardMode.Draining;
-            var next = Pack(
-                physical,
-                suppressed,
-                nextMode,
-                causativeCycle: false);
+            var next = Pack(physical, suppressed, nextMode);
             if (Interlocked.CompareExchange(ref _packedState, next, current) == current)
             {
                 return nextMode == MouseInputGuardMode.Released;
@@ -716,11 +572,7 @@ internal sealed class MouseInputGuardStateMachine
         while (true)
         {
             var current = Volatile.Read(ref _packedState);
-            var next = Pack(
-                DecodePhysical(current),
-                suppressed: 0,
-                MouseInputGuardMode.Released,
-                causativeCycle: false);
+            var next = Pack(DecodePhysical(current), suppressed: 0, MouseInputGuardMode.Released);
             if (Interlocked.CompareExchange(ref _packedState, next, current) == current)
             {
                 return;
@@ -741,27 +593,13 @@ internal sealed class MouseInputGuardStateMachine
             var physical = DecodePhysical(current);
             var suppressed = DecodeSuppressed(current);
             var mode = DecodeMode(current);
-            var causativeCycle = DecodeCausativeCycle(current);
             var suppress = false;
             var becameReleased = false;
-            var causativeClickCompleted = false;
-            var causativeClickStarted = false;
 
             if (isDown)
             {
                 physical |= button;
-                if (mode == MouseInputGuardMode.AwaitingCausativeClick)
-                {
-                    // This is the one cycle explicitly allowed through to POE. Every button in a
-                    // chord remains pass-through until the last physical Up; that Up atomically
-                    // puts the gate back into Guarding.
-                    mode = MouseInputGuardMode.WaitingForExistingRelease;
-                    causativeCycle = true;
-                    causativeClickStarted = true;
-                }
-                else if (mode is MouseInputGuardMode.Guarding or
-                         MouseInputGuardMode.DrainingToAwait ||
-                         (suppressed & button) != 0)
+                if (mode == MouseInputGuardMode.Guarding || (suppressed & button) != 0)
                 {
                     suppressed |= button;
                     suppress = true;
@@ -780,54 +618,26 @@ internal sealed class MouseInputGuardStateMachine
                     (physical & ~suppressed) == 0)
                 {
                     mode = MouseInputGuardMode.Guarding;
-                    causativeClickCompleted = causativeCycle;
-                    causativeCycle = false;
-                }
-                else if (mode == MouseInputGuardMode.WaitingForExistingReleaseThenAwait &&
-                         (physical & ~suppressed) == 0)
-                {
-                    mode = MouseInputGuardMode.AwaitingCausativeClick;
-                    causativeCycle = false;
                 }
                 else if (mode == MouseInputGuardMode.Draining && suppressed == 0)
                 {
                     mode = MouseInputGuardMode.Released;
                     becameReleased = true;
-                    causativeCycle = false;
-                }
-                else if (mode == MouseInputGuardMode.DrainingToAwait && suppressed == 0)
-                {
-                    mode = physical == 0
-                        ? MouseInputGuardMode.AwaitingCausativeClick
-                        : MouseInputGuardMode.WaitingForExistingReleaseThenAwait;
-                    causativeCycle = false;
                 }
             }
 
-            var next = Pack(physical, suppressed, mode, causativeCycle);
+            var next = Pack(physical, suppressed, mode);
             if (Interlocked.CompareExchange(ref _packedState, next, current) == current)
             {
-                return new MouseInputGuardDecision(
-                    suppress,
-                    becameReleased,
-                    causativeClickCompleted,
-                    causativeClickStarted);
+                return new MouseInputGuardDecision(suppress, becameReleased);
             }
         }
     }
 
-    private static bool SuppressesNewInput(MouseInputGuardMode mode) =>
-        mode is MouseInputGuardMode.Guarding or MouseInputGuardMode.DrainingToAwait;
-
-    private static int Pack(
-        int physical,
-        int suppressed,
-        MouseInputGuardMode mode,
-        bool causativeCycle) =>
+    private static int Pack(int physical, int suppressed, MouseInputGuardMode mode) =>
         ((physical & ButtonMask) << PhysicalShift) |
         ((suppressed & ButtonMask) << SuppressedShift) |
-        (((int)mode & ModeMask) << ModeShift) |
-        ((causativeCycle ? 1 : 0) << CausativeCycleShift);
+        (((int)mode & ModeMask) << ModeShift);
 
     private static int DecodePhysical(int state) => (state >> PhysicalShift) & ButtonMask;
 
@@ -835,7 +645,4 @@ internal sealed class MouseInputGuardStateMachine
 
     private static MouseInputGuardMode DecodeMode(int state) =>
         (MouseInputGuardMode)((state >> ModeShift) & ModeMask);
-
-    private static bool DecodeCausativeCycle(int state) =>
-        ((state >> CausativeCycleShift) & 1) != 0;
 }

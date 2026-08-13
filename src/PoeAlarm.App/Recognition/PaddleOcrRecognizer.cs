@@ -262,17 +262,9 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
             progress.Bands,
             frame.Width,
             out var assisted,
-            out var physicalLines,
-            out var candidateEvidence);
+            out var physicalLines);
         var requiresRescan = progress.NextBandIndex < preparedBands.Count ||
                              progress.RecoveryQueue.Count > 0;
-        // Near-target evidence is meaningful only after every bounded verifier has completed.
-        // Emitting it during a progressive pass could make Guarded pause on a row that the next
-        // slice would have strictly recovered.
-        if (requiresRescan)
-        {
-            candidateEvidence = [];
-        }
         var result = new OcrRecognitionResult(
             lines,
             preprocessingElapsed,
@@ -281,8 +273,7 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
             TargetAssistedMatch: null,
             RequiresRescan: requiresRescan,
             AssistedObservations: assisted,
-            PhysicalLines: physicalLines,
-            CandidateEvidence: candidateEvidence);
+            PhysicalLines: physicalLines);
         if (!requiresRescan)
         {
             _batchProgress = null;
@@ -763,12 +754,10 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
         IReadOnlyList<BatchBandRecognition?> recognitions,
         int roiWidth,
         out IReadOnlyList<OcrAssistedObservation> assisted,
-        out IReadOnlyList<OcrPhysicalLine> physicalLines,
-        out IReadOnlyList<OcrCandidateEvidence> candidateEvidence)
+        out IReadOnlyList<OcrPhysicalLine> physicalLines)
     {
         var lines = new List<string>(preparedBands.Count * 2);
         var assistedItems = new List<OcrAssistedObservation>();
-        var candidateItems = new List<OcrCandidateEvidence>();
         var physicalItems = new List<OcrPhysicalLine>();
         int? previousBottom = null;
         var previousHeight = 0;
@@ -786,25 +775,6 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
         {
             var prepared = preparedBands[bandIndex];
             var recognized = recognitions[bandIndex];
-            if (prepared.IsFallback && !includedBands.Contains(bandIndex) && recognized is not null)
-            {
-                // The full ROI overlaps one or more regular bands. Never let it become another
-                // modifier, but preserve target-related support so Guarded pauses yellow rather
-                // than treating an ambiguous fallback-only hit as a safe NoMatch.
-                foreach (var target in recognized.Batch.TargetSupports
-                             .Where(static pair => pair.Value.ShapeCompatible ||
-                                                   pair.Value.StronglySupported))
-                {
-                    candidateItems.Add(new OcrCandidateEvidence(
-                        CreateBandId(prepared),
-                        recognized.Batch.Recognition.Text,
-                        target.Key,
-                        ClassifyBatchCandidate(recognized.Batch.Recognition.Text, target.Key),
-                        prepared.SourceTop,
-                        prepared.SourceBottom));
-                }
-            }
-
             if (!includedBands.Contains(bandIndex) || recognized is null ||
                 string.IsNullOrWhiteSpace(recognized.Batch.Recognition.Text))
             {
@@ -851,21 +821,6 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
                     prepared.SourceTop,
                     prepared.SourceBottom));
             }
-
-
-            foreach (var target in recognized.Batch.TargetSupports
-                         .Where(static pair => pair.Value.ShapeCompatible &&
-                                               !pair.Value.StronglySupported))
-            {
-                candidateItems.Add(new OcrCandidateEvidence(
-                    bandId,
-                    text,
-                    target.Key,
-                    ClassifyBatchCandidate(text, target.Key),
-                    prepared.SourceTop,
-                    prepared.SourceBottom));
-            }
-
             foreach (var segmented in recognized.SegmentedStrict)
             {
                 assistedItems.Add(new OcrAssistedObservation(
@@ -896,26 +851,7 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
             .Select(static group => group.First())
             .ToArray();
         physicalLines = physicalItems;
-        candidateEvidence = candidateItems;
         return lines;
-    }
-
-    private static OcrCandidateEvidenceKind ClassifyBatchCandidate(
-        string observed,
-        string canonicalTarget)
-    {
-        var actualNumeric = AffixCanonicalizer.Normalize(observed).Tokens.Count(static token =>
-            token.Kind != AffixTokenKind.Word);
-        var expectedNumeric = AffixCanonicalizer.Normalize(canonicalTarget).Tokens.Count(static token =>
-            token.Kind != AffixTokenKind.Word);
-        if (actualNumeric < expectedNumeric)
-        {
-            return OcrCandidateEvidenceKind.MissingNumericValue;
-        }
-
-        return actualNumeric > expectedNumeric
-            ? OcrCandidateEvidenceKind.ConflictingNumericValue
-            : OcrCandidateEvidenceKind.LocalizedLexicalCandidate;
     }
 
     private static string CreateBandId(PreparedFrame band) =>

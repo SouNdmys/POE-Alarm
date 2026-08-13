@@ -1,5 +1,4 @@
 using System.Globalization;
-using PoeAlarm.App.Monitoring.Policies;
 
 namespace PoeAlarm.App.Localization;
 
@@ -84,13 +83,6 @@ internal static class UiText
         SelectRegion = "框选装备提示区域",
         RegionEmpty = "尚未选择。游戏内悬停装备后按 Ctrl + Shift + F11 最方便。",
         RunSectionTitle = "3  运行",
-        MonitoringPolicyLabel = "点击保护",
-        MonitoringPolicyToolTip = "快速模式适合日常连点；谨慎模式会在每次制作后先拦住下一次点击，确认结果后再放行。",
-        FastMonitoringPolicy = "快速模式",
-        GuardedMonitoringPolicy = "谨慎模式",
-        FastMonitoringHint = "保持低延迟识别，适合日常高频制作。",
-        GuardedMonitoringHint = "每次制作后先拦住后续点击。结果无法确认时会显示黄色提示，由你检查后决定是否继续。",
-        GuardedMonitoringUnsupported = "当前游戏语言暂不支持谨慎模式，监控未启动。",
         StartMonitoring = "开始监控",
         StopMonitoring = "停止",
         AnalyzeScreenshot = "用截图测试",
@@ -144,18 +136,6 @@ internal static class UiText
         RegionUpdated = "监控区域已更新。",
         RegionSelectionCancelled = "已取消框选；监控保持停止。",
         MonitoringStarted = "正在监控；切回游戏后保持装备提示框位于所选区域。",
-        GuardedMonitoringStarted = "谨慎模式已启动；每次制作后会先检查结果，再允许继续点击。",
-        GuardedUncertainTitle = "结果不确定 · 已暂停点击",
-        GuardedUncertainInstruction = "请直接检查当前装备。确认可以继续才点“继续监控”；否则停止并人工处理。",
-        GuardedContinue = "我已检查，继续监控",
-        GuardedStop = "停止监控",
-        GuardedContinued = "已确认当前结果并恢复谨慎模式。",
-        GuardedStoppedForReview = "谨慎模式已停止，鼠标保护已解除。请检查当前装备。",
-        GuardedLexicalCandidateUnverified = "发现了相似词缀，但无法确认是否真的命中。",
-        GuardedNumericValueMissing = "发现了目标词缀，但数值没有读清。",
-        GuardedNumericValueConflict = "同一个数值的多次识别结果不一致。",
-        GuardedFrameUnstable = "装备提示框一直在变动，暂时无法确认结果。",
-        GuardedProtectionFailedTemplate = "谨慎模式遇到问题，监控已停止。请重新开始；如果仍然出现，请先改用快速模式。",
         FutureSettingsReadOnlyTemplate = "检测到更新版本的设置文件（版本 {0}）。程序已使用默认设置，不会覆盖原文件。",
         ScreenshotCancelled = "已取消截图分析；监控保持停止。",
         ScreenshotAnalyzing = "正在分析截图……",
@@ -256,13 +236,6 @@ internal static class UiText
         SelectRegion = "Select tooltip region",
         RegionEmpty = "Not selected. Hover the item in-game, then press Ctrl + Shift + F11.",
         RunSectionTitle = "3  Run",
-        MonitoringPolicyLabel = "Click protection",
-        MonitoringPolicyToolTip = "Fast mode is best for normal rapid crafting. Careful mode checks each result before allowing another click.",
-        FastMonitoringPolicy = "Fast mode",
-        GuardedMonitoringPolicy = "Careful mode",
-        FastMonitoringHint = "Low-latency recognition for normal rapid crafting.",
-        GuardedMonitoringHint = "After each craft, later clicks are blocked until the result is checked. A yellow notice asks you to review anything uncertain.",
-        GuardedMonitoringUnsupported = "Careful mode is not available for the current game language yet. Monitoring was not started.",
         StartMonitoring = "Start monitoring",
         StopMonitoring = "Stop",
         AnalyzeScreenshot = "Test a screenshot",
@@ -316,18 +289,6 @@ internal static class UiText
         RegionUpdated = "Monitoring region updated.",
         RegionSelectionCancelled = "Region selection cancelled; monitoring remains stopped.",
         MonitoringStarted = "Monitoring. Return to the game and keep the item tooltip inside the selected region.",
-        GuardedMonitoringStarted = "Careful mode is active. After each craft, the result is checked before another click is allowed.",
-        GuardedUncertainTitle = "Uncertain result · clicks paused",
-        GuardedUncertainInstruction = "Inspect the current item. Continue only after confirming it is safe; otherwise stop and handle it manually.",
-        GuardedContinue = "Checked — continue monitoring",
-        GuardedStop = "Stop monitoring",
-        GuardedContinued = "The current result was accepted and Careful mode resumed.",
-        GuardedStoppedForReview = "Careful mode stopped and mouse protection was released. Inspect the current item manually.",
-        GuardedLexicalCandidateUnverified = "A similar affix was found, but the app could not confirm a match.",
-        GuardedNumericValueMissing = "The target affix may be present, but its value could not be read clearly.",
-        GuardedNumericValueConflict = "Repeated checks read different values.",
-        GuardedFrameUnstable = "The item tooltip kept changing, so the result could not be confirmed.",
-        GuardedProtectionFailedTemplate = "Careful mode encountered a problem and monitoring stopped. Start again, or use Fast mode if it keeps happening.",
         FutureSettingsReadOnlyTemplate = "Settings from a newer app version ({0}) were found. Default settings are in use, and the original file was not changed.",
         ScreenshotCancelled = "Screenshot analysis cancelled; monitoring remains stopped.",
         ScreenshotAnalyzing = "Analyzing screenshot…",
@@ -430,13 +391,6 @@ internal sealed record UiStrings
     public required string SelectRegion { get; init; }
     public required string RegionEmpty { get; init; }
     public required string RunSectionTitle { get; init; }
-    public required string MonitoringPolicyLabel { get; init; }
-    public required string MonitoringPolicyToolTip { get; init; }
-    public required string FastMonitoringPolicy { get; init; }
-    public required string GuardedMonitoringPolicy { get; init; }
-    public required string FastMonitoringHint { get; init; }
-    public required string GuardedMonitoringHint { get; init; }
-    public required string GuardedMonitoringUnsupported { get; init; }
     public required string StartMonitoring { get; init; }
     public required string StopMonitoring { get; init; }
     public required string AnalyzeScreenshot { get; init; }
@@ -490,18 +444,6 @@ internal sealed record UiStrings
     public required string RegionUpdated { get; init; }
     public required string RegionSelectionCancelled { get; init; }
     public required string MonitoringStarted { get; init; }
-    public required string GuardedMonitoringStarted { get; init; }
-    public required string GuardedUncertainTitle { get; init; }
-    public required string GuardedUncertainInstruction { get; init; }
-    public required string GuardedContinue { get; init; }
-    public required string GuardedStop { get; init; }
-    public required string GuardedContinued { get; init; }
-    public required string GuardedStoppedForReview { get; init; }
-    public required string GuardedLexicalCandidateUnverified { get; init; }
-    public required string GuardedNumericValueMissing { get; init; }
-    public required string GuardedNumericValueConflict { get; init; }
-    public required string GuardedFrameUnstable { get; init; }
-    public required string GuardedProtectionFailedTemplate { get; init; }
     public required string FutureSettingsReadOnlyTemplate { get; init; }
     public required string ScreenshotCancelled { get; init; }
     public required string ScreenshotAnalyzing { get; init; }
@@ -590,23 +532,8 @@ internal sealed record UiStrings
     public string MonitorStoppedWithDetail(string detail) =>
         Format(MonitorStoppedWithDetailTemplate, detail);
 
-    public string GuardedProtectionFailed(string detail) =>
-        Format(GuardedProtectionFailedTemplate, detail);
-
     public string FutureSettingsReadOnly(int schemaVersion) =>
         Format(FutureSettingsReadOnlyTemplate, schemaVersion);
-
-    public string GuardedUncertaintyReason(GuardedUncertaintyReason? reason) => reason switch
-    {
-        Monitoring.Policies.GuardedUncertaintyReason.TargetLexicalCandidateUnverified =>
-            GuardedLexicalCandidateUnverified,
-        Monitoring.Policies.GuardedUncertaintyReason.TargetNumericValueMissing =>
-            GuardedNumericValueMissing,
-        Monitoring.Policies.GuardedUncertaintyReason.TargetNumericValueConflict =>
-            GuardedNumericValueConflict,
-        Monitoring.Policies.GuardedUncertaintyReason.FrameUnstable => GuardedFrameUnstable,
-        _ => GuardedFrameUnstable,
-    };
 
     public string CanonicalMatch(string canonicalText) =>
         Format(CanonicalMatchTemplate, canonicalText);

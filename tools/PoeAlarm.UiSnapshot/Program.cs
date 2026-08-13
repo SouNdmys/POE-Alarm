@@ -14,7 +14,6 @@ using PoeAlarm.App.Capture;
 using PoeAlarm.App.Configuration;
 using PoeAlarm.App.Localization;
 using PoeAlarm.App.Monitoring;
-using PoeAlarm.App.Monitoring.Policies;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.App.RulesUi;
 using PoeAlarm.Core.Matching;
@@ -38,7 +37,6 @@ internal static class Program
         }
 
         var alertMode = args.Contains("--alert", StringComparer.OrdinalIgnoreCase);
-        var guardedAlertMode = args.Contains("--guarded-alert", StringComparer.OrdinalIgnoreCase);
         var assertBlocking = args.Contains("--assert-blocking", StringComparer.OrdinalIgnoreCase);
         var assertLiveBlocking = args.Contains("--assert-live-blocking", StringComparer.OrdinalIgnoreCase);
         var assertMonitorWait = args.Contains("--assert-monitor-wait", StringComparer.OrdinalIgnoreCase);
@@ -54,7 +52,6 @@ internal static class Program
             "--assert-close-during-stop",
             StringComparer.OrdinalIgnoreCase);
         var assertInputGuard = args.Contains("--assert-input-guard", StringComparer.OrdinalIgnoreCase);
-        var assertGuardedAlert = args.Contains("--assert-guarded-alert", StringComparer.OrdinalIgnoreCase);
         var assertSettingsProfiles = args.Contains(
             "--assert-settings-profiles",
             StringComparer.OrdinalIgnoreCase);
@@ -71,7 +68,6 @@ internal static class Program
         var englishMode = args.Contains("--english", StringComparer.OrdinalIgnoreCase);
         var poe2Mode = args.Contains("--poe2", StringComparer.OrdinalIgnoreCase);
         var structuredMode = args.Contains("--structured", StringComparer.OrdinalIgnoreCase);
-        var guardedMode = args.Contains("--guarded", StringComparer.OrdinalIgnoreCase);
         var structuredEditorMode = args.Contains(
             "--structured-editor",
             StringComparer.OrdinalIgnoreCase);
@@ -80,7 +76,6 @@ internal static class Program
             ? Path.GetFullPath(pathArgument)
             : Path.GetFullPath(Path.Combine(
                 "artifacts",
-                guardedAlertMode ? "ui-guarded-alert.png" :
                 alertMode ? "ui-alert.png" : hudMode ? "ui-hud.png" : "ui-main.png"));
 
         var outputDirectory = Path.GetDirectoryName(outputPath)
@@ -135,7 +130,6 @@ internal static class Program
             {
                 AssertStructuredMonitorAsync().GetAwaiter().GetResult();
                 AssertUnsupportedStructuredMonitorIsRejectedAsync().GetAwaiter().GetResult();
-                AssertGuardedCapabilityBoundary();
                 AssertStructuredStopWinsPendingRecognitionAsync().GetAwaiter().GetResult();
                 AssertStructuredProgressiveInputGuardAsync().GetAwaiter().GetResult();
             }
@@ -148,7 +142,6 @@ internal static class Program
             if (assertBatchOcrContract)
             {
                 AssertBatchOcrContract();
-                AssertGuardedCandidateEvidenceIntegrationAsync().GetAwaiter().GetResult();
             }
 
             if (assertBatchOcrSynthetic)
@@ -175,16 +168,6 @@ internal static class Program
                 AssertProgressiveInputGuardAsync().GetAwaiter().GetResult();
             }
 
-            if (assertGuardedAlert)
-            {
-                AssertGuardedAlertFailsOpenWhenDispatcherStalls();
-                AssertGuardedRedHandoffFailsOpenWhenDispatcherStalls();
-                AssertFastRedHandoffKeepsLegacyFailOpenContract();
-                AssertGuardedYellowWaitsForCausativeMouseUp();
-                AssertGuardedAlertLifecycle();
-                AssertGuardedPendingPromotesToRedAlert();
-            }
-
             if (structuredEditorMode)
             {
                 RenderStructuredEditor(outputPath, englishMode, poe2Mode);
@@ -196,10 +179,6 @@ internal static class Program
             else if (hudMode)
             {
                 RenderHud(outputPath, assertHud);
-            }
-            else if (guardedAlertMode)
-            {
-                RenderGuardedAlert(outputPath, englishMode);
             }
             else if (alertMode)
             {
@@ -213,7 +192,6 @@ internal static class Program
                     englishMode,
                     poe2Mode,
                     structuredMode,
-                    guardedMode,
                     assertStartHotKey);
             }
 
@@ -718,10 +696,6 @@ internal static class Program
                 $"English player-facing copy contains Chinese characters in {property.Name}: {englishValue}");
         }
 
-        Assert(!chinese.MonitoringPolicyToolTip.Contains("原有", StringComparison.Ordinal) &&
-               !chinese.FastMonitoringPolicy.Contains("行为", StringComparison.Ordinal),
-            "Click-protection copy describes implementation history instead of player behavior.");
-
         static bool ContainsAny(string value, params string[] terms) =>
             terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
     }
@@ -729,13 +703,6 @@ internal static class Program
     private static void AssertBatchOcrContract()
     {
         AssertStructuredFallbackSelection();
-        var boundedPlan = BoundedLocalizedRecoveryPlanner.Plan(
-            new[] { "band-1", "band-2", "band-3", "band-4" },
-            maximumWorkUnits: 2);
-        Assert(boundedPlan.WorkItems.SequenceEqual(["band-1", "band-2"]) &&
-               boundedPlan.DeferredItems.SequenceEqual(["band-3", "band-4"]),
-            "Bounded localized recovery must spend two work units and retain every later candidate as unresolved evidence.");
-
         var duplicateA = new FullLineAffixMatcher("+# to maximum Life");
         var duplicateB = new FullLineAffixMatcher("+# to maximum Life");
         var speed = new FullLineAffixMatcher("#% increased Attack Speed");
@@ -747,33 +714,6 @@ internal static class Program
                Poe2EnglishRecognizer.CreateTargetSetKey(
                    Poe2EnglishRecognizer.NormalizeTargetSet([speed, duplicateB])),
             "Batch target-set cache keys must not depend on input order or duplicate rules.");
-
-        var confirmedEvidence = new OcrRecognitionResult(
-            ["117% increased Spell Damage"],
-            TimeSpan.FromMilliseconds(1),
-            TimeSpan.FromMilliseconds(2),
-            CandidateEvidence:
-            [
-                new OcrCandidateEvidence(
-                    "band:confirmed",
-                    "117% increased Spell Damage",
-                    "#% increased Spell Damage",
-                    OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
-                    10,
-                    30),
-            ]);
-        var confirmedCache = new Poe2EnglishRecognizer.ConfirmedNoMatch(
-            0xC0FFEEUL,
-            "spell-damage",
-            confirmedEvidence);
-        var cachedEvidence = Poe2EnglishRecognizer.TryReuseConfirmedBatchEvidence(
-            confirmedCache,
-            fingerprint: 0xC0FFEEUL,
-            targetKey: "spell-damage");
-        Assert(cachedEvidence is { WasCached: true, RequiresRescan: false } &&
-               cachedEvidence.BatchCandidateEvidence.Count == 1,
-            "A confirmed POE2 batch frame containing a lexical target must reuse its complete " +
-            "evidence; numeric/group rules are re-evaluated by the caller without another OCR pass.");
 
         var result = new OcrRecognitionResult(
             ["+70 to maximum Life"],
@@ -795,17 +735,7 @@ internal static class Program
                     40,
                     58),
             ],
-            PhysicalLines: [new OcrPhysicalLine(0, "band:7", 40, 58)],
-            CandidateEvidence:
-            [
-                new OcrCandidateEvidence(
-                    "band:8",
-                    "to maximum Life",
-                    duplicateA.Template.Text,
-                    OcrCandidateEvidenceKind.MissingNumericValue,
-                    61,
-                    79),
-            ]);
+            PhysicalLines: [new OcrPhysicalLine(0, "band:7", 40, 58)]);
         Assert(result.BatchAssistedObservations.Count == 2 &&
                result.BatchAssistedObservations.All(item => item.PhysicalBandId == "band:7"),
             "Assisted batch observations must preserve shared physical identity.");
@@ -813,18 +743,6 @@ internal static class Program
             "Assisted observations must expose every related primary band id.");
         Assert(result.BatchPhysicalLines.Single().PhysicalBandId == "band:7",
             "Primary lines must map to the same physical id as assisted alternatives.");
-        Assert(result.BatchCandidateEvidence.Single().Kind ==
-               OcrCandidateEvidenceKind.MissingNumericValue,
-            "Guarded evidence must distinguish a missing numeric value.");
-        var unresolved = result.BatchCandidateEvidence;
-        Assert(Poe2EnglishRecognizer
-                   .SelectBatchCandidateEvidence(isConfirmation: false, unresolved).Count == 0 &&
-               Poe2EnglishRecognizer
-                   .SelectBatchCandidateEvidence(isConfirmation: true, unresolved).Single() ==
-               unresolved.Single(),
-            "POE2 must hide unresolved candidates during progressive OCR, then surface them on " +
-            "the independent confirmation pass for Guarded yellow-stop handling.");
-
         using IOcrRecognizer windows = new WindowsOcrRecognizer();
         using IOcrRecognizer chinese = new WindowsChineseOcrRecognizer();
         using IOcrRecognizer paddle = new PaddleOcrRecognizer();
@@ -884,10 +802,8 @@ internal static class Program
     {
         var frame = RenderSyntheticAffix("匕首攻擊附加 13 至 27 閃電傷害");
         var matching = new FullLineAffixMatcher("匕首攻擊附加 # 至 # 閃電傷害");
-        var nearTarget = new FullLineAffixMatcher("匕首攻擊附加 # 至 # 冰冷傷害");
         var unrelated = Enumerable.Range(0, 24)
             .Select(index => new FullLineAffixMatcher($"測試批次詞綴{index}增加 # 點力量"))
-            .Append(nearTarget)
             .Append(matching)
             .ToArray();
         using var recognizer = new WindowsChineseOcrRecognizer();
@@ -897,16 +813,10 @@ internal static class Program
             "Windows Chinese batch OCR must run one shared full-frame layout pass.");
         Assert(recognizer.BatchLocalizedWorkUnitCount <= 2,
             "Windows Chinese batch recovery must remain capped at two physical work units.");
-        Assert(recognizer.BatchLocalizedWorkUnitCount > 0,
-            "Synthetic batch OCR must execute the production localized-recovery path.");
         Assert(matching.TryFindMatch(first.Lines, out _) ||
                first.BatchAssistedObservations.Any(item =>
                    item.CanonicalTarget == matching.Template.Text),
-            "A strict synthetic target must be visible to batch recognition.");
-        Assert(first.BatchCandidateEvidence.Any(item =>
-                   item.CandidateTarget == nearTarget.Template.Text),
-            "A conservatively localized but unverified near-target must remain visible to Guarded.");
-
+            "A strict synthetic target must be visible through the primary or localized batch result.");
         _ = recognizer.ComputeFrameFingerprint(frame);
         var reordered = unrelated.Reverse().Concat([matching]).ToArray();
         var cached = await recognizer.RecognizeAsync(frame, reordered);
@@ -918,51 +828,6 @@ internal static class Program
             $"PASS: synthetic multi-target OCR; targets={reordered.Length}, " +
             $"primaryPasses={recognizer.BatchPrimaryPassCount}, " +
             $"localizedUnits={recognizer.BatchLocalizedWorkUnitCount}");
-    }
-
-    private static async Task AssertGuardedCandidateEvidenceIntegrationAsync()
-    {
-        var recognizer = new GuardedCandidateEvidenceRecognizer();
-        await using var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
-        var paused = new TaskCompletionSource<GuardedDecisionEventArgs>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        monitor.GuardedDecisionChanged += (_, decision) =>
-        {
-            if (decision.Decision == GuardedDecisionKind.Uncertain)
-            {
-                paused.TrySetResult(decision);
-            }
-        };
-        monitor.GuardedPassCycleRequested += (_, _) =>
-        {
-            recognizer.AdvanceFingerprint();
-            Assert(monitor.NotifyGuardedCausativeClickStarted(),
-                "Guarded candidate fixture did not accept the simulated causative Down.");
-            Assert(monitor.NotifyGuardedCausativeClickCompleted(),
-                "Guarded candidate fixture did not accept the simulated causative Up.");
-        };
-        var rules = RuleCompiler.Compile(new RuleSetDefinition(
-            "guarded unresolved candidate",
-            [new AcceptableResultGroup(
-                "target",
-                ResultGroupMode.Any,
-                [new AffixCondition("life", "+# to maximum Life")])]));
-
-        monitor.Start(
-            rules,
-            new ScreenRegion(0, 0, 1, 1),
-            new GuardedMonitoringPolicy(new GuardedPolicyOptions
-            {
-                RequiredStableFrames = 1,
-                RequiredConsistentRecognitions = 1,
-                DecisionTimeout = TimeSpan.FromSeconds(1),
-            }));
-        var decision = await paused.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert(decision.UncertaintyReason ==
-               GuardedUncertaintyReason.TargetLexicalCandidateUnverified &&
-               monitor.GuardedState == GuardedSessionState.PausedUncertain,
-            "A final localized candidate from batch OCR must be consumed as a Guarded yellow-stop.");
-        await monitor.StopAsync();
     }
 
     private static async Task AssertStructuredMonitorAsync()
@@ -1063,33 +928,6 @@ internal static class Program
         {
             Assert(monitor.State == MonitorState.Idle,
                 "Rejected structured monitoring must remain Idle.");
-        }
-    }
-
-    private static void AssertGuardedCapabilityBoundary()
-    {
-        var fastOnlyRecognizer = new StructuredCountingRecognizer();
-        var fastOnly = new AffixMonitor(new EmptyCapture(), fastOnlyRecognizer);
-        try
-        {
-            Assert(!fastOnly.SupportsGuardedMonitoring,
-                "A strict batch recognizer without a semantic frame fingerprint must not advertise Guarded safety.");
-        }
-        finally
-        {
-            fastOnly.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-
-        var guardedRecognizer = new ProgressiveStructuredRecognizer();
-        var guarded = new AffixMonitor(new EmptyCapture(), guardedRecognizer);
-        try
-        {
-            Assert(guarded.SupportsGuardedMonitoring,
-                "A batch recognizer with semantic fingerprinting must advertise Guarded safety.");
-        }
-        finally
-        {
-            guarded.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 
@@ -1448,7 +1286,6 @@ internal static class Program
         bool englishMode,
         bool poe2Mode,
         bool structuredMode,
-        bool guardedMode,
         bool assertStartHotKey)
     {
         var closed = false;
@@ -1490,27 +1327,6 @@ internal static class Program
             if (structuredMode)
             {
                 ApplyStructuredSnapshotState(window);
-            }
-
-            if (guardedMode)
-            {
-                var policy = window.FindName("MonitoringPolicyComboBox") as
-                    System.Windows.Controls.ComboBox
-                    ?? throw new InvalidOperationException(
-                        "Main window monitoring-policy selector was not found.");
-                SetSnapshotSelection(window, policy, "Guarded");
-                var policyField = typeof(MainWindow).GetField(
-                                      "_monitoringPolicy",
-                                      BindingFlags.Instance | BindingFlags.NonPublic)
-                                  ?? throw new InvalidOperationException(
-                                      "Main window monitoring-policy field was not found.");
-                policyField.SetValue(window, MonitoringPolicyId.Guarded);
-                var updatePolicyMethod = typeof(MainWindow).GetMethod(
-                                             "UpdateMonitoringPolicyUi",
-                                             BindingFlags.Instance | BindingFlags.NonPublic)
-                                         ?? throw new InvalidOperationException(
-                                             "Main window monitoring-policy refresh method was not found.");
-                updatePolicyMethod.Invoke(window, null);
             }
 
             if (bottomMode)
@@ -2334,381 +2150,6 @@ internal static class Program
         }
     }
 
-    private static void RenderGuardedAlert(string outputPath, bool englishMode)
-    {
-        var width = Math.Max(1280, (int)Math.Ceiling(SystemParameters.VirtualScreenWidth));
-        var height = Math.Max(720, (int)Math.Ceiling(SystemParameters.VirtualScreenHeight));
-        var text = UiText.Use(englishMode ? "en" : "zh-CN");
-        var overlay = new AffixHitOverlayWindow();
-        overlay.ArmGuarded(
-            text.GuardedUncertainTitle,
-            text.GuardedNumericValueMissing,
-            text.GuardedUncertainInstruction,
-            text.GuardedContinue,
-            text.GuardedStop,
-            generation: 999,
-            region: null);
-
-        var guardedStopField = typeof(AffixHitOverlayWindow).GetField(
-            "guardedStopButton",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Guarded stop button is missing.");
-        var guardedStop = guardedStopField.GetValue(overlay) as System.Windows.Controls.Button
-                          ?? throw new InvalidOperationException("Guarded stop control is invalid.");
-        Assert(guardedStop.Visibility == Visibility.Visible,
-            "Guarded snapshot must expose both decision buttons.");
-        var desktopBorder = (System.Windows.Controls.Border)(typeof(AffixHitOverlayWindow).GetField(
-            "desktopBorder",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!);
-        Assert(desktopBorder.BorderBrush == Brushes.Gold,
-            "Guarded snapshot must use the yellow full-desktop warning border.");
-
-        RenderElement((FrameworkElement)overlay.Content, width, height, outputPath);
-        overlay.CloseFromService();
-    }
-
-    private static void AssertGuardedAlertLifecycle()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        service.Prepare(preparePendingInputGuard: true);
-        service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3), new ScreenRegion(0, 0, 1, 1));
-        Assert(service.IsGuardedAlertActive,
-            "Guarded must own the native pending gate before an uncertain decision.");
-
-        service.ShowGuardedUncertain(
-            "Uncertain roll",
-            "The target value was missing from OCR.",
-            "Inspect the item before choosing.",
-            "Continue monitoring",
-            "Stop monitoring",
-            new ScreenRegion(0, 0, 1, 1));
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-
-        var overlayField = typeof(LatchedAlertService).GetField(
-            "overlay",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service overlay field is missing.");
-        var overlay = overlayField.GetValue(service) as AffixHitOverlayWindow
-                      ?? throw new InvalidOperationException("Guarded overlay is missing.");
-        var pendingGuardField = typeof(LatchedAlertService).GetField(
-            "pendingMouseInputGuard",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service pending hook field is missing.");
-        var pendingGuard = (PendingMouseInputGuard)(pendingGuardField.GetValue(service)
-                           ?? throw new InvalidOperationException("Pending hook is missing."));
-        Assert(overlay.IsVisible && overlay.IsHitTestVisible,
-            "A Guarded uncertain decision must synchronously become a blocking overlay.");
-        Assert(pendingGuard.Mode == MouseInputGuardMode.Released,
-            "Guarded must release its native hook only after the yellow overlay is blocking.");
-
-        var soundField = typeof(LatchedAlertService).GetField(
-            "sound",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert sound field is missing.");
-        var sound = soundField.GetValue(service) ?? throw new InvalidOperationException("Sound is missing.");
-        var playingField = sound.GetType().GetField("isPlaying", BindingFlags.Instance | BindingFlags.NonPublic);
-        if (playingField is not null)
-        {
-            Assert(!(bool)(playingField.GetValue(sound) ?? false),
-                "The yellow Guarded overlay must never start the red looping sound.");
-        }
-
-        var stateField = typeof(PendingMouseInputGuard).GetField(
-            "_state",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Pending hook state field is missing.");
-        var pendingState = (MouseInputGuardStateMachine)(stateField.GetValue(pendingGuard)
-                           ?? throw new InvalidOperationException("Pending hook state is missing."));
-        var completionMethod = typeof(LatchedAlertService).GetMethod(
-            "OnCausativeClickCompleted",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Causative completion handler is missing.");
-        var continueRaised = false;
-        var duplicateAwaitAccepted = false;
-        service.GuardedContinueRequested += (_, _) =>
-        {
-            continueRaised = true;
-            Assert(overlay.IsVisible && overlay.IsHitTestVisible,
-                "Guarded Continue must migrate monitoring state before releasing the yellow overlay.");
-            // This duplicate request is what AffixMonitor.ContinueGuarded synchronously raises.
-            // It must finish while the yellow HWND still prevents a physical click.
-            duplicateAwaitAccepted = service.AwaitNextGuardedClick(TimeSpan.FromSeconds(3));
-            Assert(!pendingState.ProcessButton(MouseButtonBits.Left, isDown: true).Suppress,
-                "Continue's deliberately allowed click Down was unexpectedly consumed.");
-            var completed = pendingState.ProcessButton(MouseButtonBits.Left, isDown: false);
-            Assert(!completed.Suppress && completed.CausativeClickCompleted,
-                "Continue's deliberately allowed click did not complete its one-shot cycle.");
-            completionMethod.Invoke(service, [pendingGuard, EventArgs.Empty]);
-
-            // A direct native-state cycle now models the fastest possible click immediately after
-            // the callback returns and the yellow HWND releases its input shield.
-        };
-        var continueButton = (System.Windows.Controls.Button)(typeof(AffixHitOverlayWindow).GetField(
-            "acknowledgementButton",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!);
-        typeof(AffixHitOverlayWindow).GetMethod(
-            "OnAcknowledgementClick",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(
-            overlay,
-            [continueButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)]);
-        Assert(!continueRaised && overlay.IsVisible,
-            "Continue must remain blocked while its click tail is being absorbed.");
-        PumpDispatcherUntil(
-            () => continueRaised,
-            TimeSpan.FromSeconds(2),
-            "Guarded Continue callback was not raised after click-tail absorption.");
-        Assert(service.IsGuardedAlertActive && !overlay.IsVisible && !overlay.IsHitTestVisible &&
-               duplicateAwaitAccepted && pendingGuard.Mode == MouseInputGuardMode.Guarding,
-            "Continue's duplicate pass-cycle acknowledgement re-armed a second allowed click.");
-
-        service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
-        service.ShowGuardedUncertain(
-            "Uncertain roll",
-            "The target value conflicted between reads.",
-            "Inspect the item before choosing.",
-            "Continue monitoring",
-            "Stop monitoring");
-        var stopRaised = false;
-        service.GuardedStopRequested += (_, _) => stopRaised = true;
-        var stopButton = (System.Windows.Controls.Button)(typeof(AffixHitOverlayWindow).GetField(
-            "guardedStopButton",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(overlay)!);
-        typeof(AffixHitOverlayWindow).GetMethod(
-            "OnGuardedStopClick",
-            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(
-            overlay,
-            [stopButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)]);
-        Assert(!stopRaised && overlay.IsVisible,
-            "Stop must remain blocked while its click tail is being absorbed.");
-        PumpDispatcherUntil(
-            () => stopRaised,
-            TimeSpan.FromSeconds(2),
-            "Guarded Stop callback was not raised after click-tail absorption.");
-        Assert(!service.IsGuardedAlertActive && !overlay.IsVisible && !overlay.IsHitTestVisible,
-            "Stop callback must observe a fully released Guarded input path.");
-    }
-
-    private static void AssertGuardedAlertFailsOpenWhenDispatcherStalls()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        var pendingGuardField = typeof(LatchedAlertService).GetField(
-            "pendingMouseInputGuard",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service pending hook field is missing.");
-        var pendingGuard = (PendingMouseInputGuard)(pendingGuardField.GetValue(service)
-                           ?? throw new InvalidOperationException("Pending hook is missing."));
-        Assert(pendingGuard.Prepare(), "Guarded watchdog test must prepare the native hook.");
-        service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
-        GuardedAlertFailOpenEventArgs? failure = null;
-        service.GuardedFailOpen += (_, e) => failure = e;
-
-        Task.Run(() => service.ShowGuardedUncertain(
-                "Uncertain",
-                "detail",
-                "instruction",
-                "Continue monitoring",
-                "Stop monitoring"))
-            .GetAwaiter()
-            .GetResult();
-
-        // Keep this STA dispatcher deliberately blocked while the independent Guarded
-        // presentation watchdog runs. The overlay may already have been pre-created, but its
-        // queued promotion cannot execute until after the assertion below.
-        {
-            using var dispatcherSuppression = Application.Current.Dispatcher.DisableProcessing();
-
-            var watch = Stopwatch.StartNew();
-            while (failure is null && watch.Elapsed < TimeSpan.FromSeconds(2))
-            {
-                Thread.Sleep(10);
-            }
-
-            Assert(failure?.Reason == GuardedAlertFailOpenReason.PresentationTimedOut,
-                "A stalled Guarded presentation must fail open with a dedicated event.");
-            Assert(!service.IsGuardedAlertActive,
-                "A stalled Guarded presentation must release its logical lifetime.");
-        }
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-    }
-
-    private static void AssertGuardedYellowWaitsForCausativeMouseUp()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        service.Prepare(preparePendingInputGuard: true);
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-
-        var pendingGuardField = typeof(LatchedAlertService).GetField(
-            "pendingMouseInputGuard",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service pending hook field is missing.");
-        var pendingGuard = (PendingMouseInputGuard)(pendingGuardField.GetValue(service)
-                           ?? throw new InvalidOperationException("Pending hook is missing."));
-        var overlayField = typeof(LatchedAlertService).GetField(
-            "overlay",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service overlay field is missing.");
-        var overlayPresentedField = typeof(LatchedAlertService).GetField(
-            "isGuardedOverlayPresented",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException(
-                "Alert service Guarded presentation field is missing.");
-
-        // Drive the lock-free transition core directly. CI/sandbox desktops often reject
-        // SendInput, while the overlay contract only needs the same tracked physical-mask state.
-        var stateField = typeof(PendingMouseInputGuard).GetField(
-            "_state",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Pending hook state field is missing.");
-        var state = (MouseInputGuardStateMachine)(stateField.GetValue(pendingGuard)
-                    ?? throw new InvalidOperationException("Pending hook state is missing."));
-
-        var held = true;
-        AffixHitOverlayWindow.MouseButtonPressedTestOverride = () => held;
-        state.InitializeReleased(MouseButtonBits.Left);
-        try
-        {
-            service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
-            Assert(pendingGuard.Mode == MouseInputGuardMode.WaitingForExistingRelease,
-                "Guarded did not preserve the causative held click as pass-through.");
-
-            service.ShowGuardedUncertain(
-                "Uncertain roll",
-                "The target value was missing from OCR.",
-                "Inspect the item before choosing.",
-                "Continue monitoring",
-                "Stop monitoring");
-            var overlay = (AffixHitOverlayWindow)(overlayField.GetValue(service)
-                          ?? throw new InvalidOperationException("Guarded overlay is missing."));
-            Assert(overlay.IsVisible && !overlay.IsHitTestVisible &&
-                   !(bool)(overlayPresentedField.GetValue(service) ?? true),
-                "Yellow Guarded presentation did not remain dormant while causative Down was held.");
-            Assert(pendingGuard.Mode == MouseInputGuardMode.WaitingForExistingRelease,
-                "Dormant yellow presentation transferred the native hook before causative Up.");
-
-            var causativeUp = state.ProcessButton(MouseButtonBits.Left, isDown: false);
-            Assert(!causativeUp.Suppress && state.Mode == MouseInputGuardMode.Guarding,
-                "The causative Up was not passed through before yellow promotion.");
-            held = false;
-            PumpDispatcherUntil(
-                () => overlay.IsHitTestVisible &&
-                      (bool)(overlayPresentedField.GetValue(service) ?? false),
-                TimeSpan.FromSeconds(2),
-                "Yellow Guarded presentation did not promote after causative Up.");
-            Assert(pendingGuard.Mode == MouseInputGuardMode.Released,
-                "Yellow promotion did not transfer the native gate after causative Up.");
-
-            service.ReleaseGuardedInputGuard();
-            Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-        }
-        finally
-        {
-            AffixHitOverlayWindow.MouseButtonPressedTestOverride = null;
-            pendingGuard.Release();
-        }
-    }
-
-    private static void AssertGuardedRedHandoffFailsOpenWhenDispatcherStalls()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        service.Prepare(preparePendingInputGuard: true);
-        service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
-        GuardedAlertFailOpenEventArgs? failure = null;
-        service.GuardedFailOpen += (_, e) =>
-        {
-            failure = e;
-            // Match MainWindow's production re-entry: faulting the monitor synchronously raises
-            // InputGuardReleased before the service's outer fail-open completion resumes.
-            service.ReleaseGuardedInputGuard();
-        };
-
-        // Trigger from a monitor-like worker while this STA deliberately cannot run the queued
-        // red presentation. A Guarded red hand-off is terminally different from the legacy Fast
-        // alert: losing its already-owned native gate must notify the monitor so it can fault.
-        using (Application.Current.Dispatcher.DisableProcessing())
-        {
-            var promoted = Task.Run(() => service.TriggerGuardedMatch("confirmed Mirror target"))
-                .GetAwaiter()
-                .GetResult();
-            Assert(promoted,
-                "A live Guarded native owner refused an otherwise valid red match promotion.");
-
-            var watch = Stopwatch.StartNew();
-            while (failure is null && watch.Elapsed < TimeSpan.FromSeconds(2))
-            {
-                Thread.Sleep(10);
-            }
-
-            Assert(failure?.Reason == GuardedAlertFailOpenReason.PresentationTimedOut,
-                "A stalled Guarded red hand-off did not emit its terminal fail-open event.");
-            Assert(!service.IsActive && !service.IsGuardedAlertActive,
-                "A timed-out Guarded red hand-off remained logically active.");
-        }
-
-        service.Acknowledge();
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-    }
-
-    private static void AssertFastRedHandoffKeepsLegacyFailOpenContract()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        service.Prepare(preparePendingInputGuard: true);
-        var guardedFailureRaised = false;
-        service.GuardedFailOpen += (_, _) => guardedFailureRaised = true;
-
-        using (Application.Current.Dispatcher.DisableProcessing())
-        {
-            Task.Run(() => service.Trigger("ordinary Fast target"))
-                .GetAwaiter()
-                .GetResult();
-
-            // Wait beyond the same hand-off watchdog. Fast preserves the 0.6.1 behavior: it
-            // releases only the native hook and does not repurpose the Guarded fault channel.
-            Thread.Sleep(TimeSpan.FromMilliseconds(900));
-            Assert(service.IsActive,
-                "The ordinary Fast red hand-off no longer preserves its legacy latched state.");
-            Assert(!guardedFailureRaised,
-                "The ordinary Fast red hand-off incorrectly raised a Guarded terminal fault.");
-        }
-
-        service.Acknowledge();
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-    }
-
-    private static void AssertGuardedPendingPromotesToRedAlert()
-    {
-        using var service = new LatchedAlertService(Application.Current.Dispatcher);
-        service.Prepare(preparePendingInputGuard: true);
-        service.BeginGuardedInputGuard(TimeSpan.FromSeconds(3));
-        var pendingGuardField = typeof(LatchedAlertService).GetField(
-            "pendingMouseInputGuard",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service pending hook field is missing.");
-        var pendingGuard = (PendingMouseInputGuard)(pendingGuardField.GetValue(service)
-                           ?? throw new InvalidOperationException("Pending hook is missing."));
-        Assert(pendingGuard.Mode is MouseInputGuardMode.Guarding or
-                MouseInputGuardMode.WaitingForExistingRelease,
-            "Guarded Match setup must begin with an armed native gate.");
-
-        Assert(service.TriggerGuardedMatch(
-                "confirmed Mirror target",
-                new ScreenRegion(0, 0, 1, 1)),
-            "Guarded Match did not atomically claim the existing native gate.");
-        Assert(service.IsActive && !service.IsGuardedAlertActive,
-            "Guarded Match must atomically reclassify its pending lifetime as a red alert.");
-        var overlayField = typeof(LatchedAlertService).GetField(
-            "overlay",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Alert service overlay field is missing.");
-        var overlay = overlayField.GetValue(service) as AffixHitOverlayWindow
-                      ?? throw new InvalidOperationException("Prepared red overlay is missing.");
-        Assert(overlay.IsVisible && overlay.IsHitTestVisible,
-            "Guarded Match must present the ordinary blocking red overlay.");
-        Assert(pendingGuard.Mode == MouseInputGuardMode.Released,
-            "Guarded Match may release its pending hook only after red presentation.");
-        service.Acknowledge();
-        Application.Current.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
-    }
-
     private static void RenderStructuredEditor(
         string outputPath,
         bool englishMode,
@@ -2855,51 +2296,6 @@ internal static class Program
                 TimeSpan.Zero,
                 TimeSpan.Zero));
         }
-
-        public void Dispose()
-        {
-        }
-    }
-
-    private sealed class GuardedCandidateEvidenceRecognizer
-        : IOcrRecognizer, IFrameFingerprintProvider
-    {
-        private static readonly string CanonicalTarget =
-            AffixCanonicalizer.Normalize("+# to maximum Life").Text;
-
-        public StructuredRuleOcrSupport StructuredRuleSupport =>
-            StructuredRuleOcrSupport.StrictBatch;
-
-        private long fingerprint = 0xCA11D1D8L;
-
-        public ulong ComputeFrameFingerprint(CapturedFrame frame) =>
-            unchecked((ulong)Interlocked.Read(ref fingerprint));
-
-        public void AdvanceFingerprint() => Interlocked.Increment(ref fingerprint);
-
-        public Task<OcrRecognitionResult> RecognizeAsync(
-            CapturedFrame frame,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Guarded candidate fixture expected batch OCR.");
-
-        public Task<OcrRecognitionResult> RecognizeAsync(
-            CapturedFrame frame,
-            IReadOnlyList<FullLineAffixMatcher> targets,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new OcrRecognitionResult(
-                ["unrelated"],
-                TimeSpan.Zero,
-                TimeSpan.Zero,
-                CandidateEvidence:
-                [
-                    new OcrCandidateEvidence(
-                        "band-deferred",
-                        "to maximum Life",
-                        CanonicalTarget,
-                        OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
-                        10,
-                        30),
-                ]));
 
         public void Dispose()
         {

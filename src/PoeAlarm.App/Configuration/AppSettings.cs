@@ -10,8 +10,9 @@ public sealed record AppSettings
 {
     /// <summary>
     /// Settings schema 1 is the profile-aware POE1/POE2 format shipped by 0.6.1. Schema 2 added
-    /// structured rules; schema 3 persists the independent Mirror Guarded monitoring policy.
-    /// Neither migration changes or reinterprets the legacy TargetAffix fast path.
+    /// structured rules. Schema 3 remains the current compatibility boundary because released
+    /// settings may contain the retired MonitoringPolicy field. That unknown field is ignored on
+    /// load and omitted on the next save, while targets and structured rules remain unchanged.
     /// </summary>
     public const int CurrentSchemaVersion = 3;
 
@@ -103,22 +104,12 @@ public enum GameProfile
     Poe2,
 }
 
-/// <summary>
-/// Selects only how stop conditions are expressed. Input protection is a separate monitoring
-/// policy so Mirror safety can later be combined with either quick or structured rules.
-/// </summary>
+/// <summary>Selects how stop conditions are expressed.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum RuleEditorMode
 {
     Quick,
     Structured,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum MonitoringPolicyId
-{
-    Fast,
-    Guarded,
 }
 
 public sealed record GameProfileSettings
@@ -135,13 +126,6 @@ public sealed record GameProfileSettings
     /// </summary>
     public RuleEditorMode RuleEditorMode { get; init; } = RuleEditorMode.Quick;
 
-    /// <summary>
-    /// Monitoring cadence and input protection are intentionally independent from rule syntax.
-    /// Fast preserves the 0.6.1 cadence. Guarded holds the next input until a stable rule
-    /// decision; it is independent from whether the rule editor is Quick or Structured.
-    /// </summary>
-    public MonitoringPolicyId MonitoringPolicy { get; init; } = MonitoringPolicyId.Fast;
-
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RuleSetDefinition? StructuredRuleSet { get; init; }
 
@@ -153,9 +137,6 @@ public sealed record GameProfileSettings
         RuleEditorMode = Enum.IsDefined(RuleEditorMode)
             ? RuleEditorMode
             : RuleEditorMode.Quick,
-        MonitoringPolicy = Enum.IsDefined(MonitoringPolicy)
-            ? MonitoringPolicy
-            : MonitoringPolicyId.Fast,
     };
 
     internal static string NormalizeOcrLanguage(string? language) =>

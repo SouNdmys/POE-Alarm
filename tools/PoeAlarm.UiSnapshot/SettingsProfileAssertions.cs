@@ -30,7 +30,6 @@ internal static class SettingsProfileAssertions
                       "TargetAffix": "poe1 independent target",
                       "OcrLanguage": "zh-TW",
                       "RuleEditorMode": "Quick",
-                      "MonitoringPolicy": "Fast",
                       "StructuredRuleSet": {
                         "SchemaVersion": 1,
                         "Name": "{{poe1RuleName}}",
@@ -41,7 +40,6 @@ internal static class SettingsProfileAssertions
                       "TargetAffix": "poe2 independent target",
                       "OcrLanguage": "en",
                       "RuleEditorMode": "Structured",
-                      "MonitoringPolicy": "Fast",
                       "StructuredRuleSet": {
                         "SchemaVersion": 1,
                         "Name": "{{poe2RuleName}}",
@@ -83,11 +81,57 @@ internal static class SettingsProfileAssertions
                        .NumericConstraints[0].Minimum == 35,
                 "Schema 2 preserves POE2 rule values independently");
             Assert(schema2Poe1.RuleEditorMode == RuleEditorMode.Quick &&
-                   schema2Poe2.RuleEditorMode == RuleEditorMode.Structured &&
-                   schema2Poe1.MonitoringPolicy == MonitoringPolicyId.Fast &&
-                   schema2Poe2.MonitoringPolicy == MonitoringPolicyId.Fast,
-                "Schema 2 adds no implicit Guarded policy or cross-profile mode change");
+                   schema2Poe2.RuleEditorMode == RuleEditorMode.Structured,
+                "Schema 2 preserves each profile's rule mode independently");
             await schema2Store.SaveAsync(schema2Migrated);
+
+            await File.WriteAllTextAsync(
+                settingsPath,
+                """
+                {
+                  "SchemaVersion": 3,
+                  "SelectedGameProfile": "Poe2",
+                  "Profiles": {
+                    "Poe1": {
+                      "TargetAffix": "legacy guarded poe1",
+                      "OcrLanguage": "zh-TW",
+                      "RuleEditorMode": "Quick",
+                      "MonitoringPolicy": "Guarded"
+                    },
+                    "Poe2": {
+                      "TargetAffix": "legacy guarded poe2",
+                      "OcrLanguage": "en",
+                      "RuleEditorMode": "Structured",
+                      "MonitoringPolicy": "Guarded",
+                      "StructuredRuleSet": {
+                        "SchemaVersion": 1,
+                        "Name": "guarded migration rules",
+                        "Groups": []
+                      }
+                    }
+                  }
+                }
+                """);
+            var guardedStore = new SettingsStore(settingsPath);
+            var guardedMigrated = await guardedStore.LoadAsync();
+            var guardedPoe1 = guardedMigrated.Profiles!.Get(GameProfile.Poe1);
+            var guardedPoe2 = guardedMigrated.Profiles.Get(GameProfile.Poe2);
+            Assert(!guardedStore.IsReadOnly &&
+                   guardedPoe1.TargetAffix == "legacy guarded poe1" &&
+                   guardedPoe1.OcrLanguage == "zh-TW" &&
+                   guardedPoe2.RuleEditorMode == RuleEditorMode.Structured &&
+                   guardedPoe2.StructuredRuleSet?.Name == "guarded migration rules",
+                "Schema 3 Guarded settings load on the fast path without losing profile data");
+            await guardedStore.SaveAsync(guardedMigrated);
+            using (var guardedDocument =
+                   JsonDocument.Parse(await File.ReadAllTextAsync(settingsPath)))
+            {
+                Assert(!guardedDocument.RootElement.GetProperty("Profiles").GetProperty("Poe1")
+                           .TryGetProperty("MonitoringPolicy", out _) &&
+                       !guardedDocument.RootElement.GetProperty("Profiles").GetProperty("Poe2")
+                           .TryGetProperty("MonitoringPolicy", out _),
+                    "Saving a schema 3 Guarded file removes only the retired policy field");
+            }
 
             await File.WriteAllTextAsync(
                 settingsPath,
@@ -117,8 +161,6 @@ internal static class SettingsProfileAssertions
                 "Legacy POE1 target remains on the quick matcher path");
             Assert(poe1.StructuredRuleSet is null,
                 "Legacy migration does not invent structured rules");
-            Assert(poe1.MonitoringPolicy == MonitoringPolicyId.Fast,
-                "Legacy POE1 settings retain the verified fast monitoring policy");
             var emptyPoe2 = migrated.Profiles.Get(GameProfile.Poe2);
             Assert(emptyPoe2.TargetAffix.Length == 0, "Migration does not copy target to POE2");
             Assert(emptyPoe2.CaptureRegion is null, "Migration does not copy region to POE2");
@@ -135,7 +177,6 @@ internal static class SettingsProfileAssertions
                     CaptureRegion = new ScreenRegion(700, 80, 640, 920),
                     OcrLanguage = "en",
                     RuleEditorMode = RuleEditorMode.Structured,
-                    MonitoringPolicy = MonitoringPolicyId.Guarded,
                     StructuredRuleSet = new RuleSetDefinition(
                         "poe2 crafting rules",
                         [
@@ -175,8 +216,6 @@ internal static class SettingsProfileAssertions
                 "POE2 region round-trip");
             Assert(poe2.RuleEditorMode == RuleEditorMode.Structured,
                 "Structured rule mode round-trip");
-            Assert(poe2.MonitoringPolicy == MonitoringPolicyId.Guarded,
-                "Guarded monitoring policy round-trips independently from structured rules");
             Assert(poe2.StructuredRuleSet?.Groups.Count == 1,
                 "Structured acceptable results round-trip");
             Assert(
@@ -190,6 +229,11 @@ internal static class SettingsProfileAssertions
                 "Saved settings remove the legacy root CaptureRegion");
             Assert(document.RootElement.TryGetProperty("Profiles", out _),
                 "Saved settings use profile-aware storage");
+            Assert(!document.RootElement.GetProperty("Profiles").GetProperty("Poe1")
+                       .TryGetProperty("MonitoringPolicy", out _) &&
+                   !document.RootElement.GetProperty("Profiles").GetProperty("Poe2")
+                       .TryGetProperty("MonitoringPolicy", out _),
+                "Saved settings omit the retired monitoring policy");
             Assert(document.RootElement.GetProperty("SchemaVersion").GetInt32() ==
                    AppSettings.CurrentSchemaVersion,
                 "Saved settings declare their schema");
@@ -262,7 +306,7 @@ internal static class SettingsProfileAssertions
             Assert(await File.ReadAllTextAsync(settingsPath) == futureSettingsWithLowercaseSchema,
                 "Duplicate future schema settings remain byte-for-byte unchanged");
 
-            Console.WriteLine("Settings profile assertions: 40/40 passed");
+            Console.WriteLine("Settings profile assertions: 41/41 passed");
         }
         finally
         {
