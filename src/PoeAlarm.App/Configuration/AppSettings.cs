@@ -9,10 +9,11 @@ namespace PoeAlarm.App.Configuration;
 public sealed record AppSettings
 {
     /// <summary>
-    /// Settings schema 1 is the profile-aware POE1/POE2 format shipped by 0.6.1. Schema 2 adds
-    /// structured rules without changing or reinterpreting the legacy TargetAffix fast path.
+    /// Settings schema 1 is the profile-aware POE1/POE2 format shipped by 0.6.1. Schema 2 added
+    /// structured rules; schema 3 persists the independent Mirror Guarded monitoring policy.
+    /// Neither migration changes or reinterprets the legacy TargetAffix fast path.
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
@@ -117,6 +118,7 @@ public enum RuleEditorMode
 public enum MonitoringPolicyId
 {
     Fast,
+    Guarded,
 }
 
 public sealed record GameProfileSettings
@@ -135,8 +137,8 @@ public sealed record GameProfileSettings
 
     /// <summary>
     /// Monitoring cadence and input protection are intentionally independent from rule syntax.
-    /// Only the verified Fast policy is persisted today; Guarded will be added when the Mirror
-    /// state machine and its yellow uncertain state pass their own safety gate.
+    /// Fast preserves the 0.6.1 cadence. Guarded holds the next input until a stable rule
+    /// decision; it is independent from whether the rule editor is Quick or Structured.
     /// </summary>
     public MonitoringPolicyId MonitoringPolicy { get; init; } = MonitoringPolicyId.Fast;
 

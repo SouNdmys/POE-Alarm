@@ -37,15 +37,20 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
     private int _progressFrameWidth;
     private int _progressFrameHeight;
     private bool _hasProgressFrame;
+    private BatchProgress? _batchProgress;
+    private BatchCache? _batchCache;
+    private long _batchPrimaryInferenceCount;
+    private long _batchRecoveryInferenceCount;
     private CapturedFrame? _prefetchedSourceFrame;
     private IReadOnlyList<PreparedFrame>? _prefetchedBands;
     private bool _disposed;
 
-    // Progressive segmentation and CTC evidence are target-conditioned. A safe batch result must
-    // preserve band identity for multiple assisted candidates, which OcrRecognitionResult does
-    // not yet model. Refuse structured live mode until that evidence model exists.
     public StructuredRuleOcrSupport StructuredRuleSupport =>
-        StructuredRuleOcrSupport.Unsupported;
+        StructuredRuleOcrSupport.StrictBatch;
+
+    internal long BatchPrimaryInferenceCount => _batchPrimaryInferenceCount;
+
+    internal long BatchRecoveryInferenceCount => _batchRecoveryInferenceCount;
 
     public PaddleOcrRecognizer()
         : this(CreatePackagedSession(), new PoeTextPreprocessor(TraditionalChinesePreprocessing))
@@ -102,6 +107,194 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
     {
         ArgumentNullException.ThrowIfNull(target);
         return RecognizeInternalAsync(frame, target, cancellationToken);
+    }
+
+    public Task<OcrRecognitionResult> RecognizeAsync(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var targetSet = Poe2EnglishRecognizer.NormalizeTargetSet(targets);
+        return RecognizeBatchInternalAsync(frame, targetSet, cancellationToken);
+    }
+
+    private async Task<OcrRecognitionResult> RecognizeBatchInternalAsync(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken)
+    {
+        await _recognitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return await Task.Run(
+                    () => RecognizeBatchCore(frame, targets, cancellationToken),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _recognitionGate.Release();
+        }
+    }
+
+    private OcrRecognitionResult RecognizeBatchCore(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (targets.Count == 0)
+        {
+            return RecognizeCore(frame, target: null, cancellationToken);
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        IReadOnlyList<PreparedFrame> preparedBands;
+        if (ReferenceEquals(frame, _prefetchedSourceFrame) && _prefetchedBands is not null)
+        {
+            preparedBands = _prefetchedBands;
+            _prefetchedSourceFrame = null;
+            _prefetchedBands = null;
+        }
+        else
+        {
+            preparedBands = _preprocessor.PrepareBlueAffixBands(frame, scale: 1);
+        }
+
+        var preprocessingElapsed = stopwatch.Elapsed;
+        var fingerprint = CombineFingerprints(preparedBands);
+        var targetKey = Poe2EnglishRecognizer.CreateTargetSetKey(targets);
+        if (_batchCache is { } cached &&
+            cached.Fingerprint == fingerprint &&
+            cached.Width == frame.Width &&
+            cached.Height == frame.Height &&
+            string.Equals(cached.TargetKey, targetKey, StringComparison.Ordinal))
+        {
+            return cached.Result with
+            {
+                PreprocessingElapsed = preprocessingElapsed,
+                RecognitionElapsed = TimeSpan.Zero,
+                WasCached = true,
+                RequiresRescan = false,
+            };
+        }
+
+        var sameProgress = _batchProgress is { } prior &&
+                           prior.Fingerprint == fingerprint &&
+                           prior.Width == frame.Width &&
+                           prior.Height == frame.Height &&
+                           string.Equals(prior.TargetKey, targetKey, StringComparison.Ordinal);
+        if (!sameProgress)
+        {
+            _batchProgress = new BatchProgress(
+                fingerprint,
+                frame.Width,
+                frame.Height,
+                targetKey,
+                new BatchBandRecognition?[preparedBands.Count],
+                nextBandIndex: 0,
+                recoveryQueue: new Queue<BatchRecoveryWork>());
+        }
+
+        var progress = _batchProgress!;
+        stopwatch.Restart();
+        var workUnits = 0;
+        var authoritativeHit = false;
+
+        // One scan advances at most two physical rows. Target support for all rules is derived
+        // from each row's shared CTC logits; target count never multiplies model inference.
+        while (progress.NextBandIndex < preparedBands.Count && workUnits < MaximumParallelBands)
+        {
+            var index = progress.NextBandIndex++;
+            var prepared = preparedBands[index];
+            var batch = _session.RecognizeBatch(prepared, targets);
+            _batchPrimaryInferenceCount++;
+            progress.Bands[index] = new BatchBandRecognition(batch);
+            authoritativeHit |= targets.Any(target =>
+                target.IsMatch(batch.Recognition.Text) ||
+                batch.TargetSupports.TryGetValue(target.Template.Text, out var support) &&
+                support.StronglySupported);
+            if (!prepared.IsFallback)
+            {
+                var recoveryTarget = SelectRecoveryTarget(batch, targets);
+                if (recoveryTarget is not null)
+                {
+                    progress.RecoveryQueue.Enqueue(new BatchRecoveryWork(index, recoveryTarget));
+                }
+            }
+
+            workUnits++;
+            if (authoritativeHit)
+            {
+                // A lexical hit may still fail a numeric constraint in the caller, but all
+                // visible evidence needed to evaluate that row is complete. Do not spend this
+                // latency-sensitive scan on unrelated remaining bands; the next scan resumes if
+                // the complete rule is not yet satisfied.
+                break;
+            }
+        }
+
+        // Only after every primary row is available, spend at most one additional inference per
+        // later scan on the best localized recovery. Never append it to a scan that already ran
+        // primary work, keeping the hard per-scan ceiling at two model inferences.
+        if (workUnits == 0 && progress.NextBandIndex >= preparedBands.Count &&
+            progress.RecoveryQueue.TryDequeue(out var recovery))
+        {
+            var current = progress.Bands[recovery.BandIndex]!;
+            var segmented = _session.Recognize(
+                preparedBands[recovery.BandIndex],
+                recovery.Target.SourceTemplate,
+                maximumSegmentWidthOverride: 400);
+            _batchRecoveryInferenceCount++;
+            if (recovery.Target.IsMatch(segmented.Text))
+            {
+                current.SegmentedStrict.Add(new BatchAssistedText(
+                    segmented.Text,
+                    recovery.Target.Template.Text));
+            }
+            workUnits++;
+        }
+
+        var lines = BuildBatchLogicalLines(
+            preparedBands,
+            progress.Bands,
+            frame.Width,
+            out var assisted,
+            out var physicalLines,
+            out var candidateEvidence);
+        var requiresRescan = progress.NextBandIndex < preparedBands.Count ||
+                             progress.RecoveryQueue.Count > 0;
+        // Near-target evidence is meaningful only after every bounded verifier has completed.
+        // Emitting it during a progressive pass could make Guarded pause on a row that the next
+        // slice would have strictly recovered.
+        if (requiresRescan)
+        {
+            candidateEvidence = [];
+        }
+        var result = new OcrRecognitionResult(
+            lines,
+            preprocessingElapsed,
+            stopwatch.Elapsed,
+            WasCached: sameProgress && workUnits == 0,
+            TargetAssistedMatch: null,
+            RequiresRescan: requiresRescan,
+            AssistedObservations: assisted,
+            PhysicalLines: physicalLines,
+            CandidateEvidence: candidateEvidence);
+        if (!requiresRescan)
+        {
+            _batchProgress = null;
+            _batchCache = new BatchCache(
+                fingerprint,
+                frame.Width,
+                frame.Height,
+                targetKey,
+                result);
+        }
+
+        return result;
     }
 
     private async Task<OcrRecognitionResult> RecognizeInternalAsync(
@@ -548,6 +741,158 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
         return lines;
     }
 
+    private static FullLineAffixMatcher? SelectRecoveryTarget(
+        CtcBatchRecognition batch,
+        IReadOnlyList<FullLineAffixMatcher> targets)
+    {
+        if (targets.Any(target => target.IsMatch(batch.Recognition.Text)))
+        {
+            return null;
+        }
+
+        // At most one target owns recovery work for a physical band. Strong CTC evidence wins;
+        // ties use the stable normalized target order. This prevents one noisy row from
+        // generating N segmentation inferences or N independently accepted alternatives.
+        return targets.FirstOrDefault(target =>
+            batch.TargetSupports.TryGetValue(target.Template.Text, out var support) &&
+            support.StronglySupported);
+    }
+
+    private static IReadOnlyList<string> BuildBatchLogicalLines(
+        IReadOnlyList<PreparedFrame> preparedBands,
+        IReadOnlyList<BatchBandRecognition?> recognitions,
+        int roiWidth,
+        out IReadOnlyList<OcrAssistedObservation> assisted,
+        out IReadOnlyList<OcrPhysicalLine> physicalLines,
+        out IReadOnlyList<OcrCandidateEvidence> candidateEvidence)
+    {
+        var lines = new List<string>(preparedBands.Count * 2);
+        var assistedItems = new List<OcrAssistedObservation>();
+        var candidateItems = new List<OcrCandidateEvidence>();
+        var physicalItems = new List<OcrPhysicalLine>();
+        int? previousBottom = null;
+        var previousHeight = 0;
+        var previousWidth = 0;
+
+        for (var bandIndex = 0; bandIndex < preparedBands.Count; bandIndex++)
+        {
+            var prepared = preparedBands[bandIndex];
+            var recognized = recognitions[bandIndex];
+            if (recognized is null || string.IsNullOrWhiteSpace(recognized.Batch.Recognition.Text))
+            {
+                AddLogicalBoundary(lines);
+                previousBottom = null;
+                previousHeight = 0;
+                previousWidth = 0;
+                continue;
+            }
+
+            if (prepared.IsFallback)
+            {
+                AddLogicalBoundary(lines);
+            }
+            else if (previousBottom is not null)
+            {
+                var currentHeight = prepared.SourceBottom - prepared.SourceTop + 1;
+                var gap = prepared.SourceTop - previousBottom.Value - 1;
+                var closeEnough = gap <= Math.Max(12, Math.Max(previousHeight, currentHeight));
+                var previousFilled = previousWidth >= roiWidth * 0.70;
+                if (!closeEnough || !previousFilled)
+                {
+                    AddLogicalBoundary(lines);
+                }
+            }
+
+            var lineIndex = lines.Count;
+            var text = recognized.Batch.Recognition.Text;
+            lines.Add(text);
+            var bandId = CreateBandId(prepared);
+            physicalItems.Add(new OcrPhysicalLine(
+                lineIndex,
+                bandId,
+                prepared.SourceTop,
+                prepared.SourceBottom));
+
+            foreach (var target in recognized.Batch.TargetSupports
+                         .Where(static pair => pair.Value.StronglySupported))
+            {
+                assistedItems.Add(new OcrAssistedObservation(
+                    bandId,
+                    text,
+                    target.Key,
+                    prepared.SourceTop,
+                    prepared.SourceBottom));
+            }
+
+
+            foreach (var target in recognized.Batch.TargetSupports
+                         .Where(static pair => pair.Value.ShapeCompatible &&
+                                               !pair.Value.StronglySupported))
+            {
+                candidateItems.Add(new OcrCandidateEvidence(
+                    bandId,
+                    text,
+                    target.Key,
+                    ClassifyBatchCandidate(text, target.Key),
+                    prepared.SourceTop,
+                    prepared.SourceBottom));
+            }
+
+            foreach (var segmented in recognized.SegmentedStrict)
+            {
+                assistedItems.Add(new OcrAssistedObservation(
+                    bandId,
+                    segmented.Text,
+                    segmented.CanonicalTarget,
+                    prepared.SourceTop,
+                    prepared.SourceBottom));
+            }
+
+            if (prepared.IsFallback)
+            {
+                AddLogicalBoundary(lines);
+                previousBottom = null;
+                previousHeight = 0;
+                previousWidth = 0;
+            }
+            else
+            {
+                previousBottom = prepared.SourceBottom;
+                previousHeight = prepared.SourceBottom - prepared.SourceTop + 1;
+                previousWidth = prepared.Width;
+            }
+        }
+
+        assisted = assistedItems
+            .GroupBy(item => $"{item.PhysicalBandId}\n{item.CanonicalTarget}", StringComparer.Ordinal)
+            .Select(static group => group.First())
+            .ToArray();
+        physicalLines = physicalItems;
+        candidateEvidence = candidateItems;
+        return lines;
+    }
+
+    private static OcrCandidateEvidenceKind ClassifyBatchCandidate(
+        string observed,
+        string canonicalTarget)
+    {
+        var actualNumeric = AffixCanonicalizer.Normalize(observed).Tokens.Count(static token =>
+            token.Kind != AffixTokenKind.Word);
+        var expectedNumeric = AffixCanonicalizer.Normalize(canonicalTarget).Tokens.Count(static token =>
+            token.Kind != AffixTokenKind.Word);
+        if (actualNumeric < expectedNumeric)
+        {
+            return OcrCandidateEvidenceKind.MissingNumericValue;
+        }
+
+        return actualNumeric > expectedNumeric
+            ? OcrCandidateEvidenceKind.ConflictingNumericValue
+            : OcrCandidateEvidenceKind.LocalizedLexicalCandidate;
+    }
+
+    private static string CreateBandId(PreparedFrame band) =>
+        $"{band.ContentFingerprint:x16}:{band.SourceTop}:{band.SourceBottom}:{band.SourceLeft}:{band.SourceRight}";
+
     private bool IsSameProgressFrame(
         ulong fingerprint,
         string targetKey,
@@ -719,6 +1064,8 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
             }
 
             _disposed = true;
+            _batchProgress = null;
+            _batchCache = null;
             _session.Dispose();
         }
         finally
@@ -810,4 +1157,57 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
         double TargetWidthDistance);
 
     private readonly record struct AssistedCandidate(int LineIndex, string Text);
+
+    private sealed class BatchProgress
+    {
+        public BatchProgress(
+            ulong fingerprint,
+            int width,
+            int height,
+            string targetKey,
+            BatchBandRecognition?[] bands,
+            int nextBandIndex,
+            Queue<BatchRecoveryWork> recoveryQueue)
+        {
+            Fingerprint = fingerprint;
+            Width = width;
+            Height = height;
+            TargetKey = targetKey;
+            Bands = bands;
+            NextBandIndex = nextBandIndex;
+            RecoveryQueue = recoveryQueue;
+        }
+
+        public ulong Fingerprint { get; }
+
+        public int Width { get; }
+
+        public int Height { get; }
+
+        public string TargetKey { get; }
+
+        public BatchBandRecognition?[] Bands { get; }
+
+        public int NextBandIndex { get; set; }
+
+        public Queue<BatchRecoveryWork> RecoveryQueue { get; }
+    }
+
+    private sealed record BatchCache(
+        ulong Fingerprint,
+        int Width,
+        int Height,
+        string TargetKey,
+        OcrRecognitionResult Result);
+
+    private sealed record BatchBandRecognition(CtcBatchRecognition Batch)
+    {
+        public List<BatchAssistedText> SegmentedStrict { get; } = [];
+    }
+
+    private sealed record BatchRecoveryWork(
+        int BandIndex,
+        FullLineAffixMatcher Target);
+
+    private sealed record BatchAssistedText(string Text, string CanonicalTarget);
 }

@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.7.0-preview.1</Version>
+    <Version>0.7.0-preview.2</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyName>PoeAlarm</AssemblyName>
     <Product>POE Alarm</Product>

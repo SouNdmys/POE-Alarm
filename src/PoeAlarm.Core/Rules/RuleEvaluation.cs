@@ -2,12 +2,32 @@ using PoeAlarm.Core.Matching;
 
 namespace PoeAlarm.Core.Rules;
 
+/// <summary>A strict localized transcript tied to one physical tooltip band.</summary>
+public sealed record AssistedModifierObservation(
+    string PhysicalBandId,
+    string OriginalText,
+    string CanonicalTarget,
+    IReadOnlyList<string>? RelatedPhysicalBandIds = null)
+{
+    public IReadOnlyList<string> PhysicalBandIds =>
+        RelatedPhysicalBandIds is { Count: > 0 }
+            ? RelatedPhysicalBandIds
+            : [PhysicalBandId];
+}
+
+/// <summary>Maps one primary OCR line back to its physical tooltip band.</summary>
+public sealed record PhysicalLineIdentity(
+    int LineIndex,
+    string PhysicalBandId);
+
 public sealed record ModifierObservation(
     int StartLineIndex,
     int PhysicalLineCount,
     string OriginalText,
     string CanonicalText,
-    IReadOnlyList<decimal?> NumericValues);
+    IReadOnlyList<decimal?> NumericValues,
+    string? PhysicalBandId = null,
+    IReadOnlyList<string>? PhysicalBandIds = null);
 
 public sealed record NumericSlotEvidence(
     int SlotIndex,
@@ -34,6 +54,15 @@ public sealed record ConditionEvaluation(
 
     public bool NumericConstraintsMatched =>
         TextMatched && NumericSlots.All(static slot => slot.IsSatisfied);
+
+    /// <summary>
+    /// The complete target text was identified, but OCR did not produce a value for one of the
+    /// slots that the rule actually constrains. Fast monitoring treats this as a miss; guarded
+    /// monitoring may pause for manual confirmation. Ignored slots never make evidence uncertain.
+    /// </summary>
+    public bool HasMissingRequiredNumericValue =>
+        TextMatched && NumericSlots.Any(static slot =>
+            slot.Constraint.Mode != NumericConstraintMode.Ignore && slot.ActualValue is null);
 
     public int? StartLineIndex => Observation?.StartLineIndex;
 

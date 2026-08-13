@@ -17,6 +17,78 @@ internal static class SettingsProfileAssertions
 
         try
         {
+            const string poe1RuleName = "schema2 poe1 quick backup";
+            const string poe2RuleName = "schema2 poe2 structured rules";
+            await File.WriteAllTextAsync(
+                settingsPath,
+                $$"""
+                {
+                  "SchemaVersion": 2,
+                  "SelectedGameProfile": "Poe2",
+                  "Profiles": {
+                    "Poe1": {
+                      "TargetAffix": "poe1 independent target",
+                      "OcrLanguage": "zh-TW",
+                      "RuleEditorMode": "Quick",
+                      "MonitoringPolicy": "Fast",
+                      "StructuredRuleSet": {
+                        "SchemaVersion": 1,
+                        "Name": "{{poe1RuleName}}",
+                        "Groups": []
+                      }
+                    },
+                    "Poe2": {
+                      "TargetAffix": "poe2 independent target",
+                      "OcrLanguage": "en",
+                      "RuleEditorMode": "Structured",
+                      "MonitoringPolicy": "Fast",
+                      "StructuredRuleSet": {
+                        "SchemaVersion": 1,
+                        "Name": "{{poe2RuleName}}",
+                        "Groups": [
+                          {
+                            "Name": "schema2 result",
+                            "Mode": "All",
+                            "RequiredCount": 1,
+                            "Conditions": [
+                              {
+                                "Name": "schema2 target",
+                                "Template": "+#% to Critical Strike Multiplier",
+                                "NumericConstraints": [
+                                  { "Mode": "AtLeast", "Minimum": 35 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+            var schema2Store = new SettingsStore(settingsPath);
+            var schema2Migrated = await schema2Store.LoadAsync();
+            Assert(schema2Migrated.SchemaVersion == AppSettings.CurrentSchemaVersion,
+                "Schema 2 migrates in memory to schema 3");
+            Assert(!schema2Store.IsReadOnly, "Schema 2 remains writable");
+            var schema2Poe1 = schema2Migrated.Profiles!.Get(GameProfile.Poe1);
+            var schema2Poe2 = schema2Migrated.Profiles.Get(GameProfile.Poe2);
+            Assert(schema2Poe1.TargetAffix == "poe1 independent target" &&
+                   schema2Poe1.StructuredRuleSet?.Name == poe1RuleName,
+                "Schema 2 preserves POE1 quick target and its own stored rules");
+            Assert(schema2Poe2.TargetAffix == "poe2 independent target" &&
+                   schema2Poe2.StructuredRuleSet?.Name == poe2RuleName &&
+                   schema2Poe2.StructuredRuleSet.Groups[0].Conditions[0]
+                       .NumericConstraints[0].Minimum == 35,
+                "Schema 2 preserves POE2 rule values independently");
+            Assert(schema2Poe1.RuleEditorMode == RuleEditorMode.Quick &&
+                   schema2Poe2.RuleEditorMode == RuleEditorMode.Structured &&
+                   schema2Poe1.MonitoringPolicy == MonitoringPolicyId.Fast &&
+                   schema2Poe2.MonitoringPolicy == MonitoringPolicyId.Fast,
+                "Schema 2 adds no implicit Guarded policy or cross-profile mode change");
+            await schema2Store.SaveAsync(schema2Migrated);
+
             await File.WriteAllTextAsync(
                 settingsPath,
                 """
@@ -63,7 +135,7 @@ internal static class SettingsProfileAssertions
                     CaptureRegion = new ScreenRegion(700, 80, 640, 920),
                     OcrLanguage = "en",
                     RuleEditorMode = RuleEditorMode.Structured,
-                    MonitoringPolicy = MonitoringPolicyId.Fast,
+                    MonitoringPolicy = MonitoringPolicyId.Guarded,
                     StructuredRuleSet = new RuleSetDefinition(
                         "poe2 crafting rules",
                         [
@@ -103,8 +175,8 @@ internal static class SettingsProfileAssertions
                 "POE2 region round-trip");
             Assert(poe2.RuleEditorMode == RuleEditorMode.Structured,
                 "Structured rule mode round-trip");
-            Assert(poe2.MonitoringPolicy == MonitoringPolicyId.Fast,
-                "Monitoring policy remains orthogonal to structured rules");
+            Assert(poe2.MonitoringPolicy == MonitoringPolicyId.Guarded,
+                "Guarded monitoring policy round-trips independently from structured rules");
             Assert(poe2.StructuredRuleSet?.Groups.Count == 1,
                 "Structured acceptable results round-trip");
             Assert(
@@ -135,6 +207,10 @@ internal static class SettingsProfileAssertions
             var futureFallback = await futureStore.LoadAsync();
             Assert(futureFallback.SchemaVersion == AppSettings.CurrentSchemaVersion,
                 "Future settings load safe in-memory defaults");
+            Assert(futureStore.Compatibility == SettingsStoreCompatibility.FutureSchemaReadOnly &&
+                   futureStore.IsReadOnly &&
+                   futureStore.DetectedSchemaVersion == 999,
+                "Future settings expose an explicit read-only compatibility state");
             try
             {
                 await futureStore.SaveAsync(futureFallback);
@@ -148,7 +224,45 @@ internal static class SettingsProfileAssertions
             Assert(await File.ReadAllTextAsync(settingsPath) == futureSettings,
                 "Future settings remain byte-for-byte unchanged");
 
-            Console.WriteLine("Settings profile assertions: 30/30 passed");
+            var saveWithoutLoadStore = new SettingsStore(settingsPath);
+            try
+            {
+                await saveWithoutLoadStore.SaveAsync(new AppSettings());
+                throw new InvalidOperationException(
+                    "Saving without loading silently overwrote a future settings schema.");
+            }
+            catch (SettingsSchemaTooNewException exception)
+            {
+                Assert(exception.DetectedSchemaVersion == 999 &&
+                       exception.SupportedSchemaVersion == AppSettings.CurrentSchemaVersion,
+                    "Future-schema exception exposes detected and supported versions");
+            }
+            Assert(saveWithoutLoadStore.IsReadOnly &&
+                   saveWithoutLoadStore.DetectedSchemaVersion == 999,
+                "Save-time disk guard publishes the read-only compatibility state");
+            Assert(!File.Exists(settingsPath + ".tmp"),
+                "Rejected future-schema save removes its temporary file");
+            Assert(await File.ReadAllTextAsync(settingsPath) == futureSettings,
+                "Save without load leaves future settings byte-for-byte unchanged");
+
+            const string futureSettingsWithLowercaseSchema =
+                """
+                {
+                  "schemaversion": 1000,
+                  "SchemaVersion": 1,
+                  "FutureOnlyValue": "duplicate schema declaration must survive"
+                }
+                """;
+            await File.WriteAllTextAsync(settingsPath, futureSettingsWithLowercaseSchema);
+            var duplicateSchemaStore = new SettingsStore(settingsPath);
+            await duplicateSchemaStore.LoadAsync();
+            Assert(duplicateSchemaStore.IsReadOnly &&
+                   duplicateSchemaStore.DetectedSchemaVersion == 1000,
+                "Case-insensitive duplicate schema declarations cannot downgrade the guard");
+            Assert(await File.ReadAllTextAsync(settingsPath) == futureSettingsWithLowercaseSchema,
+                "Duplicate future schema settings remain byte-for-byte unchanged");
+
+            Console.WriteLine("Settings profile assertions: 40/40 passed");
         }
         finally
         {

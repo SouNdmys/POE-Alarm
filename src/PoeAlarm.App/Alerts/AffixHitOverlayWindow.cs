@@ -30,6 +30,8 @@ internal sealed class AffixHitOverlayWindow : Window
     private const int VkLeftButton = 0x01;
     private const int VkRightButton = 0x02;
     private const int VkMiddleButton = 0x04;
+    private const int VkXButton1 = 0x05;
+    private const int VkXButton2 = 0x06;
 
     private const int SmXVirtualScreen = 76;
     private const int SmYVirtualScreen = 77;
@@ -43,21 +45,29 @@ internal sealed class AffixHitOverlayWindow : Window
 
     private static readonly IntPtr HwndTopmost = new(-1);
 
+    // Native SendInput is unavailable on some CI/sandbox desktops. This internal seam lets the
+    // UI contract probe drive the same held/released boundary without mutating real user input.
+    internal static Func<bool>? MouseButtonPressedTestOverride { get; set; }
+
     private readonly TextBlock detectedTextBlock;
     private readonly TextBlock headline;
     private readonly TextBlock instruction;
     private readonly TextBlock hotkeyHint;
     private readonly Button acknowledgementButton;
+    private readonly Button guardedStopButton;
     private readonly DispatcherTimer acknowledgementCommitDelay;
     private readonly DispatcherTimer alertPromotionDelay;
     private readonly Grid alertVisualLayer;
     private readonly Border messagePanel;
+    private readonly Border desktopBorder;
     private IntPtr handle;
     private HwndSource? source;
     private bool serviceCloseRequested;
     private bool presentationPrepared;
     private bool alertPromotionPending;
     private bool acknowledgementPending;
+    private OverlayAction pendingAction;
+    private OverlayPresentationKind presentationKind;
     private int alertGeneration;
     private int pendingAcknowledgementGeneration;
     private long commitNotBefore;
@@ -145,6 +155,25 @@ internal sealed class AffixHitOverlayWindow : Window
         };
         acknowledgementButton.Click += OnAcknowledgementClick;
 
+        guardedStopButton = new Button
+        {
+            Background = new SolidColorBrush(Color.FromRgb(66, 45, 6)),
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(2),
+            Cursor = Cursors.Hand,
+            Focusable = false,
+            FontFamily = new FontFamily("Segoe UI"),
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            IsEnabled = true,
+            Margin = new Thickness(10, 14, 0, 0),
+            Padding = new Thickness(18, 9, 18, 9),
+            Visibility = Visibility.Collapsed,
+        };
+        guardedStopButton.Click += OnGuardedStopClick;
+
         hotkeyHint = new TextBlock
         {
             Foreground = Brushes.White,
@@ -156,11 +185,19 @@ internal sealed class AffixHitOverlayWindow : Window
             TextAlignment = TextAlignment.Center,
         };
 
+        var guardedButtonPanel = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Orientation = Orientation.Horizontal,
+        };
+        guardedButtonPanel.Children.Add(acknowledgementButton);
+        guardedButtonPanel.Children.Add(guardedStopButton);
+
         var messageStack = new StackPanel();
         messageStack.Children.Add(headline);
         messageStack.Children.Add(detectedTextBlock);
         messageStack.Children.Add(instruction);
-        messageStack.Children.Add(acknowledgementButton);
+        messageStack.Children.Add(guardedButtonPanel);
         messageStack.Children.Add(hotkeyHint);
 
         messagePanel = new Border
@@ -183,11 +220,12 @@ internal sealed class AffixHitOverlayWindow : Window
             Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
         };
         alertVisualLayer = new Grid();
-        alertVisualLayer.Children.Add(new Border
+        desktopBorder = new Border
         {
             BorderBrush = Brushes.Red,
             BorderThickness = new Thickness(14),
-        });
+        };
+        alertVisualLayer.Children.Add(desktopBorder);
         alertVisualLayer.Children.Add(messagePanel);
         root.Children.Add(alertVisualLayer);
         Content = root;
@@ -206,6 +244,11 @@ internal sealed class AffixHitOverlayWindow : Window
 
     public void ApplyLanguage()
     {
+        if (presentationKind == OverlayPresentationKind.GuardedUncertain)
+        {
+            return;
+        }
+
         var text = UiText.Current;
         headline.Text = text.AlertTitle;
         instruction.Text = text.AlertBlockingMessage;
@@ -236,6 +279,8 @@ internal sealed class AffixHitOverlayWindow : Window
     public event EventHandler<OverlayAcknowledgementRequestedEventArgs>? AcknowledgeRequested;
 
     public event EventHandler<OverlayPresentedEventArgs>? AlertPresented;
+
+    public event EventHandler<GuardedOverlayActionRequestedEventArgs>? GuardedActionRequested;
 
     /// <summary>
     /// Creates the native window while it is hidden and explicitly input-transparent. This keeps
@@ -298,6 +343,8 @@ internal sealed class AffixHitOverlayWindow : Window
         }
 
         _ = new WindowInteropHelper(this).EnsureHandle();
+        presentationKind = OverlayPresentationKind.RedAlert;
+        ApplyRedVisuals();
         detectedTextBlock.Text = detectedText;
         alertGeneration = generation;
         anchorRegion = region is { IsValid: true } ? region : null;
@@ -319,6 +366,60 @@ internal sealed class AffixHitOverlayWindow : Window
         if (IsLoaded && IsVisible)
         {
             _ = Dispatcher.BeginInvoke(PositionMessageOnTargetMonitor, DispatcherPriority.Render);
+        }
+    }
+
+    public void ArmGuarded(
+        string title,
+        string detail,
+        string instructionText,
+        string continueButtonText,
+        string stopButtonText,
+        int generation,
+        ScreenRegion? region)
+    {
+        if (serviceCloseRequested)
+        {
+            throw new InvalidOperationException("A closed alert overlay cannot be armed again.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instructionText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(continueButtonText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stopButtonText);
+
+        _ = new WindowInteropHelper(this).EnsureHandle();
+        presentationKind = OverlayPresentationKind.GuardedUncertain;
+        headline.Text = title.Trim();
+        detectedTextBlock.Text = detail.Trim();
+        instruction.Text = instructionText.Trim();
+        hotkeyHint.Visibility = Visibility.Collapsed;
+        acknowledgementButton.Content = continueButtonText.Trim();
+        acknowledgementButton.Background = new SolidColorBrush(Color.FromRgb(54, 52, 12));
+        guardedStopButton.Content = stopButtonText.Trim();
+        guardedStopButton.Visibility = Visibility.Visible;
+        desktopBorder.BorderBrush = Brushes.Gold;
+        messagePanel.BorderBrush = Brushes.Gold;
+        messagePanel.Background = new SolidColorBrush(Color.FromArgb(238, 96, 76, 4));
+        alertGeneration = generation;
+        anchorRegion = region is { IsValid: true } ? region : null;
+
+        alertPromotionPending = AnyMouseButtonPressed();
+        if (alertPromotionPending)
+        {
+            // Exactly like the red path, the yellow HWND remains visually dormant and natively
+            // input-transparent while the physical click that caused this decision is held. The
+            // PendingMouseInputGuard therefore remains the sole owner and lets that causative Up
+            // reach POE. Only a fully released five-button mask may promote this HWND.
+            alertVisualLayer.Visibility = Visibility.Collapsed;
+            IsHitTestVisible = false;
+            ApplyReleasedStyle();
+            alertPromotionDelay.Start();
+        }
+        else
+        {
+            ConfigureBlockingAlert();
         }
     }
 
@@ -392,6 +493,7 @@ internal sealed class AffixHitOverlayWindow : Window
         alertPromotionDelay.Stop();
         acknowledgementPending = false;
         pendingAcknowledgementGeneration = 0;
+        pendingAction = OverlayAction.None;
         alertPromotionPending = false;
         // Keep the reusable surface visually empty while hidden. This prevents a dormant native
         // Show during a held matching click from briefly exposing stale red pixels rendered by a
@@ -446,9 +548,26 @@ internal sealed class AffixHitOverlayWindow : Window
             // the current Closing event can be cancelled before the service closes the window.
             e.Cancel = true;
             var requestedGeneration = alertGeneration;
-            _ = Dispatcher.BeginInvoke(() => AcknowledgeRequested?.Invoke(
-                this,
-                new OverlayAcknowledgementRequestedEventArgs(requestedGeneration)));
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (presentationKind == OverlayPresentationKind.GuardedUncertain)
+                {
+                    // Keep the desktop shield in place until the service has stopped Guarded and
+                    // released its native owner. This mirrors the button path and avoids a small
+                    // close-to-stop window in which input could reach the game.
+                    GuardedActionRequested?.Invoke(
+                        this,
+                        new GuardedOverlayActionRequestedEventArgs(
+                            requestedGeneration,
+                            GuardedOverlayAction.StopMonitoring));
+                }
+                else
+                {
+                    AcknowledgeRequested?.Invoke(
+                        this,
+                        new OverlayAcknowledgementRequestedEventArgs(requestedGeneration));
+                }
+            });
             return;
         }
 
@@ -472,11 +591,48 @@ internal sealed class AffixHitOverlayWindow : Window
 
     private void OnAcknowledgementClick(object sender, RoutedEventArgs e)
     {
+        pendingAction = presentationKind == OverlayPresentationKind.GuardedUncertain
+            ? OverlayAction.GuardedContinue
+            : OverlayAction.Acknowledge;
+        BeginActionCommit();
+    }
+
+    /// <summary>
+    /// Native-only emergency release for a dispatcher watchdog. Win32 window style/visibility
+    /// calls are safe across threads, so a stalled WPF dispatcher cannot leave this HWND as an
+    /// invisible or half-presented desktop-wide input sink. WPF cleanup follows when it recovers.
+    /// </summary>
+    public void FailOpenNativeInputShield()
+    {
+        var windowHandle = handle;
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var releasedStyle = ComposeReleasedExtendedStyle(
+            GetWindowLongPtr(windowHandle, GwlExStyle).ToInt64());
+        _ = SetWindowLongPtr(windowHandle, GwlExStyle, new IntPtr(releasedStyle));
+        _ = ShowWindow(windowHandle, SwHide);
+    }
+
+    private void OnGuardedStopClick(object sender, RoutedEventArgs e)
+    {
+        pendingAction = OverlayAction.GuardedStop;
+        BeginActionCommit();
+    }
+
+    private void BeginActionCommit()
+    {
         acknowledgementPending = true;
         pendingAcknowledgementGeneration = alertGeneration;
         commitNotBefore = DeadlineFromNow(AcknowledgementCommitPeriod);
         acknowledgementButton.IsEnabled = false;
-        acknowledgementButton.Content = UiText.Current.AlertReleasing;
+        guardedStopButton.IsEnabled = false;
+        if (presentationKind == OverlayPresentationKind.RedAlert)
+        {
+            acknowledgementButton.Content = UiText.Current.AlertReleasing;
+        }
         acknowledgementCommitDelay.Stop();
         acknowledgementCommitDelay.Interval = AcknowledgementCommitPeriod;
         acknowledgementCommitDelay.Start();
@@ -495,12 +651,9 @@ internal sealed class AffixHitOverlayWindow : Window
             return;
         }
 
-        if (
-            Mouse.LeftButton != MouseButtonState.Released ||
-            Mouse.RightButton != MouseButtonState.Released ||
-            Mouse.MiddleButton != MouseButtonState.Released)
+        if (AnyMouseButtonPressed())
         {
-            // Keep swallowing the confirmation click's tail until every button is released.
+            // Keep swallowing the confirmation click's tail until L/R/M/X1/X2 are all released.
             commitNotBefore = DeadlineFromNow(AcknowledgementCommitPeriod);
             acknowledgementCommitDelay.Interval = AcknowledgementCommitPeriod;
             acknowledgementCommitDelay.Start();
@@ -508,11 +661,28 @@ internal sealed class AffixHitOverlayWindow : Window
         }
 
         var requestedGeneration = pendingAcknowledgementGeneration;
+        var requestedAction = pendingAction;
         acknowledgementPending = false;
         pendingAcknowledgementGeneration = 0;
-        AcknowledgeRequested?.Invoke(
+        pendingAction = OverlayAction.None;
+        if (requestedAction == OverlayAction.Acknowledge)
+        {
+            AcknowledgeRequested?.Invoke(
+                this,
+                new OverlayAcknowledgementRequestedEventArgs(requestedGeneration));
+            return;
+        }
+
+        // Keep the blocking HWND in place while the service atomically installs either the next
+        // one-click Guarded cycle or the terminal stop. The service releases this overlay only
+        // after its replacement input owner is ready.
+        GuardedActionRequested?.Invoke(
             this,
-            new OverlayAcknowledgementRequestedEventArgs(requestedGeneration));
+            new GuardedOverlayActionRequestedEventArgs(
+                requestedGeneration,
+                requestedAction == OverlayAction.GuardedContinue
+                    ? GuardedOverlayAction.ContinueMonitoring
+                    : GuardedOverlayAction.StopMonitoring));
     }
 
     private void OnAlertPromotionDelayElapsed(object? sender, EventArgs e)
@@ -534,9 +704,14 @@ internal sealed class AffixHitOverlayWindow : Window
         acknowledgementCommitDelay.Stop();
         acknowledgementPending = false;
         pendingAcknowledgementGeneration = 0;
+        pendingAction = OverlayAction.None;
         commitNotBefore = 0;
         acknowledgementButton.IsEnabled = true;
-        acknowledgementButton.Content = UiText.Current.AlertAcknowledge;
+        guardedStopButton.IsEnabled = true;
+        if (presentationKind == OverlayPresentationKind.RedAlert)
+        {
+            acknowledgementButton.Content = UiText.Current.AlertAcknowledge;
+        }
     }
 
     private IntPtr WindowProcedure(
@@ -574,9 +749,12 @@ internal sealed class AffixHitOverlayWindow : Window
         Stopwatch.GetTimestamp() + (long)(duration.TotalSeconds * Stopwatch.Frequency);
 
     private static bool AnyMouseButtonPressed() =>
-        IsVirtualKeyDown(VkLeftButton) ||
-        IsVirtualKeyDown(VkRightButton) ||
-        IsVirtualKeyDown(VkMiddleButton);
+        MouseButtonPressedTestOverride?.Invoke() ??
+        (IsVirtualKeyDown(VkLeftButton) ||
+         IsVirtualKeyDown(VkRightButton) ||
+         IsVirtualKeyDown(VkMiddleButton) ||
+         IsVirtualKeyDown(VkXButton1) ||
+         IsVirtualKeyDown(VkXButton2));
 
     private static bool IsVirtualKeyDown(int virtualKey) =>
         (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
@@ -646,6 +824,21 @@ internal sealed class AffixHitOverlayWindow : Window
         ResetAcknowledgementState();
         IsHitTestVisible = true;
         ApplyBlockingStyle();
+    }
+
+    private void ApplyRedVisuals()
+    {
+        var text = UiText.Current;
+        headline.Text = text.AlertTitle;
+        instruction.Text = text.AlertBlockingMessage;
+        hotkeyHint.Text = text.AlertShortcut;
+        hotkeyHint.Visibility = Visibility.Visible;
+        acknowledgementButton.Content = text.AlertAcknowledge;
+        acknowledgementButton.Background = new SolidColorBrush(Color.FromRgb(45, 12, 12));
+        guardedStopButton.Visibility = Visibility.Collapsed;
+        desktopBorder.BorderBrush = Brushes.Red;
+        messagePanel.BorderBrush = Brushes.Red;
+        messagePanel.Background = new SolidColorBrush(Color.FromArgb(232, 105, 0, 0));
     }
 
     private void PromoteDeferredAlertNow()
@@ -851,4 +1044,33 @@ internal sealed class OverlayAcknowledgementRequestedEventArgs(int generation) :
 internal sealed class OverlayPresentedEventArgs(int generation) : EventArgs
 {
     public int Generation { get; } = generation;
+}
+
+internal enum GuardedOverlayAction
+{
+    ContinueMonitoring,
+    StopMonitoring,
+}
+
+internal sealed class GuardedOverlayActionRequestedEventArgs(
+    int generation,
+    GuardedOverlayAction action) : EventArgs
+{
+    public int Generation { get; } = generation;
+
+    public GuardedOverlayAction Action { get; } = action;
+}
+
+internal enum OverlayPresentationKind
+{
+    RedAlert,
+    GuardedUncertain,
+}
+
+internal enum OverlayAction
+{
+    None,
+    Acknowledge,
+    GuardedContinue,
+    GuardedStop,
 }

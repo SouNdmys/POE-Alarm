@@ -300,6 +300,37 @@
                        Text="开始监控" />
           </Grid>
 
+          <Grid Margin="2,0,2,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="250" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="MonitoringPolicyLabelText"
+                       Grid.Column="0"
+                       Margin="0,0,12,0"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       Text="保护策略" />
+            <ComboBox x:Name="MonitoringPolicyComboBox"
+                      Grid.Column="1"
+                      SelectedIndex="0"
+                      SelectedValuePath="Tag"
+                      SelectionChanged="OnMonitoringPolicyChanged"
+                      Style="{StaticResource GlassComboBox}"
+                      ToolTip="快速模式维持原有低延迟；Mirror Tier 安全会在画面变化后拦住下一次点击，直到规则判定完成。">
+              <ComboBoxItem x:Name="FastMonitoringPolicyOption" Tag="Fast" Content="快速保护（原模式）" />
+              <ComboBoxItem x:Name="GuardedMonitoringPolicyOption" Tag="Guarded" Content="Mirror Tier 安全" />
+            </ComboBox>
+          </Grid>
+
+          <TextBlock x:Name="MonitoringPolicyHintText"
+                     Margin="2,0,2,10"
+                     Foreground="{StaticResource TextSecondaryBrush}"
+                     FontSize="12"
+                     Text="快速保护维持 0.6.1 的低延迟识别与点击行为。"
+                     TextWrapping="Wrap" />
+
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="1.45*" />

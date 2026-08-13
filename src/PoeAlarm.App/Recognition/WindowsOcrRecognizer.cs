@@ -64,15 +64,16 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
     public string RecognizerLanguageTag => _engine.RecognizerLanguage.LanguageTag;
 
     /// <summary>
-    /// Optional per-band detail used only by the POE2 English target verifier. The normal POE1
-    /// constructor leaves collection disabled, preserving its allocation and recognition path.
+    /// Optional per-band detail used by the POE2 English target verifier and structured physical
+    /// identity projection. The normal POE1 quick constructor leaves collection disabled,
+    /// preserving its allocation and recognition path.
     /// </summary>
     internal IReadOnlyList<WindowsRecognizedBand> LastRecognizedBands => _lastRecognizedBands;
 
     public StructuredRuleOcrSupport StructuredRuleSupport =>
         StructuredRuleOcrSupport.StrictBatch;
 
-    public Task<OcrRecognitionResult> RecognizeAsync(
+    public async Task<OcrRecognitionResult> RecognizeAsync(
         Capture.CapturedFrame frame,
         IReadOnlyList<FullLineAffixMatcher> targets,
         CancellationToken cancellationToken = default)
@@ -85,7 +86,13 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
 
         // Windows English OCR has no target-conditioned inference. One exhaustive pass is the
         // complete verified path; every strict rule is evaluated later against these shared lines.
-        return RecognizeAsync(frame, cancellationToken);
+        var result = await RecognizeAsync(frame, cancellationToken).ConfigureAwait(false);
+        return !_retainBandRecognitionDetails
+            ? result
+            : result with
+            {
+                PhysicalLines = CreatePhysicalLineMap(result.Lines, _lastRecognizedBands),
+            };
     }
 
     public async Task<OcrRecognitionResult> RecognizeAsync(
@@ -263,6 +270,44 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
         {
             lines.Add(string.Empty);
         }
+    }
+
+    private static IReadOnlyList<OcrPhysicalLine> CreatePhysicalLineMap(
+        IReadOnlyList<string> lines,
+        IReadOnlyList<WindowsRecognizedBand> recognizedBands)
+    {
+        var result = new List<OcrPhysicalLine>();
+        var searchStart = 0;
+        foreach (var band in recognizedBands.Where(static item => !item.Frame.IsFallback))
+        {
+            foreach (var bandLine in band.Lines)
+            {
+                var lineIndex = -1;
+                for (var index = searchStart; index < lines.Count; index++)
+                {
+                    if (string.Equals(lines[index], bandLine, StringComparison.Ordinal))
+                    {
+                        lineIndex = index;
+                        break;
+                    }
+                }
+
+                if (lineIndex < 0)
+                {
+                    continue;
+                }
+
+                result.Add(new OcrPhysicalLine(
+                    lineIndex,
+                    $"win:{band.Frame.ContentFingerprint:x16}:{band.Frame.SourceTop}:" +
+                    $"{band.Frame.SourceBottom}:{band.Frame.SourceLeft}:{band.Frame.SourceRight}",
+                    band.Frame.SourceTop,
+                    band.Frame.SourceBottom));
+                searchStart = lineIndex + 1;
+            }
+        }
+
+        return result;
     }
 
     private void CacheBandRecognition(BandCacheKey key, string[] lines)

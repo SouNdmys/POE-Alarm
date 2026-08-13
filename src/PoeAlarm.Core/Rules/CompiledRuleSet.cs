@@ -117,11 +117,28 @@ public sealed class CompiledRuleSet
     /// <summary>Deduplicated lexical targets for one-pass, target-aware OCR adapters.</summary>
     public IReadOnlyList<FullLineAffixMatcher> Targets { get; }
 
-    public RuleEvaluationResult Evaluate(IReadOnlyList<string> physicalLines)
+    public RuleEvaluationResult Evaluate(IReadOnlyList<string> physicalLines) =>
+        Evaluate(physicalLines, [], []);
+
+    /// <summary>
+    /// Evaluates strict primary lines together with independently verified localized transcripts.
+    /// Equal physical-band ids collapse into one assignment component, including a primary line
+    /// and its assisted alternatives, so one modifier can never satisfy two conditions.
+    /// </summary>
+    public RuleEvaluationResult Evaluate(
+        IReadOnlyList<string> physicalLines,
+        IReadOnlyList<AssistedModifierObservation> assistedObservations,
+        IReadOnlyList<PhysicalLineIdentity> physicalLineIdentities)
     {
         ArgumentNullException.ThrowIfNull(physicalLines);
+        ArgumentNullException.ThrowIfNull(assistedObservations);
+        ArgumentNullException.ThrowIfNull(physicalLineIdentities);
 
-        var observations = PrepareObservations(physicalLines, _maximumPhysicalLineSpan);
+        var observations = PrepareObservations(
+            physicalLines,
+            assistedObservations,
+            physicalLineIdentities,
+            _maximumPhysicalLineSpan);
         var evaluations = new ResultGroupEvaluation[_groups.Length];
         int? firstMatchedGroup = null;
         for (var index = 0; index < _groups.Length; index++)
@@ -353,13 +370,18 @@ public sealed class CompiledRuleSet
         var matches = new List<ConditionCandidate>();
         foreach (var prepared in observations)
         {
-            if (prepared.PhysicalLineCount > condition.Matcher.MaximumLineSpan ||
-                !condition.Matcher.IsMatch(prepared.Canonical))
+            var textMatches = prepared.VerifiedCanonicalTarget is { } verifiedTarget
+                ? string.Equals(
+                    condition.Matcher.Template.Text,
+                    verifiedTarget,
+                    StringComparison.Ordinal)
+                : condition.Matcher.IsMatch(prepared.Canonical);
+            if (prepared.PhysicalLineCount > condition.Matcher.MaximumLineSpan || !textMatches)
             {
                 continue;
             }
 
-            var observation = prepared.ToObservation();
+            var observation = prepared.ToObservation(condition.Matcher.Template);
             var numericEvidence = EvaluateNumericSlots(
                 condition.Constraints,
                 observation.NumericValues);
@@ -375,9 +397,15 @@ public sealed class CompiledRuleSet
 
     private static IReadOnlyList<PreparedObservation> PrepareObservations(
         IReadOnlyList<string> physicalLines,
+        IReadOnlyList<AssistedModifierObservation> assistedObservations,
+        IReadOnlyList<PhysicalLineIdentity> physicalLineIdentities,
         int maximumPhysicalLineSpan)
     {
         var observations = new List<PreparedObservation>(physicalLines.Count * 2);
+        var physicalBandByLine = physicalLineIdentities
+            .Where(identity => identity.LineIndex >= 0 && identity.LineIndex < physicalLines.Count)
+            .GroupBy(static identity => identity.LineIndex)
+            .ToDictionary(static group => group.Key, static group => group.First().PhysicalBandId);
         for (var start = 0; start < physicalLines.Count; start++)
         {
             if (string.IsNullOrWhiteSpace(physicalLines[start]))
@@ -403,8 +431,59 @@ public sealed class CompiledRuleSet
                 combined.Append(line.Trim());
                 var original = combined.ToString();
                 var canonical = AffixCanonicalizer.Normalize(original);
-                observations.Add(new PreparedObservation(start, span, original, canonical));
+                var bandIds = Enumerable.Range(start, span)
+                    .Select(index => physicalBandByLine.GetValueOrDefault(index))
+                    .Where(static id => !string.IsNullOrWhiteSpace(id))
+                    .Select(static id => id!)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                observations.Add(new PreparedObservation(
+                    start,
+                    span,
+                    original,
+                    canonical,
+                    bandIds));
             }
+        }
+
+        // Assisted transcripts are authoritative only after their recognizer's localized
+        // verification. They are never spliced into Lines, because doing so would lose their
+        // physical identity and permit duplicate counting across alternative target decodes.
+        var assistedIndex = 0;
+        foreach (var assisted in assistedObservations)
+        {
+            if (string.IsNullOrWhiteSpace(assisted.OriginalText) ||
+                string.IsNullOrWhiteSpace(assisted.PhysicalBandId))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(assisted.CanonicalTarget))
+            {
+                continue;
+            }
+
+            var canonical = AffixCanonicalizer.Normalize(assisted.OriginalText);
+            var verifiedCanonical = AffixCanonicalizer.Normalize(assisted.CanonicalTarget).Text;
+            if (string.IsNullOrWhiteSpace(verifiedCanonical))
+            {
+                continue;
+            }
+
+            var bandIds = assisted.PhysicalBandIds
+                .Append(assisted.PhysicalBandId)
+                .Where(static id => !string.IsNullOrWhiteSpace(id))
+                .Select(static id => id.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            observations.Add(new PreparedObservation(
+                physicalLines.Count + assistedIndex++,
+                physicalLineCount: 1,
+                assisted.OriginalText.Trim(),
+                canonical,
+                bandIds,
+                verifiedCanonical));
         }
 
         return observations;
@@ -449,35 +528,90 @@ public sealed class CompiledRuleSet
     private static IReadOnlyDictionary<ObservationIdentity, int> BuildObservationComponents(
         IReadOnlyList<List<ConditionCandidate>> candidates)
     {
-        var observations = candidates
+        var observationCandidates = candidates
             .SelectMany(static items => items)
+            .GroupBy(static candidate => candidate.Identity)
+            .Select(static group => group.First())
+            .OrderBy(static candidate => candidate.Identity.StartLineIndex)
+            .ThenBy(static candidate => candidate.Identity.PhysicalLineCount)
+            .ToArray();
+        var observations = observationCandidates
             .Select(static candidate => candidate.Identity)
-            .Distinct()
-            .OrderBy(static identity => identity.StartLineIndex)
-            .ThenBy(static identity => identity.PhysicalLineCount)
             .ToArray();
         var result = new Dictionary<ObservationIdentity, int>(observations.Length);
-        var component = -1;
-        var componentEnd = -1;
-        foreach (var observation in observations)
+        if (observations.Length == 0)
         {
-            var end = observation.StartLineIndex + observation.PhysicalLineCount;
-            // Physical spans are half-open. Adjacent lines can be two independent
-            // modifiers; spans sharing any line are one ambiguous modifier component.
-            if (component < 0 || observation.StartLineIndex >= componentEnd)
+            return result;
+        }
+
+        // Connect candidates that may describe the same physical modifier. Ordinary logical
+        // spans connect when they overlap; identity-bearing primary/assisted alternatives also
+        // connect when any of their physical band ids intersect. A tiny union-find keeps this
+        // transitive (A shares band X with B, B shares Y with C => all one component).
+        var parents = Enumerable.Range(0, observations.Length).ToArray();
+        var componentEnd = -1;
+        var previousObservation = -1;
+        var observationByBand = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < observations.Length; index++)
+        {
+            var observation = observations[index];
+            if (observation.StartLineIndex < componentEnd && previousObservation >= 0)
             {
-                component++;
-                componentEnd = end;
-            }
-            else
-            {
-                componentEnd = Math.Max(componentEnd, end);
+                Union(index, previousObservation);
             }
 
-            result[observation] = component;
+            var end = observation.StartLineIndex + observation.PhysicalLineCount;
+            componentEnd = Math.Max(componentEnd, end);
+
+            previousObservation = index;
+            foreach (var bandId in observationCandidates[index].Observation.PhysicalBandIds ?? [])
+            {
+                if (observationByBand.TryGetValue(bandId, out var existing))
+                {
+                    Union(index, existing);
+                }
+                else
+                {
+                    observationByBand[bandId] = index;
+                }
+            }
+        }
+
+        var componentByRoot = new Dictionary<int, int>();
+        for (var index = 0; index < observations.Length; index++)
+        {
+            var root = Find(index);
+            if (!componentByRoot.TryGetValue(root, out var component))
+            {
+                component = componentByRoot.Count;
+                componentByRoot[root] = component;
+            }
+
+            result[observations[index]] = component;
         }
 
         return result;
+
+        int Find(int item)
+        {
+            while (parents[item] != item)
+            {
+                parents[item] = parents[parents[item]];
+                item = parents[item];
+            }
+
+            return item;
+        }
+
+        void Union(int left, int right)
+        {
+            left = Find(left);
+            right = Find(right);
+            if (left != right)
+            {
+                parents[right] = left;
+            }
+        }
     }
 
     private static List<ComponentCandidate>[] BuildComponentCandidates(
@@ -580,25 +714,57 @@ public sealed class CompiledRuleSet
     private readonly record struct ObservationIdentity(
         int StartLineIndex,
         int PhysicalLineCount,
-        string CanonicalText);
+        string CanonicalText,
+        string PhysicalIdentityKey);
 
     private sealed class PreparedObservation
     {
         private readonly int _startLineIndex;
         private readonly string _originalText;
-        private ModifierObservation? _observation;
 
         public PreparedObservation(
             int startLineIndex,
             int physicalLineCount,
             string originalText,
-            CanonicalAffix canonical)
+            CanonicalAffix canonical,
+            string? physicalBandId)
+            : this(
+                startLineIndex,
+                physicalLineCount,
+                originalText,
+                canonical,
+                string.IsNullOrWhiteSpace(physicalBandId) ? [] : [physicalBandId],
+                verifiedCanonicalTarget: null)
+        {
+        }
+
+        public PreparedObservation(
+            int startLineIndex,
+            int physicalLineCount,
+            string originalText,
+            CanonicalAffix canonical,
+            IReadOnlyList<string> physicalBandIds,
+            string? verifiedCanonicalTarget = null)
         {
             _startLineIndex = startLineIndex;
             _originalText = originalText;
             PhysicalLineCount = physicalLineCount;
             Canonical = canonical;
-            Identity = new ObservationIdentity(startLineIndex, physicalLineCount, canonical.Text);
+            VerifiedCanonicalTarget = string.IsNullOrWhiteSpace(verifiedCanonicalTarget)
+                ? null
+                : verifiedCanonicalTarget.Trim();
+            PhysicalBandIds = physicalBandIds
+                .Where(static id => !string.IsNullOrWhiteSpace(id))
+                .Select(static id => id.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            PhysicalBandId = PhysicalBandIds.FirstOrDefault();
+            Identity = new ObservationIdentity(
+                startLineIndex,
+                physicalLineCount,
+                VerifiedCanonicalTarget ?? canonical.Text,
+                string.Join('\n', PhysicalBandIds));
         }
 
         public int PhysicalLineCount { get; }
@@ -607,15 +773,52 @@ public sealed class CompiledRuleSet
 
         public CanonicalAffix Canonical { get; }
 
+        public string? VerifiedCanonicalTarget { get; }
+
+        public string? PhysicalBandId { get; }
+
+        public IReadOnlyList<string> PhysicalBandIds { get; }
+
         public ObservationIdentity Identity { get; }
 
-        public ModifierObservation ToObservation() =>
-            _observation ??= new ModifierObservation(
+        public ModifierObservation ToObservation(CanonicalAffix matchedTemplate)
+        {
+            // Assisted lexical verification may recover the target while the raw transcript is
+            // still missing or confusing word glyphs. Numeric evidence must nevertheless come
+            // only from the observed text. Project those observed magnitudes onto the verified
+            // template's numeric token structure; this never invents a roll value.
+            var numericValues = AffixValueExtractor.Extract(_originalText);
+            var expectedNumericKinds = matchedTemplate.Tokens
+                .Where(static token => token.Kind != AffixTokenKind.Word)
+                .Select(static token => token.Kind)
+                .ToArray();
+            var actualNumericTokens = Canonical.Tokens
+                .Where(static token => token.Kind != AffixTokenKind.Word)
+                .ToArray();
+            if (VerifiedCanonicalTarget is not null &&
+                actualNumericTokens.Length == expectedNumericKinds.Length &&
+                actualNumericTokens.Select(static token => token.Kind)
+                    .SequenceEqual(expectedNumericKinds))
+            {
+                // The ordinary extractor is already in token order; the check above prevents
+                // accepting a value with a different unit or sign merely because CTC supplied
+                // the words.
+            }
+            else if (VerifiedCanonicalTarget is not null)
+            {
+                numericValues = Enumerable.Repeat<decimal?>(null, expectedNumericKinds.Length)
+                    .ToArray();
+            }
+
+            return new ModifierObservation(
                 _startLineIndex,
                 PhysicalLineCount,
                 _originalText,
-                Canonical.Text,
-                AffixValueExtractor.Extract(_originalText));
+                VerifiedCanonicalTarget ?? Canonical.Text,
+                numericValues,
+                PhysicalBandId,
+                PhysicalBandIds);
+        }
     }
 
     private sealed record ConditionCandidate(
