@@ -84,12 +84,12 @@ M1 规则引擎输出 `Match / NoMatch` 加逐组、逐条件、逐数值槽证�
 - 截图测试与 Replay 输出命中原因、实际值、失败约束和耗时。
 - 数值约束开启时显示 Catalyst/品质/特殊效果警告：程序比较的是 tooltip 显示值，不保证它等于未加成的原生 Tier 数值。
 
-### 下一步：Mirror Tier 安全监控
+### 已实现：Mirror Tier 安全监控
 
-- 新增独立的 `Guarded` 监控策略：检测到语义画面变化后，先让已经交给游戏的当前按键完整释放，再阻挡下一次按下，直到该状态得到 `Match`、`NoMatch` 或 `Uncertain`。
+- 新增独立的 `Guarded` 监控策略：只放行一组完整的制作点击，并在该次抬起时原子进入拦截；画面变化后持续持有输入，直到该状态得到 `Match`、`NoMatch` 或 `Uncertain`。
 - 启动监控前预热本策略需要的 OCR/数字复核资源，避免第一次变化时懒加载。
 - 不增加固定的两秒等待；仅在 recognizer 明确要求渐进重扫或数字复核时继续持有保护。
-- `Match` 进入现有红色锁定告警；`Uncertain` 进入黄色人工检查；`NoMatch` 立即放行。
+- `Match` 进入现有红色锁定告警；`Uncertain` 进入黄色人工检查；`NoMatch` 进入下一组“只放行一次完整制作点击”的周期。被拦截的点击始终按 Down/Up 成对丢弃，不排队、不补发。
 - 安全策略及其可选数字复核器独立于快速路径，不能改动快速路径已验证的 OCR 阈值、缓存判断或鼠标状态转换。
 
 ### 延后，不在当前版本实现
@@ -145,7 +145,7 @@ Replay/                           # 同一 observation -> rule evaluation 管线
 
 ## 5. 兼容与迁移
 
-- 设置增加显式 `SchemaVersion`、每游戏可选的 `StructuredRuleSet` 与独立的 `MonitoringPolicyId`；继续保留 `GameProfileSettings.TargetAffix`，不破坏 0.6.1 单目标与降级读取。当前策略枚举只开放已验证的 `Fast`；M4 真正实现安全状态机后才加入 `Guarded`，避免配置文件提前承诺不存在的保护能力。
+- 设置增加显式 `SchemaVersion`、每游戏可选的 `StructuredRuleSet` 与独立的 `MonitoringPolicyId`；继续保留 `GameProfileSettings.TargetAffix`，不破坏 0.6.1 单目标与降级读取。Schema 3 已加入独立的 `Fast` / `Guarded` 字段；旧配置仍缺省为 `Fast`。
 - 读取 0.6.1 设置时，保留每个游戏的 `TargetAffix` 并明确选择 `Quick`；需要进入结构化引擎时，适配器才把它编译成一个结果、一个条件、`RequiredCount = 1`、所有数值槽 `Ignore`。旧设置不会被静默改写成高级模式。
 - 迁移绝不根据粘贴文本自动开启范围或 Tier 判断，否则旧用户会从“忽略数值”无声变成“限定数值”。
 - `Fast` 必须保留 0.6.1 的实际保护矩阵：POE1 English 不新增预判闸门；POE2 与繁中继续使用已有 changed-frame 短时闸门。
@@ -185,11 +185,12 @@ Replay/                           # 同一 observation -> rule evaluation 管线
 
 - 交付三个入口、折叠式可接受结果编辑器、数值槽编辑、验证提示和可解释诊断。
 - 截图测试与 Replay 使用同一编译/求值链路。
-- 当前开发预览已开放 POE1 English 的单次严格批量 OCR，并为 POE2 English 保留 changed-frame 的双 Windows 引擎确认；POE2 的多目标局部 Paddle 辅助仍未启用。繁中与无 Windows 中文能力时的 Paddle 路径在共享候选/物理行证据完成前明确拒绝结构化监控，不允许静默退化为 target-free OCR。快速单目标路径不受此门禁影响。
+- 当前开发预览已开放 POE1 English 的单次严格批量 OCR；POE2 English 保留 changed-frame 的双 Windows 引擎确认，并以共享 Paddle logits 做最多两个物理 band 的多目标局部复核。繁中 Windows OCR 与无系统中文能力时的 Paddle 路径也已实现共享目标集合、渐进式有界恢复和稳定物理 band 身份：普通转录与辅助转录来自同一 band 时只能分配给一条规则。每次扫描最多推进 1–2 个 recovery work unit，不按目标数量重复整帧 OCR。快速单目标路径不受此批量实现影响。
 
 ### M4：Guarded 安全策略
 
-- 单独实现并测试 Mirror Tier 状态机、预热、黄色不确定暂停与故障释放。
+- 已单独实现 Mirror Tier 状态机、预热、黄色不确定暂停、稳定帧严格判定、一次制作点击放行闸门与故障释放；OCR 候选 evidence 与正式命中证据分离，普通规则求值不会接纳模糊文本。
+- 当前只在原本就有 changed-frame 指纹与输入闸门基础的 POE2 English、Windows 繁中及内置 Paddle 路径开放。POE1 English 继续保持 0.6.1 快速合同，等独立确认链路通过真实回放门禁后再开放 Guarded。
 - 不通过安全验收时不以“Mirror Tier”名义发布；快速和多词缀模式不被阻塞。
 
 ### M5：实战回放与发布门禁
@@ -215,8 +216,8 @@ Replay/                           # 同一 observation -> rule evaluation 管线
 
 ### 安全策略
 
-- 变化发生于按键已按下时，先放行该次配对的 MouseUp；下一次 MouseDown 才被保护。
-- `NoMatch` 后立即成对放行；`Match` 保持红色锁定；`Uncertain` 保持黄色人工检查。
+- 变化发生于按键已按下时，先放行该次配对的 MouseUp；完成判定后只允许下一组完整制作点击通过，并从它的 MouseUp 起保护后续输入。
+- `NoMatch` 后进入上述一次点击周期；`Match` 保持红色锁定；`Uncertain` 保持黄色人工检查。
 - 连续变化、渐进重扫和快速连点 Replay 中，每个可能目标状态都在下一次有效点击前得到判定。
 - 手动停止、异常、关闭、钩子失效和 watchdog 均释放输入并停止本轮，不留孤立按键状态。
 

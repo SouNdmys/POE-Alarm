@@ -1,4 +1,5 @@
 using System.Globalization;
+using PoeAlarm.App.Monitoring.Policies;
 
 namespace PoeAlarm.App.Localization;
 
@@ -69,7 +70,7 @@ internal static class UiText
         EditStructuredRules = "编辑规则",
         NoStructuredRules = "尚未配置多词缀规则",
         StructuredRuleHint = "命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。",
-        StructuredRuleSummaryTemplate = "{0} · {1} 个可接受结果 / {2} 条条件（开发预览）",
+        StructuredRuleSummaryTemplate = "{0} · {1} 个可接受结果 / {2} 条条件",
         NeedStructuredRules = "请先编辑并保存至少一种可接受结果。",
         StructuredOcrUnsupported = "当前游戏语言的批量目标 OCR 尚未通过发布门禁。已保留规则，但不会降级到缺少局部复核的识别路径。请先切换回快速模式。",
         StructuredTargetMatched = "已命中可接受结果；监控已锁停，先检查装备再确认。",
@@ -83,6 +84,13 @@ internal static class UiText
         SelectRegion = "框选装备提示区域",
         RegionEmpty = "尚未选择。游戏内悬停装备后按 Ctrl + Shift + F11 最方便。",
         RunSectionTitle = "3  运行",
+        MonitoringPolicyLabel = "保护策略",
+        MonitoringPolicyToolTip = "快速保护维持原有低延迟；Mirror Tier 安全会在画面变化后拦住下一次点击，直到稳定识别与规则判定完成。",
+        FastMonitoringPolicy = "快速保护（0.6.1 行为）",
+        GuardedMonitoringPolicy = "Mirror Tier 安全",
+        FastMonitoringHint = "快速保护维持 0.6.1 的低延迟识别与点击行为。",
+        GuardedMonitoringHint = "安全模式会允许当前点击完整抬起，并拦截后续点击；不确定结果会黄色暂停等待人工确认。",
+        GuardedMonitoringUnsupported = "当前识别器缺少安全模式所需的稳定画面指纹或批量复核能力，监控未启动。",
         StartMonitoring = "开始监控",
         StopMonitoring = "停止",
         AnalyzeScreenshot = "用截图测试",
@@ -134,6 +142,19 @@ internal static class UiText
         RegionUpdated = "监控区域已更新。",
         RegionSelectionCancelled = "已取消框选；监控保持停止。",
         MonitoringStarted = "正在监控；切回游戏后保持装备提示框位于所选区域。",
+        GuardedMonitoringStarted = "Mirror Tier 安全监控已启动；画面变化后的下一次点击会等待稳定判定。",
+        GuardedUncertainTitle = "结果不确定 · 已暂停点击",
+        GuardedUncertainInstruction = "请直接检查当前装备。确认可以继续才点“继续监控”；否则停止并人工处理。",
+        GuardedContinue = "我已检查，继续监控",
+        GuardedStop = "停止监控",
+        GuardedContinued = "已人工确认当前结果并恢复安全监控。",
+        GuardedStoppedForReview = "已停止安全监控；鼠标保护已解除，请人工检查当前装备。",
+        GuardedLexicalCandidateUnverified = "发现目标相似词缀，但局部复核无法可靠确认。",
+        GuardedNumericValueMissing = "发现目标词缀候选，但约束数值无法可靠读取。",
+        GuardedNumericValueConflict = "目标相关的多次识别给出了冲突数值。",
+        GuardedFrameUnstable = "装备提示框在安全判定期间未能稳定。",
+        GuardedProtectionFailedTemplate = "Mirror Tier 安全保护已故障并停止监控：{0}",
+        FutureSettingsReadOnlyTemplate = "检测到更新版本的设置格式（schema {0}）。本程序已使用安全默认值，并保持原文件只读不覆盖。",
         ScreenshotCancelled = "已取消截图分析；监控保持停止。",
         ScreenshotAnalyzing = "正在分析截图……",
         TestAlertDetectedText = "告警自检：这是红色命中提示",
@@ -219,7 +240,7 @@ internal static class UiText
         EditStructuredRules = "Edit rules",
         NoStructuredRules = "No multi-affix rule configured",
         StructuredRuleHint = "Matching any acceptable result triggers the alarm. One observed modifier counts at most once within a result.",
-        StructuredRuleSummaryTemplate = "{0} · {1} acceptable result(s) / {2} condition(s) (preview)",
+        StructuredRuleSummaryTemplate = "{0} · {1} acceptable result(s) / {2} condition(s)",
         NeedStructuredRules = "Edit and save at least one acceptable result first.",
         StructuredOcrUnsupported = "Batch target OCR for the current game language has not passed the release gate. Your rules are preserved, but the app will not fall back to recognition without its verified recovery path. Use Quick mode for now.",
         StructuredTargetMatched = "An acceptable result matched. Monitoring is locked and stopped; inspect the item before acknowledging.",
@@ -233,6 +254,13 @@ internal static class UiText
         SelectRegion = "Select tooltip region",
         RegionEmpty = "Not selected. Hover the item in-game, then press Ctrl + Shift + F11.",
         RunSectionTitle = "3  Run",
+        MonitoringPolicyLabel = "Protection policy",
+        MonitoringPolicyToolTip = "Fast preserves the established low-latency path. Mirror Tier Guarded blocks the next click after a frame change until a stable rule decision is available.",
+        FastMonitoringPolicy = "Fast protection (0.6.1 behavior)",
+        GuardedMonitoringPolicy = "Mirror Tier Guarded",
+        FastMonitoringHint = "Fast protection preserves the 0.6.1 recognition latency and click behavior.",
+        GuardedMonitoringHint = "Guarded lets the current click finish, blocks later clicks, and shows a yellow review pause for uncertain target-related evidence.",
+        GuardedMonitoringUnsupported = "The current recognizer lacks the stable-frame fingerprint or batch verification required by Guarded mode. Monitoring was not started.",
         StartMonitoring = "Start monitoring",
         StopMonitoring = "Stop",
         AnalyzeScreenshot = "Test a screenshot",
@@ -284,6 +312,19 @@ internal static class UiText
         RegionUpdated = "Monitoring region updated.",
         RegionSelectionCancelled = "Region selection cancelled; monitoring remains stopped.",
         MonitoringStarted = "Monitoring. Return to the game and keep the item tooltip inside the selected region.",
+        GuardedMonitoringStarted = "Mirror Tier Guarded monitoring is active. The next click after a frame change waits for a stable decision.",
+        GuardedUncertainTitle = "Uncertain result · clicks paused",
+        GuardedUncertainInstruction = "Inspect the current item. Continue only after confirming it is safe; otherwise stop and handle it manually.",
+        GuardedContinue = "Checked — continue monitoring",
+        GuardedStop = "Stop monitoring",
+        GuardedContinued = "The current result was manually accepted and Guarded monitoring resumed.",
+        GuardedStoppedForReview = "Guarded monitoring stopped and mouse protection was released. Inspect the current item manually.",
+        GuardedLexicalCandidateUnverified = "A target-like modifier was found, but localized verification could not confirm it reliably.",
+        GuardedNumericValueMissing = "A target modifier candidate was found, but its constrained value could not be read reliably.",
+        GuardedNumericValueConflict = "Target-related recognition passes reported conflicting numeric values.",
+        GuardedFrameUnstable = "The item tooltip did not stabilize during the Guarded decision.",
+        GuardedProtectionFailedTemplate = "Mirror Tier Guarded protection faulted and monitoring stopped: {0}",
+        FutureSettingsReadOnlyTemplate = "A newer settings format (schema {0}) was detected. Safe defaults are in use and the original file remains read-only and unchanged.",
         ScreenshotCancelled = "Screenshot analysis cancelled; monitoring remains stopped.",
         ScreenshotAnalyzing = "Analyzing screenshot…",
         TestAlertDetectedText = "Alert test: this is the red match notification",
@@ -385,6 +426,13 @@ internal sealed record UiStrings
     public required string SelectRegion { get; init; }
     public required string RegionEmpty { get; init; }
     public required string RunSectionTitle { get; init; }
+    public required string MonitoringPolicyLabel { get; init; }
+    public required string MonitoringPolicyToolTip { get; init; }
+    public required string FastMonitoringPolicy { get; init; }
+    public required string GuardedMonitoringPolicy { get; init; }
+    public required string FastMonitoringHint { get; init; }
+    public required string GuardedMonitoringHint { get; init; }
+    public required string GuardedMonitoringUnsupported { get; init; }
     public required string StartMonitoring { get; init; }
     public required string StopMonitoring { get; init; }
     public required string AnalyzeScreenshot { get; init; }
@@ -436,6 +484,19 @@ internal sealed record UiStrings
     public required string RegionUpdated { get; init; }
     public required string RegionSelectionCancelled { get; init; }
     public required string MonitoringStarted { get; init; }
+    public required string GuardedMonitoringStarted { get; init; }
+    public required string GuardedUncertainTitle { get; init; }
+    public required string GuardedUncertainInstruction { get; init; }
+    public required string GuardedContinue { get; init; }
+    public required string GuardedStop { get; init; }
+    public required string GuardedContinued { get; init; }
+    public required string GuardedStoppedForReview { get; init; }
+    public required string GuardedLexicalCandidateUnverified { get; init; }
+    public required string GuardedNumericValueMissing { get; init; }
+    public required string GuardedNumericValueConflict { get; init; }
+    public required string GuardedFrameUnstable { get; init; }
+    public required string GuardedProtectionFailedTemplate { get; init; }
+    public required string FutureSettingsReadOnlyTemplate { get; init; }
     public required string ScreenshotCancelled { get; init; }
     public required string ScreenshotAnalyzing { get; init; }
     public required string TestAlertDetectedText { get; init; }
@@ -522,6 +583,24 @@ internal sealed record UiStrings
 
     public string MonitorStoppedWithDetail(string detail) =>
         Format(MonitorStoppedWithDetailTemplate, detail);
+
+    public string GuardedProtectionFailed(string detail) =>
+        Format(GuardedProtectionFailedTemplate, detail);
+
+    public string FutureSettingsReadOnly(int schemaVersion) =>
+        Format(FutureSettingsReadOnlyTemplate, schemaVersion);
+
+    public string GuardedUncertaintyReason(GuardedUncertaintyReason? reason) => reason switch
+    {
+        Monitoring.Policies.GuardedUncertaintyReason.TargetLexicalCandidateUnverified =>
+            GuardedLexicalCandidateUnverified,
+        Monitoring.Policies.GuardedUncertaintyReason.TargetNumericValueMissing =>
+            GuardedNumericValueMissing,
+        Monitoring.Policies.GuardedUncertaintyReason.TargetNumericValueConflict =>
+            GuardedNumericValueConflict,
+        Monitoring.Policies.GuardedUncertaintyReason.FrameUnstable => GuardedFrameUnstable,
+        _ => GuardedFrameUnstable,
+    };
 
     public string CanonicalMatch(string canonicalText) =>
         Format(CanonicalMatchTemplate, canonicalText);

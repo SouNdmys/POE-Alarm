@@ -155,7 +155,16 @@ public sealed class ScreenshotAffixAnalyzer
             cancellationToken.ThrowIfCancellationRequested();
 
             var evaluationWatch = Stopwatch.StartNew();
-            evaluation = rules.Evaluate(ocrResult.Lines);
+            evaluation = rules.Evaluate(
+                ocrResult.Lines,
+                ocrResult.BatchAssistedObservations.Select(static observation =>
+                    new AssistedModifierObservation(
+                        observation.PhysicalBandId,
+                        observation.OriginalText,
+                        observation.CanonicalTarget,
+                        observation.RelatedPhysicalBandIds)).ToArray(),
+                ocrResult.BatchPhysicalLines.Select(static line =>
+                    new PhysicalLineIdentity(line.LineIndex, line.PhysicalBandId)).ToArray());
             evaluationWatch.Stop();
             evaluationElapsed += evaluationWatch.Elapsed;
             if (evaluation.IsMatch || !ocrResult.RequiresRescan)

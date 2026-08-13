@@ -1,0 +1,403 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-13",
+  "purpose": "Reproducible RuleSet evaluation corpus using real PoEDB/PoE2DB modifier text and real mirror-service item combinations. It tests deterministic text-rule evaluation, not OCR accuracy or crafting feasibility.",
+  "limitations": [
+    "Normal non-Alt tooltips do not expose the word fractured (or the modifier tier/name), so fractured provenance is deliberately metadata only and is never a rule condition.",
+    "Quality, catalysts, runes, enchantments and other modifier-magnitude effects can change displayed values; thresholds here apply to the displayed value only.",
+    "Hybrid modifiers are kept as one physical modifier only when the source exposes them together; one physical modifier must never satisfy two conditions.",
+    "Actual mirror-service listings establish real high-end combinations, while PoEDB/PoE2DB item-class pages establish current modifier wording and ranges. A text corpus is not evidence that every OCR engine can read every rendered tooltip."
+  ],
+  "sources": [
+    {
+      "id": "poe1-poedb-one-hand-swords",
+      "kind": "modifier-database",
+      "game": "POE1",
+      "equipmentSlot": "one-hand-sword",
+      "url": "https://poedb.tw/us/One_Hand_Swords",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current One Hand Sword page exposes the physical, flat physical, attack-speed and critical families used by the historical real mirror sword scenario."
+    },
+    {
+      "id": "poe1-poedb-wands",
+      "kind": "modifier-database",
+      "game": "POE1",
+      "equipmentSlot": "wand",
+      "url": "https://poedb.tw/us/Wands",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Wand page exposes increased Spell Damage, cast speed, spell gem level and critical wording used by the wand scenarios."
+    },
+    {
+      "id": "poe1-poedb-sceptres",
+      "kind": "modifier-database",
+      "game": "POE1",
+      "equipmentSlot": "sceptre",
+      "url": "https://poedb.tw/us/Sceptres",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Sceptre page confirms all Spell Skill Gems, spell damage, cast speed and spell-critical modifier families cited by the real Golem Bane listing."
+    },
+    {
+      "id": "poe1-poedb-cobalt-jewel",
+      "kind": "modifier-database",
+      "game": "POE1",
+      "equipmentSlot": "cobalt-jewel",
+      "url": "https://poedb.tw/us/Cobalt_Jewel",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Cobalt Jewel page exposes the four close neighbours: global critical chance, spell critical chance, spell critical multiplier and generic attack speed."
+    },
+    {
+      "id": "poe1-mirror-wand-2026",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE1",
+      "equipmentSlot": "wand",
+      "url": "https://www.pathofexile.com/forum/view-thread/3924610",
+      "accessedAt": "2026-08-13",
+      "evidence": "Wrath Edge Omen Wand mirror listing contains Global Critical Strike Multiplier, all Spell and Physical Spell skill gem levels, physical-as-extra-cold and Hatred aura effect."
+    },
+    {
+      "id": "poe1-mirror-spell-items-2025",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE1",
+      "equipmentSlot": "sceptre-and-amulet",
+      "url": "https://www.pathofexile.com/forum/view-thread/3527883",
+      "accessedAt": "2026-08-13",
+      "evidence": "Golem Bane sceptre and Blight Braid amulet establish real high-end combinations including spell damage, spell crit chance, spell skill levels, cast speed and penetration."
+    },
+    {
+      "id": "poe1-mirror-weapon-shop",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE1",
+      "equipmentSlot": "one-hand-sword",
+      "url": "https://www.pathofexile.com/forum/view-thread/2196247",
+      "accessedAt": "2026-08-13",
+      "evidence": "Phoenix Needle real mirror item combines 178% physical, 24-40 added physical, 27% attack speed, extra cold, elemental penetration and 27% critical chance."
+    },
+    {
+      "id": "poe2-poe2db-two-hand-maces",
+      "kind": "modifier-database",
+      "game": "POE2",
+      "equipmentSlot": "two-hand-mace",
+      "url": "https://poe2db.tw/us/Two_Hand_Maces",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Two Hand Mace page exposes 170-179% pure physical, 75-79% physical plus accuracy hybrid, added physical, melee skill levels and related top tiers."
+    },
+    {
+      "id": "poe2-poe2db-quarterstaves",
+      "kind": "modifier-database",
+      "game": "POE2",
+      "equipmentSlot": "quarterstaff",
+      "url": "https://poe2db.tw/us/Quarterstaves",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Quarterstaff page confirms 170-179% pure physical, 75-79% physical plus 175-200 accuracy, 37-55 to 63-94 flat physical, attack speed and melee skill level families."
+    },
+    {
+      "id": "poe2-poe2db-greater-haste",
+      "kind": "modifier-database",
+      "game": "POE2",
+      "equipmentSlot": "martial-weapon",
+      "url": "https://poe2db.tw/Greater_Essence_of_Haste",
+      "accessedAt": "2026-08-13",
+      "evidence": "Greater Essence of Haste confirms 23-25% increased Attack Speed for melee weapons."
+    },
+    {
+      "id": "poe2-poe2db-wands",
+      "kind": "modifier-database",
+      "game": "POE2",
+      "equipmentSlot": "wand",
+      "url": "https://poe2db.tw/us/Wands",
+      "accessedAt": "2026-08-13",
+      "evidence": "Current Wand page exposes 105-119% spell/elemental damage and 28-30% damage-as-extra elemental top tiers."
+    },
+    {
+      "id": "poe2-mirror-quarterstaff-2025",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE2",
+      "equipmentSlot": "quarterstaff",
+      "url": "https://www.pathofexile.com/forum/view-thread/3868726",
+      "accessedAt": "2026-08-13",
+      "evidence": "Razor Quarterstaff listing gives rolled values and ranges for 178% pure physical, 78% physical/accuracy hybrid, 55-94 added physical, 23% speed, +7 melee skills and 25% Onslaught chance."
+    },
+    {
+      "id": "poe2-mirror-mace-2025",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE2",
+      "equipmentSlot": "two-hand-mace",
+      "url": "https://www.pathofexile.com/forum/view-thread/3865567",
+      "accessedAt": "2026-08-13",
+      "evidence": "Cataclysm Thresher listing contains fractured added physical, pure physical, accuracy, +6 attack skills, Onslaught chance and desecrated 28% attack speed."
+    },
+    {
+      "id": "poe2-mirror-lightning-wand-2025",
+      "kind": "official-forum-mirror-listing",
+      "game": "POE2",
+      "equipmentSlot": "wand",
+      "url": "https://www.pathofexile.com/forum/view-thread/3843434",
+      "accessedAt": "2026-08-13",
+      "evidence": "Havoc Call listing combines lightning damage, extra lightning, spell damage, +5 Lightning Spell skills (fractured), critical spell damage and cast speed."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "poe1-cobalt-crit-roll",
+      "game": "POE1",
+      "locale": "en-US",
+      "equipmentSlot": "cobalt-jewel",
+      "title": "Jewel: any two desirable critical/speed affixes, or the exact spell-critical pair",
+      "basis": "current-modifier-pool",
+      "sourceIds": ["poe1-poedb-cobalt-jewel"],
+      "unobservableFacts": [],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "POE1 critical jewel",
+        "groups": [
+          {
+            "name": "any-two-of-four",
+            "mode": "AtLeast",
+            "requiredCount": 2,
+            "conditions": [
+              {"name":"global-crit","template":"#% increased Global Critical Strike Chance","numericConstraints":[{"mode":"AtLeast","minimum":8}]},
+              {"name":"spell-crit","template":"#% increased Spell Critical Strike Chance","numericConstraints":[{"mode":"AtLeast","minimum":10}]},
+              {"name":"spell-multi","template":"+#% to Critical Strike Multiplier for Spell Damage","numericConstraints":[{"mode":"AtLeast","minimum":12}]},
+              {"name":"attack-speed","template":"#% increased Attack Speed","numericConstraints":[{"mode":"AtLeast","minimum":3}]}
+            ]
+          },
+          {
+            "name": "spell-critical-pair",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"spell-crit","template":"#% increased Spell Critical Strike Chance","numericConstraints":[{"mode":"AtLeast","minimum":10}]},
+              {"name":"spell-multi","template":"+#% to Critical Strike Multiplier for Spell Damage","numericConstraints":[{"mode":"AtLeast","minimum":12}]}
+            ]
+          },
+          {
+            "name": "single-perfect-global-crit",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"perfect-global-crit","template":"#% increased Global Critical Strike Chance","numericConstraints":[{"mode":"Exactly","expected":10}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"two-of-four-positive","expectedMatch":true,"expectedGroup":"any-two-of-four","tags":["positive"],"lines":["8% increased Global Critical Strike Chance","3% increased Attack Speed"]},
+        {"id":"or-overlap-positive","expectedMatch":true,"expectedGroup":"any-two-of-four","tags":["positive","or-branch"],"lines":["10% increased Spell Critical Strike Chance","+12% to Critical Strike Multiplier for Spell Damage"]},
+        {"id":"or-second-branch-positive","expectedMatch":true,"expectedGroup":"single-perfect-global-crit","tags":["positive","or-second-branch"],"lines":["10% increased Global Critical Strike Chance"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["14% increased Spell Critical Strike Chance"]},
+        {"id":"near-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["14% increased Critical Strike Chance with Elemental Skills","+15% to Critical Strike Multiplier with Elemental Skills"]},
+        {"id":"numeric-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["7% increased Global Critical Strike Chance","2% increased Attack Speed"]}
+      ]
+    },
+    {
+      "id": "poe1-phoenix-needle-sword",
+      "game": "POE1",
+      "locale": "en-US",
+      "equipmentSlot": "one-hand-sword",
+      "title": "Actual mirror sword: top physical, flat physical, attack speed and critical chance",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe1-poedb-one-hand-swords", "poe1-mirror-weapon-shop"],
+      "unobservableFacts": [],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Phoenix Needle checkpoints",
+        "groups": [
+          {
+            "name": "four-core-affixes",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"physical","template":"#% increased Physical Damage","numericConstraints":[{"mode":"AtLeast","minimum":170}]},
+              {"name":"flat-physical","template":"Adds # to # Physical Damage","numericConstraints":[{"mode":"AtLeast","minimum":24},{"mode":"AtLeast","minimum":40}]},
+              {"name":"attack-speed","template":"#% increased Attack Speed","numericConstraints":[{"mode":"AtLeast","minimum":27}]},
+              {"name":"critical-chance","template":"#% increased Critical Strike Chance","numericConstraints":[{"mode":"AtLeast","minimum":27}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"listed-item-positive","expectedMatch":true,"expectedGroup":"four-core-affixes","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["178% increased Physical Damage","Adds 24 to 40 Physical Damage","27% increased Attack Speed","27% increased Critical Strike Chance","Gain 40% of Physical Damage as Extra Cold Damage","Damage Penetrates 8% Elemental Resistances"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["178% increased Physical Damage","Adds 24 to 40 Physical Damage","27% increased Attack Speed"]},
+        {"id":"physical-threshold-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["169% increased Physical Damage","Adds 24 to 40 Physical Damage","27% increased Attack Speed","27% increased Critical Strike Chance"]},
+        {"id":"spell-crit-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["178% increased Physical Damage","Adds 24 to 40 Physical Damage","27% increased Attack Speed","27% increased Spell Critical Strike Chance"]}
+      ]
+    },
+    {
+      "id": "poe1-wrath-edge-wand",
+      "game": "POE1",
+      "locale": "en-US",
+      "equipmentSlot": "wand",
+      "title": "Actual 2026 mirror wand: gem levels, global crit multiplier and physical-as-cold",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe1-poedb-wands", "poe1-mirror-wand-2026"],
+      "unobservableFacts": [],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Wrath Edge checkpoints",
+        "groups": [
+          {
+            "name": "full-mirror-core",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"global-multi","template":"+#% to Global Critical Strike Multiplier","numericConstraints":[{"mode":"AtLeast","minimum":38}]},
+              {"name":"all-spells","template":"+# to Level of all Spell Skill Gems","numericConstraints":[{"mode":"AtLeast","minimum":1}]},
+              {"name":"physical-spells","template":"+# to Level of all Physical Spell Skill Gems","numericConstraints":[{"mode":"AtLeast","minimum":1}]},
+              {"name":"extra-cold","template":"Gain #% of Physical Damage as Extra Cold Damage","numericConstraints":[{"mode":"AtLeast","minimum":20}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"listed-item-positive","expectedMatch":true,"expectedGroup":"full-mirror-core","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["+38% to Global Critical Strike Multiplier","+1 to Level of all Spell Skill Gems","+1 to Level of all Physical Spell Skill Gems","Gain 20% of Physical Damage as Extra Cold Damage","Hatred has 40% increased Aura Effect"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["+38% to Global Critical Strike Multiplier","+1 to Level of all Spell Skill Gems","Gain 20% of Physical Damage as Extra Cold Damage"]},
+        {"id":"lightning-spell-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["+38% to Global Critical Strike Multiplier","+1 to Level of all Spell Skill Gems","+1 to Level of all Lightning Spell Skill Gems","Gain 20% of Physical Damage as Extra Cold Damage"]}
+      ]
+    },
+    {
+      "id": "poe1-golem-bane-sceptre",
+      "game": "POE1",
+      "locale": "en-US",
+      "equipmentSlot": "sceptre",
+      "title": "Actual mirror sceptre with spell damage, spell critical chance, levels and cast speed",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe1-poedb-sceptres", "poe1-mirror-spell-items-2025"],
+      "unobservableFacts": ["The Fire Spell Skill Gems line is fractured in the listing; normal non-Alt text only exposes the visible modifier itself."],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Golem Bane caster checkpoints",
+        "groups": [
+          {
+            "name": "core-caster-pair",
+            "mode": "AtLeast",
+            "requiredCount": 2,
+            "conditions": [
+              {"name":"spell-damage","template":"#% increased Spell Damage","numericConstraints":[{"mode":"AtLeast","minimum":99}]},
+              {"name":"spell-critical","template":"#% increased Critical Strike Chance for Spells","numericConstraints":[{"mode":"AtLeast","minimum":90}]},
+              {"name":"all-spells","template":"+# to Level of all Spell Skill Gems","numericConstraints":[{"mode":"AtLeast","minimum":1}]},
+              {"name":"cast-speed","template":"#% increased Cast Speed","numericConstraints":[{"mode":"AtLeast","minimum":21}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"listed-pair-positive","expectedMatch":true,"expectedGroup":"core-caster-pair","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["99% increased Spell Damage","90% increased Critical Strike Chance for Spells"]},
+        {"id":"levels-and-speed-positive","expectedMatch":true,"expectedGroup":"core-caster-pair","tags":["positive"],"lines":["+1 to Level of all Spell Skill Gems","21% increased Cast Speed"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["99% increased Spell Damage"]},
+        {"id":"attack-critical-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["99% increased Spell Damage","90% increased Critical Strike Chance"]},
+        {"id":"spell-damage-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["98% increased Spell Damage","90% increased Critical Strike Chance for Spells"]}
+      ]
+    },
+    {
+      "id": "poe2-razor-quarterstaff",
+      "game": "POE2",
+      "locale": "en-US",
+      "equipmentSlot": "quarterstaff",
+      "title": "Actual mirror quarterstaff with pure physical plus physical/accuracy hybrid",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe2-poe2db-quarterstaves", "poe2-poe2db-greater-haste", "poe2-mirror-quarterstaff-2025"],
+      "unobservableFacts": ["The source listing labels tiers and ranges, but the normal tooltip does not expose the tier names."],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Razor Quarterstaff checkpoints",
+        "groups": [
+          {
+            "name": "physical-prefix-package",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"pure-physical","template":"#% increased Physical Damage","numericConstraints":[{"mode":"RangeInclusive","minimum":170,"maximum":179}]},
+              {"name":"hybrid-physical-accuracy","template":"#% increased Physical Damage\n+# to Accuracy Rating","numericConstraints":[{"mode":"RangeInclusive","minimum":75,"maximum":79},{"mode":"AtLeast","minimum":175}]},
+              {"name":"flat-physical","template":"Adds # to # Physical Damage","numericConstraints":[{"mode":"AtLeast","minimum":37},{"mode":"AtLeast","minimum":63}]}
+            ]
+          },
+          {
+            "name": "finishing-suffix-pair",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"speed","template":"#% increased Attack Speed","numericConstraints":[{"mode":"AtLeast","minimum":23}]},
+              {"name":"melee-skills","template":"+# to Level of all Melee Skills","numericConstraints":[{"mode":"AtLeast","minimum":7}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"listed-prefix-package-positive","expectedMatch":true,"expectedGroup":"physical-prefix-package","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]},
+        {"id":"listed-suffix-pair-positive","expectedMatch":true,"expectedGroup":"finishing-suffix-pair","tags":["positive","or-branch"],"lines":["23(23-25)% increased Attack Speed","+7 to Level of all Melee Skills","25(20-25)% chance to gain Onslaught on Killing Hits with this Weapon"]},
+        {"id":"one-short-hybrid-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating"]},
+        {"id":"hybrid-one-count-negative","expectedMatch":false,"tags":["one-modifier-one-count"],"lines":["78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]},
+        {"id":"hybrid-missing-second-line-negative","expectedMatch":false,"tags":["one-short-negative","near-neighbour-negative"],"lines":["178(170-179)% increased Physical Damage","78(75-79)% increased Physical Damage","Adds 55(37-55) to 94(63-94) Physical Damage"]},
+        {"id":"pure-physical-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["169(160-169)% increased Physical Damage","78(75-79)% increased Physical Damage","+192(+175-+200) to Accuracy Rating","Adds 55(37-55) to 94(63-94) Physical Damage"]}
+      ]
+    },
+    {
+      "id": "poe2-cataclysm-thresher",
+      "game": "POE2",
+      "locale": "en-US",
+      "equipmentSlot": "two-hand-mace",
+      "title": "Actual mirror mace: two of four valuable visible affixes",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe2-poe2db-two-hand-maces", "poe2-poe2db-greater-haste", "poe2-mirror-mace-2025"],
+      "unobservableFacts": ["The source says added physical is fractured and speed is desecrated; those provenance facts are not visible without Alt and are not rule conditions."],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Cataclysm Thresher roll checkpoints",
+        "groups": [
+          {
+            "name": "any-two-of-four",
+            "mode": "AtLeast",
+            "requiredCount": 2,
+            "conditions": [
+              {"name":"pure-physical","template":"#% increased Physical Damage","numericConstraints":[{"mode":"AtLeast","minimum":170}]},
+              {"name":"flat-physical","template":"Adds # to # Physical Damage","numericConstraints":[{"mode":"AtLeast","minimum":40},{"mode":"AtLeast","minimum":90}]},
+              {"name":"attack-speed","template":"#% increased Attack Speed","numericConstraints":[{"mode":"AtLeast","minimum":28}]},
+              {"name":"attack-skills","template":"+# to Level of all Attack Skills","numericConstraints":[{"mode":"AtLeast","minimum":6}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"physical-and-flat-positive","expectedMatch":true,"expectedGroup":"any-two-of-four","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["258% increased Physical Damage","Adds 54 to 92 Physical Damage"]},
+        {"id":"speed-and-skills-positive","expectedMatch":true,"expectedGroup":"any-two-of-four","tags":["positive"],"lines":["28% increased Attack Speed","+6 to Level of all Attack Skills"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["+6 to Level of all Attack Skills"]},
+        {"id":"melee-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["28% increased Attack Speed","+6 to Level of all Melee Skills"]},
+        {"id":"flat-second-slot-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["Adds 54 to 89 Physical Damage","+6 to Level of all Melee Skills"]}
+      ]
+    },
+    {
+      "id": "poe2-havoc-call-wand",
+      "game": "POE2",
+      "locale": "en-US",
+      "equipmentSlot": "wand",
+      "title": "Actual mirror lightning wand with visible spell package",
+      "basis": "actual-mirror-item",
+      "sourceIds": ["poe2-poe2db-wands", "poe2-mirror-lightning-wand-2025"],
+      "unobservableFacts": ["The +5 Lightning Spell Skills modifier is fractured and cast speed is desecrated in the listing; the rules only assert their visible text/value."],
+      "ruleSet": {
+        "schemaVersion": 1,
+        "name": "Havoc Call visible spell package",
+        "groups": [
+          {
+            "name": "all-four-caster-lines",
+            "mode": "All",
+            "requiredCount": 1,
+            "conditions": [
+              {"name":"lightning","template":"#% increased Lightning Damage","numericConstraints":[{"mode":"AtLeast","minimum":105}]},
+              {"name":"spell","template":"#% increased Spell Damage","numericConstraints":[{"mode":"AtLeast","minimum":105}]},
+              {"name":"critical-spell-damage","template":"#% increased Critical Spell Damage Bonus","numericConstraints":[{"mode":"AtLeast","minimum":35}]},
+              {"name":"cast-speed","template":"#% increased Cast Speed","numericConstraints":[{"mode":"AtLeast","minimum":33}]}
+            ]
+          }
+        ]
+      },
+      "cases": [
+        {"id":"listed-item-positive","expectedMatch":true,"expectedGroup":"all-four-caster-lines","tags":["positive","actual-listing","numeric-boundary-inclusive"],"lines":["114(105-119)% increased Lightning Damage","Gain 27(25-27)% of Damage as Extra Lightning Damage","117(105-119)% increased Spell Damage","+5 to Level of all Lightning Spell Skills","39(35-39)% increased Critical Spell Damage Bonus","34(33-35)% increased Cast Speed"]},
+        {"id":"exact-boundaries-positive","expectedMatch":true,"expectedGroup":"all-four-caster-lines","tags":["positive","numeric-boundary-inclusive"],"lines":["105% increased Lightning Damage","105% increased Spell Damage","35% increased Critical Spell Damage Bonus","33% increased Cast Speed"]},
+        {"id":"one-short-negative","expectedMatch":false,"tags":["one-short-negative"],"lines":["114% increased Lightning Damage","117% increased Spell Damage","39% increased Critical Spell Damage Bonus"]},
+        {"id":"global-crit-neighbour-negative","expectedMatch":false,"tags":["near-neighbour-negative"],"lines":["114% increased Lightning Damage","117% increased Spell Damage","39% increased Global Critical Damage Bonus","34% increased Cast Speed"]},
+        {"id":"cast-speed-below-negative","expectedMatch":false,"tags":["numeric-boundary-below"],"lines":["114% increased Lightning Damage","117% increased Spell Damage","39% increased Critical Spell Damage Bonus","32% increased Cast Speed"]}
+      ]
+    }
+  ]
+}

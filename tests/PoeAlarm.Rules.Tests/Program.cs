@@ -24,11 +24,16 @@ var tests = new (string Name, Action Run)[]
     ("Specific numeric condition receives the qualifying observation", SpecificNumericConditionReceivesQualifyingObservation),
     ("Overlapping conditions require a complete one-to-one assignment", OverlappingConditionsRequireCompleteOneToOneAssignment),
     ("Overlapping physical spans cannot count one wrapped modifier twice", OverlappingPhysicalSpansCannotCountOneWrappedModifierTwice),
+    ("Assisted transcripts participate without losing physical identity", AssistedTranscriptsParticipateWithoutLosingPhysicalIdentity),
+    ("Primary and assisted alternatives from one band count once", PrimaryAndAssistedAlternativesFromOneBandCountOnce),
+    ("Wrapped assisted bands collapse transitively", WrappedAssistedBandsCollapseTransitively),
+    ("Wrapped assisted alternatives union every source band", WrappedAssistedAlternativesUnionEverySourceBand),
     ("Wrapped affixes are one logical observation", WrappedAffixesAreOneLogicalObservation),
     ("Blank lines remain logical boundaries", BlankLinesRemainLogicalBoundaries),
     ("Specific affix semantics stay distinct", SpecificAffixSemanticsStayDistinct),
     ("Invalid rules are rejected with validation details", InvalidRulesAreRejectedWithValidationDetails),
     ("Evaluation explains matches and numeric failures", EvaluationExplainsMatchesAndNumericFailures),
+    ("Missing constrained numeric evidence is explicit", MissingConstrainedNumericEvidenceIsExplicit),
     ("Twenty-condition evaluation remains sub-millisecond per call", TwentyConditionEvaluationRemainsFast),
     ("Dense duplicate assignment remains bounded", DenseDuplicateAssignmentRemainsBounded),
 };
@@ -474,6 +479,90 @@ static void OverlappingPhysicalSpansCannotCountOneWrappedModifierTwice()
     False(observations[0]!.StartLineIndex == observations[1]!.StartLineIndex);
 }
 
+static void AssistedTranscriptsParticipateWithoutLosingPhysicalIdentity()
+{
+    var rules = OneCondition(
+        "#% increased Physical Damage",
+        NumericConstraint.AtLeast(170m));
+
+    var result = rules.Evaluate(
+        ["unrelated primary OCR"],
+        [new AssistedModifierObservation(
+            "band-1",
+            "179% increased Physical Damage",
+            "#% increased Physical Damage")],
+        [new PhysicalLineIdentity(0, "band-0")]);
+
+    True(result.IsMatch);
+    Equal("band-1", result.MatchedGroup?.Conditions.Single().Observation?.PhysicalBandId);
+}
+
+static void PrimaryAndAssistedAlternativesFromOneBandCountOnce()
+{
+    var rules = Compile(new AcceptableResultGroup(
+        "same physical modifier",
+        ResultGroupMode.All,
+        [Condition("primary wording", "#% increased Physical Damage"),
+         Condition("assisted wording", "#% increased Attack Speed")]));
+
+    var result = rules.Evaluate(
+        ["179% increased Physical Damage"],
+        [new AssistedModifierObservation(
+            "band-1",
+            "27% increased Attack Speed",
+            "#% increased Attack Speed")],
+        [new PhysicalLineIdentity(0, "band-1")]);
+
+    False(result.IsMatch);
+    Equal(1, result.Groups.Single().MatchedCount);
+}
+
+static void WrappedAssistedBandsCollapseTransitively()
+{
+    var rules = Compile(new AcceptableResultGroup(
+        "one wrapped physical modifier",
+        ResultGroupMode.All,
+        [Condition("primary first row", "#% increased Physical Damage"),
+         Condition("assisted wrapped", "#% increased Attack Speed Recently"),
+         Condition("primary second row", "+# to maximum Life")]));
+
+    var result = rules.Evaluate(
+        ["179% increased Physical Damage", "+70 to maximum Life"],
+        [new AssistedModifierObservation(
+            "wrapped-band",
+            "27% increased Attack Sped Recently",
+            "#% increased Attack Speed Recently",
+            ["band-a", "band-b"])],
+        [new PhysicalLineIdentity(0, "band-a"), new PhysicalLineIdentity(1, "band-b")]);
+
+    False(result.IsMatch);
+    Equal(1, result.Groups.Single().MatchedCount);
+}
+
+static void WrappedAssistedAlternativesUnionEverySourceBand()
+{
+    var rules = Compile(new AcceptableResultGroup(
+        "wrapped identity",
+        ResultGroupMode.AtLeast,
+        [Condition("first primary", "First half"),
+         Condition("second primary", "Second half"),
+         Condition("assisted whole", "Whole recovered modifier")],
+        threshold: 2));
+
+    var result = rules.Evaluate(
+        ["First half", "Second half"],
+        [new AssistedModifierObservation(
+            "wrapped-band",
+            "Whole rec0vered modifier",
+            "Whole recovered modifier",
+            ["row-a", "row-b"])],
+        [new PhysicalLineIdentity(0, "row-a"),
+         new PhysicalLineIdentity(1, "row-b")]);
+
+    False(result.IsMatch);
+    Equal(1, result.Groups.Single().MatchedCount);
+}
+
 static void WrappedAffixesAreOneLogicalObservation()
 {
     var rules = OneCondition("#% increased Attack Speed if you've dealt a Critical Strike Recently");
@@ -564,6 +653,24 @@ static void EvaluationExplainsMatchesAndNumericFailures()
     True(!string.IsNullOrWhiteSpace(missEvidence.FailureReason));
     Equal(169m, missEvidence.ActualValues.Single());
     False(missEvidence.NumericSlots.Single().IsMatch);
+}
+
+static void MissingConstrainedNumericEvidenceIsExplicit()
+{
+    var constrained = OneCondition(
+        "#% increased Physical Damage",
+        NumericConstraint.AtLeast(170m));
+    var constrainedEvidence = constrained.Evaluate(["#% increased Physical Damage"])
+        .Groups.Single().Conditions.Single();
+    True(constrainedEvidence.TextMatched);
+    True(constrainedEvidence.HasMissingRequiredNumericValue);
+    False(constrainedEvidence.IsMatched);
+
+    var ignored = OneCondition("#% increased Physical Damage");
+    var ignoredEvidence = ignored.Evaluate(["#% increased Physical Damage"])
+        .Groups.Single().Conditions.Single();
+    True(ignoredEvidence.IsMatched);
+    False(ignoredEvidence.HasMissingRequiredNumericValue);
 }
 
 static void TwentyConditionEvaluationRemainsFast()

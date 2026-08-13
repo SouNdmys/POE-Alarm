@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using PoeAlarm.App.Capture;
+using PoeAlarm.App.Monitoring.Policies;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.Core.Matching;
 using PoeAlarm.Core.Rules;
@@ -15,6 +16,8 @@ public sealed class AffixMonitor : IAsyncDisposable
     private Task? _loopTask;
     private MonitorState _state = MonitorState.Idle;
     private bool _stopInProgress;
+    private GuardedPolicyStateMachine? _guardedStateMachine;
+    private TaskCompletionSource _guardedResumeSignal = CreateGuardedResumeSignal();
     private Task? _disposeTask;
     private bool _disposed;
 
@@ -29,6 +32,12 @@ public sealed class AffixMonitor : IAsyncDisposable
     public event EventHandler<AffixDetectedEventArgs>? AffixDetected;
 
     /// <summary>
+    /// Raised for terminal Guarded decisions. Match also raises <see cref="AffixDetected"/> so
+    /// the existing red latched alert remains the authoritative match owner.
+    /// </summary>
+    public event EventHandler<GuardedDecisionEventArgs>? GuardedDecisionChanged;
+
+    /// <summary>
     /// Raised before OCR starts on a changed frame for recognizers that expose a semantic
     /// fingerprint. The UI uses this to install a short, invisible input guard while that frame
     /// is being decided.
@@ -37,6 +46,13 @@ public sealed class AffixMonitor : IAsyncDisposable
 
     /// <summary>Raised when a guarded changed frame completes without a target match.</summary>
     public event EventHandler? InputGuardReleased;
+
+    /// <summary>
+    /// Raised after a conclusive Guarded miss or an explicit human Continue. The native gate must
+    /// remain installed, pass exactly the next complete crafting click, and guard every click
+    /// after that pair until the resulting tooltip has been decided.
+    /// </summary>
+    public event EventHandler? GuardedPassCycleRequested;
 
     public MonitorState State
     {
@@ -66,13 +82,29 @@ public sealed class AffixMonitor : IAsyncDisposable
             EnsureCanStart();
             _loopCancellation?.Dispose();
             _loopCancellation = new CancellationTokenSource();
+            _guardedStateMachine = null;
             _state = MonitorState.Running;
             _loopTask = RunLoopAsync(matcher, region, _loopCancellation.Token);
         }
     }
 
+    public GuardedSessionState? GuardedState
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _guardedStateMachine?.State;
+            }
+        }
+    }
+
     public StructuredRuleOcrSupport StructuredRuleSupport =>
         _ocrRecognizer.StructuredRuleSupport;
+
+    public bool SupportsGuardedMonitoring =>
+        _ocrRecognizer.StructuredRuleSupport != StructuredRuleOcrSupport.Unsupported &&
+        _ocrRecognizer is IFrameFingerprintProvider;
 
     /// <summary>
     /// Starts the structured-rule path. The legacy string overload above remains unchanged and
@@ -100,15 +132,141 @@ public sealed class AffixMonitor : IAsyncDisposable
             EnsureCanStart();
             _loopCancellation?.Dispose();
             _loopCancellation = new CancellationTokenSource();
+            _guardedStateMachine = null;
             _state = MonitorState.Running;
             _loopTask = RunRuleLoopAsync(rules, region, _loopCancellation.Token);
         }
+    }
+
+    /// <summary>
+    /// Starts structured monitoring under an explicit input policy. Passing Fast is identical to
+    /// the existing structured overload; Guarded uses its own state machine and loop.
+    /// </summary>
+    public void Start(
+        CompiledRuleSet rules,
+        ScreenRegion region,
+        IMonitoringPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        if (policy is FastMonitoringPolicy || policy.Kind == MonitoringPolicyKind.Fast)
+        {
+            Start(rules, region);
+            return;
+        }
+
+        if (policy is not GuardedMonitoringPolicy guardedPolicy ||
+            policy.Kind != MonitoringPolicyKind.Guarded)
+        {
+            throw new ArgumentException("Unsupported monitoring policy.", nameof(policy));
+        }
+
+        ArgumentNullException.ThrowIfNull(rules);
+        if (_ocrRecognizer.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
+        {
+            throw new NotSupportedException(
+                $"{_ocrRecognizer.GetType().Name} has not passed structured-rule batch OCR validation.");
+        }
+
+        if (_ocrRecognizer is not IFrameFingerprintProvider)
+        {
+            throw new NotSupportedException(
+                $"{_ocrRecognizer.GetType().Name} does not expose the semantic fingerprint required by Guarded monitoring.");
+        }
+
+        if (!region.IsValid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(region), "Select a valid tooltip region before monitoring.");
+        }
+
+        lock (_stateGate)
+        {
+            EnsureCanStart();
+            _loopCancellation?.Dispose();
+            _loopCancellation = new CancellationTokenSource();
+            _guardedStateMachine = new GuardedPolicyStateMachine(guardedPolicy.Options);
+            _guardedResumeSignal = CreateGuardedResumeSignal();
+            _state = MonitorState.Running;
+            _loopTask = RunGuardedRuleLoopAsync(
+                rules,
+                region,
+                _guardedStateMachine,
+                _loopCancellation.Token);
+        }
+    }
+
+    /// <summary>
+    /// Accepts the currently visible uncertain roll and resumes Guarded monitoring. Input is
+    /// released without replay; the next physical click is a fresh user action.
+    /// </summary>
+    public bool ContinueGuarded()
+    {
+        GuardedFrameTransition transition;
+        TaskCompletionSource resumeSignal;
+        lock (_stateGate)
+        {
+            if (_disposed || _guardedStateMachine is null ||
+                _guardedStateMachine.State != GuardedSessionState.PausedUncertain)
+            {
+                return false;
+            }
+
+            transition = _guardedStateMachine.ContinueAfterUncertain();
+            resumeSignal = _guardedResumeSignal;
+            _guardedResumeSignal = CreateGuardedResumeSignal();
+        }
+
+        ApplyGuardTransition(transition);
+        resumeSignal.TrySetResult();
+        return true;
+    }
+
+    /// <summary>
+    /// Fails open when the native input guard or its visible hand-off reports that protection is
+    /// no longer available. The Guarded session is cancelled and may not silently continue.
+    /// </summary>
+    public bool FailGuardedSession(
+        string detail,
+        GuardedFaultReason reason = GuardedFaultReason.InputGuardUnavailable)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+        GuardedFrameTransition transition;
+        CancellationTokenSource? cancellation;
+        TaskCompletionSource resumeSignal;
+        lock (_stateGate)
+        {
+            if (_disposed || _guardedStateMachine is null ||
+                _guardedStateMachine.State is GuardedSessionState.Stopped or
+                    GuardedSessionState.Faulted)
+            {
+                return false;
+            }
+
+            transition = _guardedStateMachine.Fault(detail.Trim(), reason);
+            cancellation = _loopCancellation;
+            resumeSignal = _guardedResumeSignal;
+            _guardedResumeSignal = CreateGuardedResumeSignal();
+            _state = MonitorState.Faulted;
+        }
+
+        cancellation?.Cancel();
+        resumeSignal.TrySetResult();
+        ApplyGuardTransition(transition);
+        RaiseSnapshot(new MonitorSnapshot(
+            MonitorState.Faulted,
+            0,
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            [],
+            $"Guarded {reason}: {detail.Trim()}"));
+        return true;
     }
 
     public async Task StopAsync()
     {
         Task? loopTask;
         var ownsStop = false;
+        GuardedFrameTransition? guardedStop = null;
+        TaskCompletionSource? guardedResume = null;
         lock (_stateGate)
         {
             if (_disposed)
@@ -121,9 +279,21 @@ public sealed class AffixMonitor : IAsyncDisposable
                 _stopInProgress = true;
                 ownsStop = true;
                 _loopCancellation?.Cancel();
+                if (_guardedStateMachine is not null)
+                {
+                    guardedStop = _guardedStateMachine.Stop();
+                    guardedResume = _guardedResumeSignal;
+                    _guardedResumeSignal = CreateGuardedResumeSignal();
+                }
             }
 
             loopTask = _loopTask;
+        }
+
+        if (guardedStop is { } stopTransition)
+        {
+            ApplyGuardTransition(stopTransition);
+            guardedResume?.TrySetResult();
         }
 
         try
@@ -325,7 +495,7 @@ public sealed class AffixMonitor : IAsyncDisposable
                 scanCount++;
 
                 cancellationToken.ThrowIfCancellationRequested();
-                var evaluation = rules.Evaluate(ocrResult.Lines);
+                var evaluation = EvaluateRules(rules, ocrResult);
                 var snapshot = new MonitorSnapshot(
                     MonitorState.Running,
                     scanCount,
@@ -401,6 +571,322 @@ public sealed class AffixMonitor : IAsyncDisposable
         }
     }
 
+    private async Task RunGuardedRuleLoopAsync(
+        CompiledRuleSet rules,
+        ScreenRegion region,
+        GuardedPolicyStateMachine guarded,
+        CancellationToken cancellationToken)
+    {
+        long scanCount = 0;
+        MonitorSnapshot? lastSnapshot = null;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (guarded.State == GuardedSessionState.PausedUncertain)
+                {
+                    Task resumeTask;
+                    lock (_stateGate)
+                    {
+                        resumeTask = _guardedResumeSignal.Task;
+                    }
+
+                    await resumeTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                var captureWatch = Stopwatch.StartNew();
+                var frame = _screenCapture.Capture(region);
+                var fingerprint = ComputeGuardedFrameFingerprint(frame);
+                var captureElapsed = captureWatch.Elapsed;
+                var frameTransition = guarded.ObserveFrame(fingerprint, DateTimeOffset.UtcNow);
+                ApplyGuardTransition(frameTransition, lastSnapshot: lastSnapshot);
+                if (frameTransition.Decision?.Kind == GuardedDecisionKind.Faulted)
+                {
+                    SetGuardedFault(
+                        scanCount,
+                        frameTransition.Decision.Detail,
+                        frameTransition.Decision.FaultReason ??
+                        GuardedFaultReason.DecisionTimedOut,
+                        lastSnapshot);
+                    return;
+                }
+
+                if (!frameTransition.ShouldRecognize)
+                {
+                    // Stability is sampled at capture cadence. This is cooperative scheduling,
+                    // not a fixed safety delay; there is no two-second timer in this path.
+                    await Task.Yield();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    continue;
+                }
+
+                OcrRecognitionResult ocrResult;
+                try
+                {
+                    var remaining = guarded.RemainingDecisionTime(DateTimeOffset.UtcNow);
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        var timeout = guarded.Fault(
+                            "Guarded decision watchdog expired before OCR started.",
+                            GuardedFaultReason.DecisionTimedOut);
+                        ApplyGuardTransition(timeout, lastSnapshot: lastSnapshot);
+                        SetGuardedFault(
+                            scanCount,
+                            timeout.Decision!.Detail,
+                            GuardedFaultReason.DecisionTimedOut,
+                            lastSnapshot);
+                        return;
+                    }
+
+                    using var decisionCancellation = CancellationTokenSource
+                        .CreateLinkedTokenSource(cancellationToken);
+                    decisionCancellation.CancelAfter(remaining);
+                    try
+                    {
+                        ocrResult = await _ocrRecognizer
+                            .RecognizeAsync(frame, rules.Targets, decisionCancellation.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                        when (!cancellationToken.IsCancellationRequested &&
+                              decisionCancellation.IsCancellationRequested)
+                    {
+                        var timeout = guarded.Fault(
+                            "Guarded OCR exceeded its decision watchdog.",
+                            GuardedFaultReason.DecisionTimedOut);
+                        ApplyGuardTransition(timeout, lastSnapshot: lastSnapshot);
+                        SetGuardedFault(
+                            scanCount,
+                            timeout.Decision!.Detail,
+                            GuardedFaultReason.DecisionTimedOut,
+                            lastSnapshot);
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                scanCount++;
+                cancellationToken.ThrowIfCancellationRequested();
+                var evaluation = EvaluateRules(rules, ocrResult);
+                lastSnapshot = new MonitorSnapshot(
+                    MonitorState.Running,
+                    scanCount,
+                    captureElapsed,
+                    ocrResult.TotalElapsed,
+                    ocrResult.Lines,
+                    OcrWasCached: ocrResult.WasCached);
+                RaiseSnapshot(lastSnapshot);
+
+                var evidence = CreateGuardedRuleEvidence(evaluation, ocrResult);
+                var decisionTransition = guarded.ObserveRecognition(evidence);
+
+                if (decisionTransition.Decision?.Kind == GuardedDecisionKind.Match)
+                {
+                    if (!TrySetMatchFound(cancellationToken))
+                    {
+                        return;
+                    }
+
+                    ApplyGuardTransition(
+                        decisionTransition,
+                        evaluation,
+                        lastSnapshot);
+                    var detectedText = CreateRuleMatchDetail(evaluation);
+                    var matchedSnapshot = lastSnapshot with
+                    {
+                        State = MonitorState.MatchFound,
+                        Detail = detectedText,
+                    };
+                    RaiseSnapshot(matchedSnapshot);
+                    AffixDetected?.Invoke(
+                        this,
+                        new AffixDetectedEventArgs(evaluation, detectedText, matchedSnapshot));
+                    return;
+                }
+
+                ApplyGuardTransition(
+                    decisionTransition,
+                    evaluation,
+                    lastSnapshot);
+
+                if (decisionTransition.Decision?.Kind == GuardedDecisionKind.Uncertain)
+                {
+                    continue;
+                }
+
+                if (ocrResult.RequiresRescan)
+                {
+                    await Task.Yield();
+                }
+                else
+                {
+                    await Task.Delay(ocrResult.WasCached ? 8 : 4, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Explicit Stop/Dispose owns the fail-open transition outside the loop.
+        }
+        catch (Exception exception)
+        {
+            var transition = guarded.Fault(
+                exception.Message,
+                GuardedFaultReason.CaptureOrRecognitionFailed);
+            ApplyGuardTransition(transition, lastSnapshot: lastSnapshot);
+            SetGuardedFault(
+                scanCount,
+                exception.Message,
+                GuardedFaultReason.CaptureOrRecognitionFailed,
+                lastSnapshot);
+        }
+        finally
+        {
+            if (guarded.IsInputGuardHeld &&
+                guarded.State is not GuardedSessionState.PausedUncertain and
+                not GuardedSessionState.MatchFound)
+            {
+                ApplyGuardTransition(guarded.Stop(), lastSnapshot: lastSnapshot);
+            }
+        }
+    }
+
+    private static GuardedRuleEvidence CreateGuardedRuleEvidence(
+        RuleEvaluationResult evaluation,
+        OcrRecognitionResult ocrResult)
+    {
+        var relevantConditions = evaluation.Groups
+            .SelectMany(static group => group.Conditions)
+            .Where(static condition => condition.TextMatched)
+            .OrderBy(static condition => condition.Template, StringComparer.Ordinal)
+            .ThenBy(static condition => condition.StartLineIndex)
+            .ToArray();
+        var relevantCandidates = ocrResult.BatchCandidateEvidence
+            .Where(candidate => IsCompiledTarget(candidate.CandidateTarget, evaluation))
+            .OrderBy(static candidate => candidate.CandidateTarget, StringComparer.Ordinal)
+            .ThenBy(static candidate => candidate.PhysicalBandId, StringComparer.Ordinal)
+            .ToArray();
+
+        // Signatures deliberately omit unrelated OCR lines. Only a strict target observation or
+        // recognizer-localized near-target candidate may make repeated evidence disagree.
+        var signature = string.Join('|', relevantConditions.Select(static condition =>
+                $"{condition.Template}:{string.Join(',', condition.ActualValues.Select(value => value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"))}:{condition.IsMatched}")) +
+            "#" +
+            string.Join('|', relevantCandidates.Select(static candidate =>
+                $"{candidate.CandidateTarget}:{candidate.PhysicalBandId}:{candidate.Kind}"));
+        if (signature == "#")
+        {
+            signature = "none";
+        }
+
+        return new GuardedRuleEvidence(
+            evaluation.IsMatch,
+            ocrResult.RequiresRescan,
+            HasTargetCandidate: relevantConditions.Length > 0 || relevantCandidates.Length > 0,
+            HasUnverifiedTargetCandidate:
+                relevantCandidates.Any(static candidate =>
+                    candidate.Kind == OcrCandidateEvidenceKind.LocalizedLexicalCandidate),
+            HasMissingRequiredNumericValue:
+                relevantConditions.Any(static condition =>
+                    condition.HasMissingRequiredNumericValue) ||
+                relevantCandidates.Any(static candidate =>
+                    candidate.Kind == OcrCandidateEvidenceKind.MissingNumericValue),
+            HasConflictingTargetNumericEvidence:
+                relevantCandidates.Any(static candidate =>
+                    candidate.Kind == OcrCandidateEvidenceKind.ConflictingNumericValue),
+            signature);
+    }
+
+    private static bool IsCompiledTarget(
+        string candidateTarget,
+        RuleEvaluationResult evaluation) =>
+        evaluation.Groups
+            .SelectMany(static group => group.Conditions)
+            .Any(condition => string.Equals(
+                AffixCanonicalizer.Normalize(condition.Template).Text,
+                candidateTarget,
+                StringComparison.Ordinal));
+
+    private void ApplyGuardTransition(
+        GuardedFrameTransition transition,
+        RuleEvaluationResult? evaluation = null,
+        MonitorSnapshot? lastSnapshot = null)
+    {
+        if (transition.ReleaseInputGuard)
+        {
+            InputGuardReleased?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (transition.AwaitNextCausativeClick)
+        {
+            if (GuardedPassCycleRequested is not { } passCycleRequested)
+            {
+                FailGuardedSession(
+                    "No owner accepted the Guarded one-click pass cycle.",
+                    GuardedFaultReason.InputGuardUnavailable);
+                return;
+            }
+
+            passCycleRequested.Invoke(this, EventArgs.Empty);
+        }
+
+        if (transition.RequestInputGuard)
+        {
+            InputGuardRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (transition.Decision is not { } decision)
+        {
+            return;
+        }
+
+        GuardedDecisionChanged?.Invoke(
+            this,
+            new GuardedDecisionEventArgs(
+                decision.Kind,
+                transition.State,
+                decision.Detail,
+                decision.UncertaintyReason,
+                decision.FaultReason,
+                evaluation,
+                lastSnapshot));
+    }
+
+    private void SetGuardedFault(
+        long scanCount,
+        string detail,
+        GuardedFaultReason reason,
+        MonitorSnapshot? previousSnapshot)
+    {
+        SetState(MonitorState.Faulted);
+        RaiseSnapshot(new MonitorSnapshot(
+            MonitorState.Faulted,
+            scanCount,
+            previousSnapshot?.CaptureElapsed ?? TimeSpan.Zero,
+            previousSnapshot?.OcrElapsed ?? TimeSpan.Zero,
+            previousSnapshot?.LastLines ?? [],
+            $"Guarded {reason}: {detail}",
+            previousSnapshot?.OcrWasCached ?? false));
+    }
+
+    private static TaskCompletionSource CreateGuardedResumeSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private ulong ComputeGuardedFrameFingerprint(CapturedFrame frame) =>
+        _ocrRecognizer switch
+        {
+            IFrameFingerprintProvider legacyProvider =>
+                legacyProvider.ComputeFrameFingerprint(frame),
+            _ => throw new NotSupportedException(
+                $"{_ocrRecognizer.GetType().Name} does not expose a Guarded semantic fingerprint."),
+        };
+
     private void EnsureCanStart()
     {
         if (_disposeTask is not null)
@@ -418,6 +904,20 @@ public sealed class AffixMonitor : IAsyncDisposable
             throw new InvalidOperationException("Monitoring is already running.");
         }
     }
+
+    private static RuleEvaluationResult EvaluateRules(
+        CompiledRuleSet rules,
+        OcrRecognitionResult ocrResult) =>
+        rules.Evaluate(
+            ocrResult.Lines,
+            ocrResult.BatchAssistedObservations.Select(static observation =>
+                new AssistedModifierObservation(
+                    observation.PhysicalBandId,
+                    observation.OriginalText,
+                    observation.CanonicalTarget,
+                    observation.RelatedPhysicalBandIds)).ToArray(),
+            ocrResult.BatchPhysicalLines.Select(static line =>
+                new PhysicalLineIdentity(line.LineIndex, line.PhysicalBandId)).ToArray());
 
     private static string CreateRuleMatchDetail(RuleEvaluationResult evaluation)
     {

@@ -234,6 +234,112 @@ internal sealed class PaddleCtcSession : IDisposable
         return RecognizeCrop(frame, crop, targetTemplate);
     }
 
+    /// <summary>
+    /// Runs the model exactly once and evaluates target-conditioned CTC support for a complete
+    /// deduplicated target set against the shared logits. This is deliberately separate from
+    /// <see cref="Recognize(PreparedFrame,string?,int?)"/> so the legacy single-target route and
+    /// every confidence threshold remain byte-for-byte unchanged.
+    /// </summary>
+    public CtcBatchRecognition RecognizeBatch(
+        PreparedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(targets);
+        var crop = FindInkCrop(frame, _inkMargin);
+        var recognized = RecognizeCropBatch(frame, crop, targets);
+        return new CtcBatchRecognition(recognized.Recognition, recognized.TargetSupports);
+    }
+
+    private BatchCropRecognition RecognizeCropBatch(
+        PreparedFrame frame,
+        InkCrop crop,
+        IReadOnlyList<FullLineAffixMatcher> targets)
+    {
+        if (!_workspaces.TryTake(out var workspace))
+        {
+            workspace = new InferenceWorkspace();
+        }
+
+        try
+        {
+            var preparationWatch = Stopwatch.StartNew();
+            var resizedWidth = CalculateResizedWidth(crop);
+            var tensorWidth = Math.Clamp(
+                RoundUp(Math.Max(MinimumModelWidth, resizedWidth + _rightPadding), 8),
+                8,
+                MaximumModelWidth);
+            var inputLength = checked(3 * ModelHeight * tensorWidth);
+            var inputMemory = workspace.PrepareInput(inputLength);
+            FillTensor(frame, crop, resizedWidth, tensorWidth, inputMemory.Span, _polarity);
+            preparationWatch.Stop();
+
+            long[] inputShape = [1, 3, ModelHeight, tensorWidth];
+            using var inputValue = OrtValue.CreateTensorValueFromMemory<float>(
+                OrtMemoryInfo.DefaultInstance,
+                inputMemory,
+                inputShape);
+            var inputs = new Dictionary<string, OrtValue>(1, StringComparer.Ordinal)
+            {
+                [_inputName] = inputValue,
+            };
+
+            var inferenceWatch = Stopwatch.StartNew();
+            using var outputValues = _session.Run(workspace.RunOptions, inputs, _outputNames);
+            inferenceWatch.Stop();
+
+            var decodeWatch = Stopwatch.StartNew();
+            var outputValue = outputValues[0];
+            var outputShape = outputValue.GetTensorTypeAndShape().Shape;
+            if (outputShape.Length != 3 || outputShape[0] != 1)
+            {
+                throw new InvalidDataException(
+                    $"Expected a [1,time,classes] CTC tensor; received [{string.Join(',', outputShape)}].");
+            }
+
+            var timeSteps = checked((int)outputShape[1]);
+            var classCount = checked((int)outputShape[2]);
+            var output = outputValue.GetTensorDataAsSpan<float>();
+            if (output.Length != checked(timeSteps * classCount))
+            {
+                throw new InvalidDataException(
+                    $"CTC output contains {output.Length} values; expected {timeSteps * classCount}.");
+            }
+
+            var decoded = Decode(output, timeSteps, classCount);
+            var supports = new Dictionary<string, CtcTargetSupport>(StringComparer.Ordinal);
+            foreach (var target in targets)
+            {
+                supports.TryAdd(
+                    target.Template.Text,
+                    AnalyzeTargetSupport(
+                        target.SourceTemplate,
+                        decoded,
+                        output,
+                        timeSteps,
+                        classCount));
+            }
+
+            decodeWatch.Stop();
+            return new BatchCropRecognition(
+                new CtcRecognition(
+                    decoded.Text,
+                    decoded.MeanConfidence,
+                    tensorWidth,
+                    timeSteps,
+                    classCount,
+                    preparationWatch.Elapsed,
+                    inferenceWatch.Elapsed,
+                    decodeWatch.Elapsed,
+                    TargetSupport: null),
+                supports);
+        }
+        finally
+        {
+            _workspaces.Add(workspace);
+        }
+    }
+
     private CtcRecognition RecognizeCrop(
         PreparedFrame frame,
         InkCrop crop,
@@ -767,6 +873,14 @@ internal sealed record CtcRecognition(
 {
     public TimeSpan TotalElapsed => TensorPreparationElapsed + InferenceElapsed + DecodeElapsed;
 }
+
+internal sealed record CtcBatchRecognition(
+    CtcRecognition Recognition,
+    IReadOnlyDictionary<string, CtcTargetSupport> TargetSupports);
+
+internal sealed record BatchCropRecognition(
+    CtcRecognition Recognition,
+    IReadOnlyDictionary<string, CtcTargetSupport> TargetSupports);
 
 internal sealed record CtcTargetSupport(
     bool ShapeCompatible,

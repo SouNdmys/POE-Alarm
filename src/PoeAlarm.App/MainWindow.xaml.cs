@@ -13,6 +13,7 @@ using PoeAlarm.App.Configuration;
 using PoeAlarm.App.Input;
 using PoeAlarm.App.Localization;
 using PoeAlarm.App.Monitoring;
+using PoeAlarm.App.Monitoring.Policies;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.App.Replay;
 using PoeAlarm.App.RulesUi;
@@ -35,6 +36,7 @@ public partial class MainWindow : Window
     private AppSettings _settings = new AppSettings().Normalize();
     private GameProfile _selectedGameProfile = GameProfile.Poe1;
     private RuleEditorMode _ruleEditorMode = RuleEditorMode.Quick;
+    private MonitoringPolicyId _monitoringPolicy = MonitoringPolicyId.Fast;
     private RuleSetDefinition? _structuredRuleSet;
     private HudPlacement _hudPlacement = HudPlacement.Default;
     private string _uiLanguage = UiText.DefaultLanguageCode;
@@ -48,6 +50,7 @@ public partial class MainWindow : Window
     private bool _isApplyingProfileSettings;
     private bool _isSelectingRegion;
     private bool _isStartingMonitoring;
+    private bool _guardedInputProtectionFailed;
     private bool _isClosing;
     private bool _closeReady;
     private long _lastUiUpdateTimestamp;
@@ -65,6 +68,9 @@ public partial class MainWindow : Window
         _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
         _alertService = new LatchedAlertService();
         _alertService.Acknowledged += OnAlertAcknowledged;
+        _alertService.GuardedContinueRequested += OnGuardedContinueRequested;
+        _alertService.GuardedStopRequested += OnGuardedStopRequested;
+        _alertService.GuardedFailOpen += OnGuardedFailOpen;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -101,6 +107,13 @@ public partial class MainWindow : Window
         _isLoaded = true;
         TryRegisterStartMonitoringHotKey(_startMonitoringHotKey, reportFailure: true);
         ShowIdleHudIfEnabled();
+        if (_settingsStore.IsReadOnly)
+        {
+            SetStatus(
+                UiText.Current.FutureSettingsReadOnly(
+                    _settingsStore.DetectedSchemaVersion ?? 0),
+                UiStatusKind.Warning);
+        }
     }
 
     private async void OnGameProfileChanged(
@@ -202,7 +215,8 @@ public partial class MainWindow : Window
 
         if (_monitor?.State == MonitorState.Running ||
             _alertService.IsActive ||
-            _alertService.IsInputGuardActive)
+            _alertService.IsInputGuardActive ||
+            _alertService.IsGuardedAlertActive)
         {
             RuleModeComboBox.SelectedValue = _ruleEditorMode.ToString();
             return;
@@ -211,16 +225,34 @@ public partial class MainWindow : Window
         _ruleEditorMode = ParseRuleEditorMode(RuleModeComboBox.SelectedValue?.ToString());
         UpdateRuleEditorUi();
         ShowIdleHudIfEnabled();
-        if (_ruleEditorMode == RuleEditorMode.Structured &&
-            SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese)
-        {
-            SetStatus(UiText.Current.StructuredOcrUnsupported, UiStatusKind.Warning);
-        }
-
         if (_isLoaded && !_isClosing)
         {
             await SaveSettingsAsync();
         }
+    }
+
+    private async void OnMonitoringPolicyChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!_isLoaded || _isApplyingProfileSettings || MonitoringPolicyComboBox is null)
+        {
+            return;
+        }
+
+        if (_monitor?.State == MonitorState.Running ||
+            _alertService.IsActive || _alertService.IsInputGuardActive ||
+            _alertService.IsGuardedAlertActive)
+        {
+            MonitoringPolicyComboBox.SelectedValue = _monitoringPolicy.ToString();
+            return;
+        }
+
+        _monitoringPolicy = ParseMonitoringPolicy(
+            MonitoringPolicyComboBox.SelectedValue?.ToString());
+        UpdateMonitoringPolicyUi();
+        ShowIdleHudIfEnabled();
+        await SaveSettingsAsync();
     }
 
     private async void OnEditStructuredRules(object sender, RoutedEventArgs e)
@@ -406,12 +438,6 @@ public partial class MainWindow : Window
                 ? UiText.Current.SwitchedChineseOcr
                 : UiText.Current.SwitchedEnglishOcr,
             UiStatusKind.Neutral);
-        if (_ruleEditorMode == RuleEditorMode.Structured &&
-            SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese)
-        {
-            SetStatus(UiText.Current.StructuredOcrUnsupported, UiStatusKind.Warning);
-        }
-
         await SaveSettingsAsync();
     }
 
@@ -464,6 +490,7 @@ public partial class MainWindow : Window
     {
         if (_isStartingMonitoring || _isClosing || _isSelectingRegion ||
             _alertService.IsActive || _alertService.IsInputGuardActive ||
+            _alertService.IsGuardedAlertActive ||
             _monitor?.State == MonitorState.Running)
         {
             return;
@@ -473,6 +500,7 @@ public partial class MainWindow : Window
         try
         {
             var isStructured = _ruleEditorMode == RuleEditorMode.Structured;
+            var isGuarded = _monitoringPolicy == MonitoringPolicyId.Guarded;
             var template = TargetAffixTextBox.Text.Trim();
             CompiledRuleSet? compiledRules = null;
             if (isStructured)
@@ -516,8 +544,17 @@ public partial class MainWindow : Window
                     // Keep the verified 0.6.1 quick matcher path exactly target-aware. It is not
                     // wrapped into a one-condition structured rule.
                     _ = new FullLineAffixMatcher(template, maximumLineSpan);
+                    if (isGuarded)
+                    {
+                        compiledRules = CompileGuardedQuickRule(template, maximumLineSpan);
+                    }
                 }
                 EnsureMonitorCreated();
+                if (isGuarded && !_monitor!.SupportsGuardedMonitoring)
+                {
+                    ShowValidationMessage(UiText.Current.GuardedMonitoringUnsupported);
+                    return;
+                }
                 if (compiledRules is not null &&
                     _monitor!.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
                 {
@@ -528,14 +565,29 @@ public partial class MainWindow : Window
                 _alertService.Acknowledge();
                 _alertService.Prepare(
                     preparePendingInputGuard:
+                        isGuarded ||
                         SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese ||
                         _selectedGameProfile == GameProfile.Poe2);
+                _guardedInputProtectionFailed = false;
                 AcknowledgeButton.IsEnabled = false;
                 var session = Interlocked.Increment(ref _nextMonitoringSession);
                 Interlocked.Exchange(ref _activeMonitoringSession, session);
                 try
                 {
-                    if (compiledRules is not null)
+                    if (isGuarded)
+                    {
+                        _monitor!.Start(
+                            compiledRules!,
+                            region,
+                            new GuardedMonitoringPolicy());
+                        if (_guardedInputProtectionFailed ||
+                            _monitor.State != MonitorState.Running)
+                        {
+                            throw new InvalidOperationException(
+                                UiText.Current.PendingGuardArmFailed);
+                        }
+                    }
+                    else if (compiledRules is not null)
                     {
                         _monitor!.Start(compiledRules, region);
                     }
@@ -550,7 +602,11 @@ public partial class MainWindow : Window
                         StartButton.IsEnabled = false;
                         StopButton.IsEnabled = true;
                         SetProfileSelectorsEnabled(false);
-                        SetStatus(UiText.Current.MonitoringStarted, UiStatusKind.Monitoring);
+                        SetStatus(
+                            isGuarded
+                                ? UiText.Current.GuardedMonitoringStarted
+                                : UiText.Current.MonitoringStarted,
+                            UiStatusKind.Monitoring);
                         WindowState = WindowState.Minimized;
                     }
                 }
@@ -635,6 +691,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_alertService.IsGuardedAlertActive && !_alertService.IsActive)
+        {
+            Interlocked.Exchange(ref _activeMonitoringSession, 0);
+            _alertService.ReleaseGuardedInputGuard();
+            _ = StopPendingGuardFromHotkeyAsync();
+            return;
+        }
+
         _alertService.Acknowledge();
     }
 
@@ -674,8 +738,10 @@ public partial class MainWindow : Window
         _monitor = new AffixMonitor(new GdiScreenCapture(), recognizer);
         _monitor.SnapshotChanged += OnMonitorSnapshotChanged;
         _monitor.AffixDetected += OnAffixDetected;
+        _monitor.GuardedDecisionChanged += OnGuardedDecisionChanged;
         _monitor.InputGuardRequested += OnInputGuardRequested;
         _monitor.InputGuardReleased += OnInputGuardReleased;
+        _monitor.GuardedPassCycleRequested += OnGuardedPassCycleRequested;
     }
 
     private void OnMonitorSnapshotChanged(object? sender, MonitorSnapshot snapshot)
@@ -772,7 +838,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        _alertService.Trigger(e.DetectedText, _captureRegion);
+        var guardedMatch = _monitoringPolicy == MonitoringPolicyId.Guarded;
+        var handoffAccepted = guardedMatch
+            ? _alertService.TriggerGuardedMatch(e.DetectedText, _captureRegion)
+            : TriggerFastAlert(e.DetectedText);
+        if (!handoffAccepted)
+        {
+            _monitor?.FailGuardedSession(
+                "The Guarded match alert could not take ownership of input.",
+                GuardedFaultReason.InputGuardUnavailable);
+            return;
+        }
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
         {
             if (_isClosing || _monitor?.State != MonitorState.MatchFound)
@@ -790,18 +866,156 @@ public partial class MainWindow : Window
             StopButton.IsEnabled = false;
             AcknowledgeButton.IsEnabled = true;
         }));
+
+        bool TriggerFastAlert(string detectedText)
+        {
+            _alertService.Trigger(detectedText, _captureRegion);
+            return true;
+        }
     }
 
     private void OnInputGuardRequested(object? sender, EventArgs e)
     {
         if (!_isClosing && Interlocked.Read(ref _activeMonitoringSession) != 0)
         {
-            _alertService.BeginInputGuard(_captureRegion);
+            if (_monitoringPolicy == MonitoringPolicyId.Guarded)
+            {
+                _alertService.BeginGuardedInputGuard(
+                    new GuardedPolicyOptions().DecisionTimeout +
+                    TimeSpan.FromMilliseconds(250),
+                    _captureRegion);
+            }
+            else
+            {
+                _alertService.BeginInputGuard(_captureRegion);
+            }
         }
     }
 
-    private void OnInputGuardReleased(object? sender, EventArgs e) =>
-        _alertService.ReleaseInputGuard();
+    private void OnInputGuardReleased(object? sender, EventArgs e)
+    {
+        if (_monitoringPolicy == MonitoringPolicyId.Guarded)
+        {
+            _alertService.ReleaseGuardedInputGuard();
+        }
+        else
+        {
+            _alertService.ReleaseInputGuard();
+        }
+    }
+
+    private void OnGuardedPassCycleRequested(object? sender, EventArgs e)
+    {
+        if (_isClosing || Interlocked.Read(ref _activeMonitoringSession) == 0)
+        {
+            return;
+        }
+
+        var options = new GuardedPolicyOptions();
+        if (!_alertService.AwaitNextGuardedClick(
+                options.DecisionTimeout + TimeSpan.FromMilliseconds(250),
+                _captureRegion))
+        {
+            _guardedInputProtectionFailed = true;
+        }
+    }
+
+    private void OnGuardedDecisionChanged(object? sender, GuardedDecisionEventArgs e)
+    {
+        if (_isClosing || Interlocked.Read(ref _activeMonitoringSession) == 0)
+        {
+            return;
+        }
+
+        if (e.Decision == GuardedDecisionKind.NoMatch)
+        {
+            return;
+        }
+
+        if (e.Decision == GuardedDecisionKind.Uncertain)
+        {
+            var reason = UiText.Current.GuardedUncertaintyReason(e.UncertaintyReason);
+            _alertService.ShowGuardedUncertain(
+                UiText.Current.GuardedUncertainTitle,
+                reason,
+                UiText.Current.GuardedUncertainInstruction,
+                UiText.Current.GuardedContinue,
+                UiText.Current.GuardedStop,
+                _captureRegion);
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+            {
+                _monitoringHud?.HideHud();
+                SetStatus(reason, UiStatusKind.Warning);
+                StartButton.IsEnabled = false;
+                StopButton.IsEnabled = true;
+            }));
+            return;
+        }
+
+        if (e.Decision == GuardedDecisionKind.Faulted)
+        {
+            Interlocked.Exchange(ref _activeMonitoringSession, 0);
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+            {
+                _monitoringHud?.HideHud();
+                StartButton.IsEnabled = true;
+                StopButton.IsEnabled = false;
+                SetProfileSelectorsEnabled(true);
+                SetStatus(UiText.Current.GuardedProtectionFailed(e.Detail), UiStatusKind.Warning);
+                WindowState = WindowState.Normal;
+                Show();
+                Activate();
+            }));
+        }
+    }
+
+    private void OnGuardedContinueRequested(object? sender, EventArgs e)
+    {
+        if (_isClosing || _monitor?.ContinueGuarded() != true)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            if (_monitor?.State == MonitorState.Running)
+            {
+                ShowMonitoringHud(ActiveRuleDisplayText, _captureRegion!.Value);
+                SetStatus(UiText.Current.GuardedContinued, UiStatusKind.Monitoring);
+            }
+        });
+    }
+
+    private void OnGuardedStopRequested(object? sender, EventArgs e)
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _ = StopGuardedFromReviewAsync();
+    }
+
+    private async Task StopGuardedFromReviewAsync()
+    {
+        await StopMonitorAsync(showIdleStatus: false);
+        if (!_isClosing)
+        {
+            SetStatus(UiText.Current.GuardedStoppedForReview, UiStatusKind.Warning);
+            WindowState = WindowState.Normal;
+            Show();
+            Activate();
+        }
+    }
+
+    private void OnGuardedFailOpen(object? sender, GuardedAlertFailOpenEventArgs e)
+    {
+        _guardedInputProtectionFailed = true;
+        var reason = e.Reason == GuardedAlertFailOpenReason.InputGuardTimedOut
+            ? GuardedFaultReason.DecisionTimedOut
+            : GuardedFaultReason.InputGuardUnavailable;
+        _monitor?.FailGuardedSession(e.Detail, reason);
+    }
 
     private async Task StopMonitorAsync(bool showIdleStatus)
     {
@@ -809,7 +1023,8 @@ public partial class MainWindow : Window
         // Release a guard immediately instead of waiting for an in-flight OCR call or its
         // fail-open watchdog. A real red alert ignores this guard-only release.
         _alertService.ReleaseInputGuard();
-        if (!_alertService.IsActive)
+        _alertService.ReleaseGuardedInputGuard();
+        if (!_alertService.IsActive && !_alertService.IsGuardedAlertActive)
         {
             ShowIdleHudIfEnabled();
         }
@@ -820,7 +1035,8 @@ public partial class MainWindow : Window
 
         StartButton.IsEnabled = true;
         StopButton.IsEnabled = false;
-        SetProfileSelectorsEnabled(!_alertService.IsActive);
+        SetProfileSelectorsEnabled(
+            !_alertService.IsActive && !_alertService.IsGuardedAlertActive);
         if (showIdleStatus)
         {
             SetStatus(UiText.Current.MonitoringStopped, UiStatusKind.Idle);
@@ -830,7 +1046,8 @@ public partial class MainWindow : Window
     private void ShowMonitoringHud(string targetAffix, ScreenRegion region)
     {
         if (_isClosing || !_keepHudVisible ||
-            _monitor?.State != MonitorState.Running || _alertService.IsActive)
+            _monitor?.State != MonitorState.Running || _alertService.IsActive ||
+            _alertService.IsGuardedAlertActive)
         {
             if (!_keepHudVisible)
             {
@@ -900,7 +1117,8 @@ public partial class MainWindow : Window
 
     private void ShowIdleHudIfEnabled()
     {
-        if (_isClosing || _alertService.IsActive || _isHudPlacementMode)
+        if (_isClosing || _alertService.IsActive || _alertService.IsGuardedAlertActive ||
+            _isHudPlacementMode)
         {
             return;
         }
@@ -956,6 +1174,10 @@ public partial class MainWindow : Window
         StructuredRuleModeOption.Content = text.StructuredRuleMode;
         EditStructuredRulesButton.Content = text.EditStructuredRules;
         StructuredRuleHintText.Text = text.StructuredRuleHint;
+        MonitoringPolicyLabelText.Text = text.MonitoringPolicyLabel;
+        MonitoringPolicyComboBox.ToolTip = text.MonitoringPolicyToolTip;
+        FastMonitoringPolicyOption.Content = text.FastMonitoringPolicy;
+        GuardedMonitoringPolicyOption.Content = text.GuardedMonitoringPolicy;
         OcrLanguageLabelText.Text = text.OcrLanguageLabel;
         OcrLanguageComboBox.ToolTip = text.OcrLanguageToolTip;
         EnglishOcrOption.Content = text.OcrEnglishOption;
@@ -995,6 +1217,7 @@ public partial class MainWindow : Window
 
         UpdateCanonicalPreview();
         UpdateRuleEditorUi();
+        UpdateMonitoringPolicyUi();
         UpdateRegionText();
         UpdateCustomSoundText();
         if (!_isLoaded)
@@ -1029,7 +1252,7 @@ public partial class MainWindow : Window
         {
             UiStatusKind.Monitoring => (FindBrush("TextPrimaryBrush"), FindBrush("SuccessBrush")),
             UiStatusKind.Alert => (FindBrush("DangerBrush"), FindBrush("DangerBrush")),
-            UiStatusKind.Warning => (FindBrush("TextPrimaryBrush"), FindBrush("DangerBrush")),
+            UiStatusKind.Warning => (FindBrush("TextPrimaryBrush"), FindBrush("WarningBrush")),
             UiStatusKind.Idle => (FindBrush("TextPrimaryBrush"), FindBrush("TextTertiaryBrush")),
             _ => (FindBrush("TextPrimaryBrush"), FindBrush("AccentBrush")),
         };
@@ -1066,6 +1289,20 @@ public partial class MainWindow : Window
         _selectedGameProfile == GameProfile.Poe2
             ? FullLineAffixMatcher.MaximumSupportedPhysicalLineSpan
             : FullLineAffixMatcher.MaximumPhysicalLineSpan;
+
+    private static CompiledRuleSet CompileGuardedQuickRule(
+        string template,
+        int maximumPhysicalLineSpan) =>
+        RuleCompiler.Compile(
+            new RuleSetDefinition(
+                "Quick target",
+                [
+                    new AcceptableResultGroup(
+                        "Quick target",
+                        ResultGroupMode.Any,
+                        [new AffixCondition("Quick target", template)]),
+                ]),
+            maximumPhysicalLineSpan);
 
     private string ActiveRuleDisplayText => _ruleEditorMode == RuleEditorMode.Structured
         ? CreateStructuredRuleSummary(_structuredRuleSet)
@@ -1106,8 +1343,10 @@ public partial class MainWindow : Window
 
         monitor.SnapshotChanged -= OnMonitorSnapshotChanged;
         monitor.AffixDetected -= OnAffixDetected;
+        monitor.GuardedDecisionChanged -= OnGuardedDecisionChanged;
         monitor.InputGuardRequested -= OnInputGuardRequested;
         monitor.InputGuardReleased -= OnInputGuardReleased;
+        monitor.GuardedPassCycleRequested -= OnGuardedPassCycleRequested;
         await monitor.DisposeAsync();
     }
 
@@ -1138,13 +1377,28 @@ public partial class MainWindow : Window
         StructuredRulePanel.Visibility = isStructured ? Visibility.Visible : Visibility.Collapsed;
         PasteButton.Visibility = isStructured ? Visibility.Collapsed : Visibility.Visible;
         StructuredRuleSummaryText.Text = CreateStructuredRuleSummary(_structuredRuleSet);
-        var structuredHint = isStructured &&
-                             SelectedOcrLanguage ==
-                             OcrRecognitionLanguage.TraditionalChinese
-            ? UiText.Current.StructuredOcrUnsupported
-            : UiText.Current.StructuredRuleHint;
+        var structuredHint = UiText.Current.StructuredRuleHint;
         StructuredRuleHintText.Text = structuredHint;
         StructuredRuleHintText.ToolTip = structuredHint;
+    }
+
+    private void UpdateMonitoringPolicyUi()
+    {
+        if (!IsInitialized || MonitoringPolicyComboBox is null ||
+            MonitoringPolicyHintText is null)
+        {
+            return;
+        }
+
+        MonitoringPolicyComboBox.SelectedValue = _monitoringPolicy.ToString();
+        var isGuarded = _monitoringPolicy == MonitoringPolicyId.Guarded;
+        MonitoringPolicyHintText.Text = isGuarded
+            ? UiText.Current.GuardedMonitoringHint
+            : UiText.Current.FastMonitoringHint;
+        MonitoringPolicyHintText.ToolTip = MonitoringPolicyHintText.Text;
+        MonitoringPolicyHintText.Foreground = isGuarded
+            ? FindBrush("WarningBrush")
+            : FindBrush("TextSecondaryBrush");
     }
 
     private string CreateStructuredRuleSummary(RuleSetDefinition? definition)
@@ -1175,6 +1429,7 @@ public partial class MainWindow : Window
         {
             TargetAffixTextBox.Text = profile.TargetAffix;
             _ruleEditorMode = profile.RuleEditorMode;
+            _monitoringPolicy = profile.MonitoringPolicy;
             _structuredRuleSet = profile.StructuredRuleSet;
             _captureRegion = profile.CaptureRegion is { IsValid: true } region ? region : null;
             OcrLanguageComboBox.SelectedValue = profile.OcrLanguage;
@@ -1182,6 +1437,7 @@ public partial class MainWindow : Window
             LatencyText.Text = UiText.Current.NoScanData;
             UpdateCanonicalPreview();
             UpdateRuleEditorUi();
+            UpdateMonitoringPolicyUi();
             UpdateRegionText();
         }
         finally
@@ -1223,7 +1479,8 @@ public partial class MainWindow : Window
     private async void OnStartMonitoringHotKeyPressed(object? sender, EventArgs e)
     {
         if (_isClosing || _isSelectingRegion || _alertService.IsActive ||
-            _alertService.IsInputGuardActive || _monitor?.State == MonitorState.Running)
+            _alertService.IsInputGuardActive || _alertService.IsGuardedAlertActive ||
+            _monitor?.State == MonitorState.Running)
         {
             return;
         }
@@ -1278,6 +1535,7 @@ public partial class MainWindow : Window
             TargetAffix = TargetAffixTextBox.Text.Trim(),
             CaptureRegion = _captureRegion,
             RuleEditorMode = _ruleEditorMode,
+            MonitoringPolicy = _monitoringPolicy,
             StructuredRuleSet = _structuredRuleSet,
             OcrLanguage = SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese
                 ? "zh-TW"
@@ -1299,6 +1557,7 @@ public partial class MainWindow : Window
         GameProfileComboBox.IsEnabled = enabled;
         RuleModeComboBox.IsEnabled = enabled;
         EditStructuredRulesButton.IsEnabled = enabled;
+        MonitoringPolicyComboBox.IsEnabled = enabled;
     }
 
     private static RuleEditorMode ParseRuleEditorMode(string? value) =>
@@ -1306,6 +1565,12 @@ public partial class MainWindow : Window
         Enum.IsDefined(mode)
             ? mode
             : RuleEditorMode.Quick;
+
+    private static MonitoringPolicyId ParseMonitoringPolicy(string? value) =>
+        Enum.TryParse<MonitoringPolicyId>(value, ignoreCase: true, out var policy) &&
+        Enum.IsDefined(policy)
+            ? policy
+            : MonitoringPolicyId.Fast;
 
     private static GameProfile ParseGameProfile(string? value) =>
         Enum.TryParse<GameProfile>(value, ignoreCase: true, out var profile) &&
@@ -1468,6 +1733,12 @@ public partial class MainWindow : Window
             };
             await _settingsStore.SaveAsync(_settings);
         }
+        catch (SettingsSchemaTooNewException exception)
+        {
+            SetStatus(
+                UiText.Current.FutureSettingsReadOnly(exception.DetectedSchemaVersion),
+                UiStatusKind.Warning);
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             if (expectedMonitoringSession is { } expectedSession &&
@@ -1499,6 +1770,9 @@ public partial class MainWindow : Window
         // Fail open first: a blocking alert must disappear before its fallback hotkey is
         // unregistered or any asynchronous shutdown work begins.
         _alertService.Acknowledged -= OnAlertAcknowledged;
+        _alertService.GuardedContinueRequested -= OnGuardedContinueRequested;
+        _alertService.GuardedStopRequested -= OnGuardedStopRequested;
+        _alertService.GuardedFailOpen -= OnGuardedFailOpen;
         _alertService.Dispose();
         if (_monitoringHud is not null)
         {

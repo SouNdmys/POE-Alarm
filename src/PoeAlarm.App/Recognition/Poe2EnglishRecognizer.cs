@@ -23,6 +23,9 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
     private ConfirmedNoMatch? _confirmedNoMatch;
     private PendingNoMatch? _pendingBatchNoMatch;
     private ConfirmedNoMatch? _confirmedBatchNoMatch;
+    private BatchLocalizedRecovery? _pendingBatchRecovery;
+    private long _batchPrimaryPassCount;
+    private long _batchLocalizedWorkUnitCount;
     private bool _disposed;
 
     public Poe2EnglishRecognizer(PoeTextPreprocessor? preprocessor = null)
@@ -48,6 +51,10 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
 
     public StructuredRuleOcrSupport StructuredRuleSupport =>
         StructuredRuleOcrSupport.ConfirmedStrictBatch;
+
+    internal long BatchPrimaryPassCount => _batchPrimaryPassCount;
+
+    internal long BatchLocalizedWorkUnitCount => _batchLocalizedWorkUnitCount;
 
     public ulong ComputeFrameFingerprint(CapturedFrame frame)
     {
@@ -164,8 +171,8 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
     /// <summary>
     /// Runs one shared Windows OCR pass and checks every deduplicated target strictly in memory.
     /// A changed frame not accepted by the caller's full rule evaluation is confirmed by the
-    /// independent Windows engine on the next scan. Localized Paddle recovery remains single-target-only until assisted evidence
-    /// can carry stable physical-band identity for several targets.
+    /// independent Windows engine on the next scan. Up to two localized bands are verified by
+    /// shared Paddle logits, and every assisted alternative keeps its physical band identity.
     /// </summary>
     public async Task<OcrRecognitionResult> RecognizeAsync(
         CapturedFrame frame,
@@ -197,6 +204,7 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 confirmed.Fingerprint == fingerprint &&
                 string.Equals(confirmed.TargetKey, targetKey, StringComparison.Ordinal))
             {
+                _pendingBatchRecovery = null;
                 return confirmed.Result with
                 {
                     PreprocessingElapsed = TimeSpan.Zero,
@@ -213,13 +221,35 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             {
                 _pendingBatchNoMatch = null;
                 _confirmedBatchNoMatch = null;
+                _pendingBatchRecovery = null;
             }
 
             var windows = confirmingSameFrame ? _confirmation : _primary;
             var result = await windows
-                .RecognizeAsync(frame, cancellationToken)
+                .RecognizeAsync(frame, targetSet, cancellationToken)
                 .ConfigureAwait(false);
+            _batchPrimaryPassCount++;
             var hasStrictTarget = HasAnyStrictTarget(result.Lines, targetSet);
+            var batchRecovery = confirmingSameFrame && _pendingBatchRecovery is not null
+                ? _pendingBatchRecovery
+                : await TryRecoverLocalizedBandsAsync(
+                        result.Lines,
+                        windows.LastRecognizedBands,
+                        targetSet,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            result = result with
+            {
+                RecognitionElapsed = result.RecognitionElapsed + batchRecovery.Elapsed,
+                AssistedObservations = batchRecovery.Assisted,
+                CandidateEvidence = SelectBatchCandidateEvidence(
+                    confirmingSameFrame,
+                    batchRecovery.Candidates),
+                PhysicalLines = CreatePhysicalLineMap(
+                    result.Lines,
+                    windows.LastRecognizedBands),
+            };
+            hasStrictTarget |= batchRecovery.Assisted.Count > 0;
 
             if (!confirmingSameFrame)
             {
@@ -230,7 +260,13 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 _pendingBatchNoMatch = new PendingNoMatch(
                     fingerprint,
                     targetKey,
-                    RecoveryAttempted: false);
+                    RecoveryAttempted: batchRecovery.Assisted.Count > 0 ||
+                                       batchRecovery.Candidates.Count > 0);
+                // Keep unresolved target-like evidence in the pending confirmation state. It is
+                // hidden from the progressive first result below, then surfaced on the final
+                // independent pass so Guarded can yellow-pause instead of accepting a false
+                // NoMatch. Assisted transcripts remain tied to the same physical band ids.
+                _pendingBatchRecovery = batchRecovery;
                 return result with
                 {
                     TargetAssistedMatch = null,
@@ -239,6 +275,7 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             }
 
             _pendingBatchNoMatch = null;
+            _pendingBatchRecovery = null;
             var final = result with
             {
                 TargetAssistedMatch = null,
@@ -273,6 +310,7 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             _confirmedNoMatch = null;
             _pendingBatchNoMatch = null;
             _confirmedBatchNoMatch = null;
+            _pendingBatchRecovery = null;
             _confirmation.Dispose();
             _primary.Dispose();
             if (_paddleSessionTask.IsCompletedSuccessfully)
@@ -375,6 +413,144 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
                 target.Template.Text),
             watch.Elapsed);
     }
+
+    private async Task<BatchLocalizedRecovery> TryRecoverLocalizedBandsAsync(
+        IReadOnlyList<string> logicalLines,
+        IReadOnlyList<WindowsRecognizedBand> recognizedBands,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken)
+    {
+        var jobs = targets
+            .Where(target => !target.TryFindMatch(logicalLines, out _))
+            .SelectMany(target => recognizedBands
+                .Where(item => !item.Frame.IsFallback &&
+                               ContainsLocalizedLexicalCandidate(item.Lines, target))
+                .Select(band => new BatchRecoveryJob(target, band)))
+            .GroupBy(job => CreateBandId(job.Band.Frame), StringComparer.Ordinal)
+            .Select(static group => new BatchRecoveryBandJob(
+                group.First().Band,
+                group.Select(static item => item.Target).ToArray()))
+            .Take(2)
+            .ToArray();
+        if (jobs.Length == 0)
+        {
+            return BatchLocalizedRecovery.Empty;
+        }
+
+        PaddleCtcSession session;
+        try
+        {
+            session = await _paddleSessionTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return BatchLocalizedRecovery.Empty;
+        }
+
+        var watch = Stopwatch.StartNew();
+        var assisted = new List<OcrAssistedObservation>();
+        var candidates = new List<OcrCandidateEvidence>();
+        foreach (var job in jobs)
+        {
+            _batchLocalizedWorkUnitCount++;
+            cancellationToken.ThrowIfCancellationRequested();
+            var recognized = session.RecognizeBatch(job.Band.Frame, job.Targets);
+            var bandId = CreateBandId(job.Band.Frame);
+            foreach (var target in job.Targets)
+            {
+                var verified = target.IsMatch(recognized.Recognition.Text) ||
+                               recognized.TargetSupports.TryGetValue(
+                                   target.Template.Text,
+                                   out var support) && support.StronglySupported;
+                if (verified)
+                {
+                    assisted.Add(new OcrAssistedObservation(
+                        bandId,
+                        recognized.Recognition.Text,
+                        target.Template.Text,
+                        job.Band.Frame.SourceTop,
+                        job.Band.Frame.SourceBottom));
+                }
+                else
+                {
+                    // Windows localized exactly one glyph-compatible physical row, but
+                    // independent CTC did not verify this target. Guarded policy may pause;
+                    // normal rule matching always ignores this evidence.
+                    candidates.Add(new OcrCandidateEvidence(
+                        bandId,
+                        string.Join(' ', job.Band.Lines),
+                        target.Template.Text,
+                        OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                        job.Band.Frame.SourceTop,
+                        job.Band.Frame.SourceBottom));
+                }
+            }
+        }
+
+        watch.Stop();
+        return new BatchLocalizedRecovery(assisted, candidates, watch.Elapsed);
+    }
+
+    private static IReadOnlyList<OcrPhysicalLine> CreatePhysicalLineMap(
+        IReadOnlyList<string> lines,
+        IReadOnlyList<WindowsRecognizedBand> recognizedBands)
+    {
+        var result = new List<OcrPhysicalLine>();
+        var searchStart = 0;
+        foreach (var band in recognizedBands.Where(static item => !item.Frame.IsFallback))
+        {
+            foreach (var bandLine in band.Lines)
+            {
+                var lineIndex = FindLineIndex(lines, bandLine, searchStart);
+                if (lineIndex < 0)
+                {
+                    continue;
+                }
+
+                result.Add(new OcrPhysicalLine(
+                    lineIndex,
+                    CreateBandId(band.Frame),
+                    band.Frame.SourceTop,
+                    band.Frame.SourceBottom));
+                searchStart = lineIndex + 1;
+            }
+        }
+
+        return result;
+    }
+
+    private static int FindLineIndex(
+        IReadOnlyList<string> lines,
+        string target,
+        int start)
+    {
+        for (var index = start; index < lines.Count; index++)
+        {
+            if (string.Equals(lines[index], target, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string CreateBandId(PreparedFrame band) =>
+        $"poe2:{band.ContentFingerprint:x16}:{band.SourceTop}:{band.SourceBottom}:{band.SourceLeft}:{band.SourceRight}";
+
+    /// <summary>
+    /// A progressive first pass keeps target-like evidence private while the independent Windows
+    /// confirmation is pending. The confirmation pass must surface that preserved evidence so
+    /// Guarded can pause instead of accepting an unresolved lexical candidate as a safe miss.
+    /// </summary>
+    internal static IReadOnlyList<OcrCandidateEvidence> SelectBatchCandidateEvidence(
+        bool isConfirmation,
+        IReadOnlyList<OcrCandidateEvidence> candidates) =>
+        isConfirmation ? candidates : [];
 
     private static bool HasStrictTarget(OcrRecognitionResult result, FullLineAffixMatcher target) =>
         target.TryFindMatch(result.Lines, out _) ||
@@ -542,4 +718,20 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
         OcrRecognitionResult Result);
 
     private sealed record LocalizedRecovery(LogicalAffixMatch Match, TimeSpan Elapsed);
+
+    private sealed record BatchRecoveryJob(
+        FullLineAffixMatcher Target,
+        WindowsRecognizedBand Band);
+
+    private sealed record BatchRecoveryBandJob(
+        WindowsRecognizedBand Band,
+        IReadOnlyList<FullLineAffixMatcher> Targets);
+
+    private sealed record BatchLocalizedRecovery(
+        IReadOnlyList<OcrAssistedObservation> Assisted,
+        IReadOnlyList<OcrCandidateEvidence> Candidates,
+        TimeSpan Elapsed)
+    {
+        public static BatchLocalizedRecovery Empty { get; } = new([], [], TimeSpan.Zero);
+    }
 }

@@ -36,6 +36,9 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
     private string _lastTargetKey = string.Empty;
     private ulong _lastFingerprint;
     private bool _hasCachedRecognition;
+    private BatchCache? _batchCache;
+    private long _batchPrimaryPassCount;
+    private long _batchLocalizedWorkUnitCount;
     private bool _disposed;
 
     public WindowsChineseOcrRecognizer(PoeTextPreprocessor? preprocessor = null)
@@ -52,11 +55,12 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
 
     public string RecognizerLanguageTag => _engine.RecognizerLanguage.LanguageTag;
 
-    // The single-target path can safely localize and independently refine one candidate. The
-    // current OCR result cannot represent several assisted matches with physical-band identity,
-    // so structured live monitoring is deliberately unavailable instead of silently weakening it.
     public StructuredRuleOcrSupport StructuredRuleSupport =>
-        StructuredRuleOcrSupport.Unsupported;
+        StructuredRuleOcrSupport.StrictBatch;
+
+    internal long BatchPrimaryPassCount => _batchPrimaryPassCount;
+
+    internal long BatchLocalizedWorkUnitCount => _batchLocalizedWorkUnitCount;
 
     public ulong ComputeFrameFingerprint(CapturedFrame frame)
     {
@@ -84,6 +88,169 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
     {
         ArgumentNullException.ThrowIfNull(target);
         return RecognizeCoreAsync(frame, target, cancellationToken);
+    }
+
+    public async Task<OcrRecognitionResult> RecognizeAsync(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var targetSet = Poe2EnglishRecognizer.NormalizeTargetSet(targets);
+        if (targetSet.Count == 0)
+        {
+            return await RecognizeAsync(frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        await _recognitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var stopwatch = Stopwatch.StartNew();
+            PreparedFrame prepared;
+            if (ReferenceEquals(frame, _prefetchedSourceFrame) && _prefetchedFrame is not null)
+            {
+                prepared = _prefetchedFrame;
+                _prefetchedSourceFrame = null;
+                _prefetchedFrame = null;
+            }
+            else
+            {
+                prepared = _preprocessor.PrepareBlueAffixText(frame, scale: 1);
+            }
+
+            var preprocessingElapsed = stopwatch.Elapsed;
+            var fingerprint = CombineFingerprint(prepared, frame.Width, frame.Height);
+            var targetKey = Poe2EnglishRecognizer.CreateTargetSetKey(targetSet);
+            if (_batchCache is { } cached &&
+                cached.Fingerprint == fingerprint &&
+                string.Equals(cached.TargetKey, targetKey, StringComparison.Ordinal))
+            {
+                return cached.Result with
+                {
+                    PreprocessingElapsed = preprocessingElapsed,
+                    RecognitionElapsed = TimeSpan.Zero,
+                    WasCached = true,
+                };
+            }
+
+            if (prepared.Width > OcrEngine.MaxImageDimension ||
+                prepared.Height > OcrEngine.MaxImageDimension)
+            {
+                throw new InvalidOperationException(
+                    $"繁中识别区域超过 Windows OCR 的 {OcrEngine.MaxImageDimension}px 限制；请框选更小的装备提示区域。");
+            }
+
+            stopwatch.Restart();
+            using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+                prepared.BgraPixels.AsBuffer(0, prepared.ByteLength),
+                BitmapPixelFormat.Bgra8,
+                prepared.Width,
+                prepared.Height,
+                BitmapAlphaMode.Premultiplied);
+            var recognized = await _engine
+                .RecognizeAsync(bitmap)
+                .AsTask(cancellationToken)
+                .ConfigureAwait(false);
+            _batchPrimaryPassCount++;
+            var detectedLines = recognized.Lines
+                .Where(line => line.Words.Count > 0)
+                .ToArray();
+            var projection = BuildLogicalProjection(detectedLines, prepared);
+            var assisted = new List<OcrAssistedObservation>();
+            var candidateEvidence = new List<OcrCandidateEvidence>();
+
+            // Windows supplies all candidate bounds from one shared full-frame layout pass. A
+            // batch spends no more than two localized recovery work units regardless of target
+            // count, ordered by edit distance and then physical position.
+            var jobs = targetSet
+                .Where(target => !target.TryFindMatch(projection.Lines, out _))
+                .SelectMany(target => FindRefinementCandidates(detectedLines, target)
+                    .Select(candidate => new BatchRefinementJob(target, candidate)))
+                .OrderBy(job => job.Candidate.EditDistance)
+                .ThenBy(job => job.Candidate.LineCount)
+                .ThenBy(job => job.Candidate.StartLine)
+                .GroupBy(job => CreateDetectedBandId(
+                    detectedLines,
+                    job.Candidate.StartLine,
+                    job.Candidate.LineCount,
+                    prepared.ContentFingerprint))
+                .Select(static group => new BatchRefinementBandJob(
+                    group.First().Candidate,
+                    group.Select(static item => item.Target).ToArray()))
+                .Take(2)
+                .ToArray();
+            foreach (var job in jobs)
+            {
+                _batchLocalizedWorkUnitCount++;
+                var recovery = await RefineCandidateBatchAsync(
+                        frame,
+                        prepared,
+                        job.Targets,
+                        job.Candidate,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var bandId = CreateDetectedBandId(
+                    detectedLines,
+                    job.Candidate.StartLine,
+                    job.Candidate.LineCount,
+                    prepared.ContentFingerprint);
+                var relatedBandIds = Enumerable.Range(
+                        job.Candidate.StartLine,
+                        job.Candidate.LineCount)
+                    .Select(index =>
+                    {
+                        var bounds = GetBounds(detectedLines[index]);
+                        return CreateBandId(
+                            prepared.ContentFingerprint,
+                            (int)Math.Floor(bounds.Top),
+                            (int)Math.Ceiling(bounds.Bottom));
+                    })
+                    .ToArray();
+                foreach (var verified in recovery.Verified)
+                {
+                    assisted.Add(new OcrAssistedObservation(
+                        bandId,
+                        verified.ObservedText,
+                        verified.Target.Template.Text,
+                        (int)Math.Floor(job.Candidate.Bounds.Top),
+                        (int)Math.Ceiling(job.Candidate.Bounds.Bottom),
+                        relatedBandIds));
+                }
+
+                var observed = string.Join(' ', detectedLines
+                    .Skip(job.Candidate.StartLine)
+                    .Take(job.Candidate.LineCount)
+                    .Select(line => NormalizeChineseNumericDashes(line.Text.Trim())));
+                foreach (var unresolved in recovery.Unresolved)
+                {
+                    candidateEvidence.Add(new OcrCandidateEvidence(
+                        bandId,
+                        observed,
+                        unresolved.Template.Text,
+                        ClassifyCandidateEvidence(observed, unresolved),
+                        (int)Math.Floor(job.Candidate.Bounds.Top),
+                        (int)Math.Ceiling(job.Candidate.Bounds.Bottom)));
+                }
+            }
+
+            var result = new OcrRecognitionResult(
+                projection.Lines,
+                preprocessingElapsed,
+                stopwatch.Elapsed,
+                WasCached: false,
+                TargetAssistedMatch: null,
+                RequiresRescan: false,
+                AssistedObservations: assisted,
+                PhysicalLines: projection.PhysicalLines,
+                CandidateEvidence: candidateEvidence);
+            _batchCache = new BatchCache(fingerprint, targetKey, result);
+            return result;
+        }
+        finally
+        {
+            _recognitionGate.Release();
+        }
     }
 
     private async Task<OcrRecognitionResult> RecognizeCoreAsync(
@@ -294,6 +461,142 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
         return null;
     }
 
+    private static IReadOnlyList<RefinementCandidate> FindRefinementCandidates(
+        IReadOnlyList<OcrLine> detectedLines,
+        FullLineAffixMatcher target)
+    {
+        if (target.Template.Tokens.Count < 2 || detectedLines.Count == 0)
+        {
+            return [];
+        }
+
+        var candidates = new Dictionary<(int Start, int Span), RefinementCandidate>();
+        var editAllowance = target.Template.Tokens.Count <= 8
+            ? Math.Min(4, target.Template.Tokens.Count)
+            : Math.Clamp((target.Template.Tokens.Count + 1) / 2, 4, 8);
+        for (var start = 0; start < detectedLines.Count; start++)
+        {
+            var maximumSpan = Math.Min(target.MaximumLineSpan, detectedLines.Count - start);
+            var text = string.Empty;
+            var bounds = new Rect();
+            for (var span = 1; span <= maximumSpan; span++)
+            {
+                var line = detectedLines[start + span - 1];
+                if (span > 1 && HasLogicalBoundary(detectedLines[start + span - 2], line))
+                {
+                    break;
+                }
+
+                var normalizedLine = NormalizeChineseNumericDashes(line.Text.Trim());
+                text = text.Length == 0 ? normalizedLine : $"{text} {normalizedLine}";
+                bounds = span == 1 ? GetBounds(line) : Union(bounds, GetBounds(line));
+                var canonical = AffixCanonicalizer.Normalize(text);
+                var distance = TokenEditDistance(target.Template.Tokens, canonical.Tokens, editAllowance);
+                if (distance is >= 1 && distance <= editAllowance)
+                {
+                    var key = (start, span);
+                    var candidate = new RefinementCandidate(start, span, bounds, distance);
+                    if (!candidates.TryGetValue(key, out var existing) ||
+                        candidate.EditDistance < existing.EditDistance)
+                    {
+                        candidates[key] = candidate;
+                    }
+                }
+            }
+        }
+
+        return candidates.Values.ToArray();
+    }
+
+    private async Task<LogicalAffixMatch?> RefineCandidateAsync(
+        CapturedFrame source,
+        PreparedFrame prepared,
+        FullLineAffixMatcher target,
+        RefinementCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        using var crop = CreateOriginalCrop(source, prepared, candidate.Bounds, out var cropFrame);
+        var refined = await _engine
+            .RecognizeAsync(crop)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
+        var refinedLines = BuildLogicalLines(refined.Lines);
+        if (target.TryFindMatch(refinedLines, out var strictMatch) && strictMatch is not null)
+        {
+            return new LogicalAffixMatch(
+                candidate.StartLine,
+                strictMatch.PhysicalLineCount,
+                strictMatch.OriginalText,
+                strictMatch.CanonicalText);
+        }
+
+        return TryPaddleFallback(cropFrame, target, candidate.StartLine);
+    }
+
+    private async Task<BatchRefinementResult> RefineCandidateBatchAsync(
+        CapturedFrame source,
+        PreparedFrame prepared,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        RefinementCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        using var crop = CreateOriginalCrop(source, prepared, candidate.Bounds, out var cropFrame);
+        var refined = await _engine
+            .RecognizeAsync(crop)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
+        var refinedLines = BuildLogicalLines(refined.Lines);
+        var verified = new List<BatchVerifiedTarget>();
+        var unresolved = new List<FullLineAffixMatcher>();
+        foreach (var target in targets)
+        {
+            if (target.TryFindMatch(refinedLines, out var strict) && strict is not null)
+            {
+                verified.Add(new BatchVerifiedTarget(target, strict.OriginalText));
+            }
+            else
+            {
+                unresolved.Add(target);
+            }
+        }
+
+        if (unresolved.Count == 0)
+        {
+            return new BatchRefinementResult(verified, []);
+        }
+
+        // One Paddle inference supplies logits for every still-relevant target. This preserves
+        // the same independent localized verifier as Quick mode without scaling OCR work by N.
+        var bands = _paddleFallbackPreprocessor.PrepareBlueAffixBands(cropFrame, scale: 1)
+            .Where(static item => !item.IsFallback)
+            .Take(2)
+            .ToArray();
+        if (bands.Length == 1)
+        {
+            var batch = GetPaddleFallbackSession().RecognizeBatch(bands[0], unresolved);
+            var remaining = new List<FullLineAffixMatcher>();
+            foreach (var target in unresolved)
+            {
+                var accepted = target.IsMatch(batch.Recognition.Text) ||
+                               batch.TargetSupports.TryGetValue(
+                                   target.Template.Text,
+                                   out var support) && support.StronglySupported;
+                if (accepted)
+                {
+                    verified.Add(new BatchVerifiedTarget(target, batch.Recognition.Text));
+                }
+                else
+                {
+                    remaining.Add(target);
+                }
+            }
+
+            unresolved = remaining;
+        }
+
+        return new BatchRefinementResult(verified, unresolved);
+    }
+
     private SoftwareBitmap CreateOriginalCrop(
         CapturedFrame source,
         PreparedFrame prepared,
@@ -465,6 +768,24 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
         return previous[^1];
     }
 
+    private static OcrCandidateEvidenceKind ClassifyCandidateEvidence(
+        string observed,
+        FullLineAffixMatcher target)
+    {
+        var expectedNumeric = target.Template.Tokens.Count(static token =>
+            token.Kind != AffixTokenKind.Word);
+        var actualNumeric = AffixCanonicalizer.Normalize(observed).Tokens.Count(static token =>
+            token.Kind != AffixTokenKind.Word);
+        if (actualNumeric < expectedNumeric)
+        {
+            return OcrCandidateEvidenceKind.MissingNumericValue;
+        }
+
+        return actualNumeric > expectedNumeric
+            ? OcrCandidateEvidenceKind.ConflictingNumericValue
+            : OcrCandidateEvidenceKind.LocalizedLexicalCandidate;
+    }
+
     private static string NormalizeChineseNumericDashes(string text)
     {
         var firstCandidate = text.IndexOf('一');
@@ -533,6 +854,63 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
         return lines.ToArray();
     }
 
+    private static LogicalProjection BuildLogicalProjection(
+        IReadOnlyList<OcrLine> detectedLines,
+        PreparedFrame prepared)
+    {
+        var lines = new List<string>(detectedLines.Count * 2);
+        var physical = new List<OcrPhysicalLine>(detectedLines.Count);
+        OcrLine? previous = null;
+        foreach (var detectedLine in detectedLines)
+        {
+            var text = NormalizeChineseNumericDashes(detectedLine.Text.Trim());
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (previous is not null && HasLogicalBoundary(previous, detectedLine))
+            {
+                lines.Add(string.Empty);
+            }
+
+            var bounds = GetBounds(detectedLine);
+            var index = lines.Count;
+            lines.Add(text);
+            var top = (int)Math.Floor(bounds.Top);
+            var bottom = (int)Math.Ceiling(bounds.Bottom);
+            physical.Add(new OcrPhysicalLine(
+                index,
+                CreateBandId(prepared.ContentFingerprint, top, bottom),
+                top,
+                bottom));
+            previous = detectedLine;
+        }
+
+        return new LogicalProjection(lines, physical);
+    }
+
+    private static string CreateDetectedBandId(
+        IReadOnlyList<OcrLine> detectedLines,
+        int start,
+        int count,
+        ulong fingerprint)
+    {
+        var bounds = GetBounds(detectedLines[start]);
+        for (var offset = 1; offset < count; offset++)
+        {
+            bounds = Union(bounds, GetBounds(detectedLines[start + offset]));
+        }
+
+        return CreateBandId(
+            fingerprint,
+            (int)Math.Floor(bounds.Top),
+            (int)Math.Ceiling(bounds.Bottom));
+    }
+
+    private static string CreateBandId(ulong fingerprint, int top, int bottom) =>
+        $"winzh:{fingerprint:x16}:{top}:{bottom}";
+
     private static bool HasLogicalBoundary(OcrLine previous, OcrLine current)
     {
         var previousBounds = GetBounds(previous);
@@ -584,4 +962,29 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
         int LineCount,
         Rect Bounds,
         int EditDistance);
+
+    private sealed record LogicalProjection(
+        IReadOnlyList<string> Lines,
+        IReadOnlyList<OcrPhysicalLine> PhysicalLines);
+
+    private sealed record BatchRefinementJob(
+        FullLineAffixMatcher Target,
+        RefinementCandidate Candidate);
+
+    private sealed record BatchRefinementBandJob(
+        RefinementCandidate Candidate,
+        IReadOnlyList<FullLineAffixMatcher> Targets);
+
+    private sealed record BatchRefinementResult(
+        IReadOnlyList<BatchVerifiedTarget> Verified,
+        IReadOnlyList<FullLineAffixMatcher> Unresolved);
+
+    private sealed record BatchVerifiedTarget(
+        FullLineAffixMatcher Target,
+        string ObservedText);
+
+    private sealed record BatchCache(
+        ulong Fingerprint,
+        string TargetKey,
+        OcrRecognitionResult Result);
 }

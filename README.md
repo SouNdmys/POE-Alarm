@@ -2,14 +2,14 @@
 
 POE 制作时的本地 OCR 告警工具。它读取选定屏幕区域中的蓝色装备词缀，命中用户输入的完整目标词缀后立即停止扫描，并显示会阻挡后续鼠标点击的红色锁定窗、循环播放告警声。
 
-当前版本：`0.6.1`。目标环境为 Windows 10/11 x64，支持 POE1 / POE2 的 English 与繁體中文客户端。两款游戏会分别保存目标词缀、框选区域和识别语言；POE1 English 保持原有 Windows OCR 路径，POE2 English 使用独立复核层，繁中使用 Windows 中文多行 OCR 快速路径并仅在局部疑难候选或系统没有中文 OCR 能力时使用内置 PP-OCRv5。实测数据与边界见[繁體中文 OCR 生产说明](docs/traditional-chinese-ocr.md)。
+当前正式基线：`0.6.1`；当前工作树开发版本：`0.7.0-preview.2`。目标环境为 Windows 10/11 x64，支持 POE1 / POE2 的 English 与繁體中文客户端。两款游戏会分别保存目标词缀、框选区域和识别语言；POE1 English 保持原有 Windows OCR 路径，POE2 English 使用独立复核层，繁中使用 Windows 中文多行 OCR 快速路径并仅在局部疑难候选或系统没有中文 OCR 能力时使用内置 PP-OCRv5。实测数据与边界见[繁體中文 OCR 生产说明](docs/traditional-chinese-ocr.md)。
 
 ## 直接试用
 
-开发者在本地执行本文的 `dotnet publish` 后，自包含构建产物位于：
+开发者在本地执行本文的 `dotnet publish` 后，当前开发预览的自包含构建产物位于：
 
 ```text
-artifacts/publish/0.6.1/win-x64/PoeAlarm.exe
+artifacts/publish/0.7.0-preview.2/win-x64/PoeAlarm.exe
 ```
 
 如果拿到的是发布 ZIP，解压后直接运行根目录的 `PoeAlarm.exe`。公开包内置的是程序原创提示音，不含游戏音频素材；想使用自己已有的音效，可在“体验设置 → 命中提示音”中选择本地 PCM WAV，路径只保存在本机，不会复制到程序目录或上传。
@@ -48,9 +48,11 @@ Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0"
 
 ## vNext 开发预览
 
-当前开发版本标识为 `0.7.0-preview.1`，以 `0.6.1` 为冻结基线，已加入与快速模式隔离的“多词缀命中模式”预览：可保存多个“可接受结果”（结果之间为 OR），每个结果支持任意、全部或至少 N 条完整词缀，并可为数值槽设置闭区间、至少、至多或精确值。同一条实际词缀在一个结果内最多计数一次。Catalyst、品质与特殊效果可能改变 tooltip 显示值；程序只比较屏幕实际值，不反推基础 Tier。
+当前开发版本标识为 `0.7.0-preview.2`，以 `0.6.1` 为冻结基线，已加入与快速模式隔离的“多词缀命中模式”：可保存多个“可接受结果”（结果之间为 OR），每个结果支持任意、全部或至少 N 条完整词缀，并可为数值槽设置闭区间、至少、至多或精确值。同一条实际词缀在一个结果内最多计数一次。Catalyst、品质与特殊效果可能改变 tooltip 显示值；程序只比较屏幕实际值，不反推基础 Tier。
 
-快速模式仍直接调用 0.6.1 的单目标识别接口，旧 `settings.json` 会迁移为快速模式且无需手工操作。结构化规则按 POE1 / POE2 分别保存；界面中的“开发预览”表示其批量目标 OCR 与真实制作回放仍在发布门禁中。目前 POE1 English 可用单次严格批量 OCR，POE2 English 保留变化帧的双引擎严格确认；繁中和内置 Paddle 路径尚未完成共享多目标局部复核，因此会明确拒绝结构化监控，不会静默降级，快速模式仍照常可用。Mirror Tier 安全模式尚未开放，它会作为独立 `MonitoringPolicy` 开发，不会改写快速模式的识别与鼠标状态机。完整范围、延后项与验收标准见 [vNext 规则引擎与安全监控计划](docs/VNEXT_RULE_ENGINE_PLAN.md)。
+快速模式仍直接调用 0.6.1 的单目标识别接口，旧 `settings.json` 会迁移为快速模式且无需手工操作。结构化规则按 POE1 / POE2 分别保存；真实制作回放仍属于正式发布门禁。POE1 English 使用单次严格批量 OCR，POE2 English 保留变化帧的双 Windows 引擎确认；繁中 Windows OCR 与内置 Paddle 路径均已实现共享多目标局部复核。每个扫描批次的恢复工作单元有固定上限，目标数量不会导致重复整帧 OCR；普通与辅助转录共享物理行身份，不能把同一词缀重复计数。快速模式原有路径、阈值与鼠标状态机不变。Mirror Tier 安全模式作为独立 `MonitoringPolicy` 接入：当前仅在具备 changed-frame 指纹链路的 POE2 English 与繁中识别器上开放；命中时红停，目标相关但数值缺失/冲突或局部复核未决时黄停，稳定帧严格判定为安全不命中后，输入闸门只放行下一次完整制作点击，并在该次抬起时原子拦截后续点击。POE1 English 仍保持 0.6.1 无预判闸门的合同，不用未验证的单次 OCR 冒充 Mirror 安全。完整范围、延后项与验收标准见 [vNext 规则引擎与安全监控计划](docs/VNEXT_RULE_ENGINE_PLAN.md)。
+
+PoEDB / PoE2DB 与 GGG 官网 Mirror Service 组合语料当前覆盖 14 个来源、7 个场景（其中 6 个真实镜装组合），共 34/34：13 个正例、21 个负例，包含 OR 第二分支、少一条、近邻词缀、数值边界与 Hybrid 同一 modifier 不重复计数。详情和来源链接见 [Mirror 复合规则语料](docs/MIRROR_RULE_CORPUS.md)。这证明规则表达与计数可覆盖这些制作目标，不等同于每个装备都做过实机 OCR 回放。
 
 ## 匹配规则
 
@@ -113,7 +115,9 @@ POE1 逻辑词缀可以由 1–4 条相邻 OCR 物理行组成；POE2 支持最�
 - `tests/PoeAlarm.Core.Tests`：无外部测试框架的 matcher 回归测试。
 - `tests/PoeAlarm.Rules.Tests`：vNext 数值槽、可接受结果、一对一计数、设置序列化与规则热路径回归测试。
 - `tests/PoeAlarm.RulesUi.Tests`：多词缀编辑器的数据隔离、数值输入、上限和 POE2 换行模板回归测试。
+- `tests/PoeAlarm.GuardedPolicy.Tests`：Mirror Tier Guarded 的稳定帧、严格判定、单次制作点击放行、黄色暂停、watchdog、手动继续/停止和输入成对释放测试。
 - `tests/PoeAlarm.Poe2CorpusProbe`：POE2 中英 PoEDB 语料、数值占位、长碑牌组合及交叉误报审计。
+- `tests/PoeAlarm.MirrorCorpusProbe`：来自 PoEDB、PoE2DB 与官网实际镜像服务物品的复合规则语料，覆盖 OR、至少 N 条、数值边界、Hybrid 一对一计数与近邻负例；详见 [Mirror Tier 语料报告](docs/MIRROR_RULE_CORPUS.md)。
 - `tools/PoeAlarm.OcrProbe`：Windows OCR ROI/缩放基准工具。
 - `tools/PoeAlarm.RecognizerProbe`：内置 Paddle 兼容路径的 recognizer-only 基准工具。
 - `tools/PoeAlarm.TransientReplay`：内置 Paddle 路径的瞬态目标与点击节奏实验工具。
@@ -135,10 +139,13 @@ dotnet build PoeAlarm.slnx -c Release --no-restore -m:1
 dotnet run --project tests\PoeAlarm.Core.Tests\PoeAlarm.Core.Tests.csproj -c Release --no-build
 dotnet run --project tests\PoeAlarm.Rules.Tests\PoeAlarm.Rules.Tests.csproj -c Release --no-build
 dotnet run --project tests\PoeAlarm.RulesUi.Tests\PoeAlarm.RulesUi.Tests.csproj -c Release --no-build
+dotnet run --project tests\PoeAlarm.GuardedPolicy.Tests\PoeAlarm.GuardedPolicy.Tests.csproj -c Release --no-build
+dotnet run --project tests\PoeAlarm.MirrorCorpusProbe\PoeAlarm.MirrorCorpusProbe.csproj -c Release --no-build
 dotnet run --project tests\PoeAlarm.Poe2CorpusProbe\PoeAlarm.Poe2CorpusProbe.csproj -c Release --no-build
 dotnet run --project tools\PoeAlarm.EndToEndProbe\PoeAlarm.EndToEndProbe.csproj -c Release --no-build -- --manifest tests\screenshots\8.11\traditional-ocr-8.11.json
 dotnet run --project tools\PoeAlarm.EndToEndProbe\PoeAlarm.EndToEndProbe.csproj -c Release --no-build -- --manifest tests\screenshots\poe2\poe2-ocr-manifest.en.json --poe2-en-recovery
 dotnet run --project tools\PoeAlarm.UiSnapshot\PoeAlarm.UiSnapshot.csproj -c Release --no-build -- --poedb-corpus tests\screenshots\poedb-traditional-affix-corpus.json
+dotnet run --project tools\PoeAlarm.UiSnapshot\PoeAlarm.UiSnapshot.csproj -c Release --no-build -- --assert-batch-ocr-contract --assert-batch-ocr-synthetic
 dotnet restore src\PoeAlarm.App\PoeAlarm.App.csproj -r win-x64 -p:NuGetAudit=false -m:1
 dotnet publish src\PoeAlarm.App\PoeAlarm.App.csproj -c Release -p:PublishProfile=PortableWinX64 --no-restore -m:1
 ```
