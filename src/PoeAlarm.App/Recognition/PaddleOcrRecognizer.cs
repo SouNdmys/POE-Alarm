@@ -41,6 +41,12 @@ public sealed class PaddleOcrRecognizer : IOcrRecognizer, IFrameFingerprintProvi
     private IReadOnlyList<PreparedFrame>? _prefetchedBands;
     private bool _disposed;
 
+    // Progressive segmentation and CTC evidence are target-conditioned. A safe batch result must
+    // preserve band identity for multiple assisted candidates, which OcrRecognitionResult does
+    // not yet model. Refuse structured live mode until that evidence model exists.
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        StructuredRuleOcrSupport.Unsupported;
+
     public PaddleOcrRecognizer()
         : this(CreatePackagedSession(), new PoeTextPreprocessor(TraditionalChinesePreprocessing))
     {

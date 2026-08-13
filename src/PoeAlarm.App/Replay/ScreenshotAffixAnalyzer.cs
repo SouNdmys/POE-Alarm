@@ -3,6 +3,7 @@ using System.IO;
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.Core.Matching;
+using PoeAlarm.Core.Rules;
 
 namespace PoeAlarm.App.Replay;
 
@@ -14,11 +15,11 @@ public sealed class ScreenshotAffixAnalyzer
 {
     private const int MaximumContinuationScans = 128;
     private readonly IOcrRecognizer _ocrRecognizer;
-    private readonly ScreenshotFrameLoader _frameLoader;
+    private readonly IScreenshotFrameLoader _frameLoader;
 
     public ScreenshotAffixAnalyzer(
         IOcrRecognizer ocrRecognizer,
-        ScreenshotFrameLoader? frameLoader = null)
+        IScreenshotFrameLoader? frameLoader = null)
     {
         ArgumentNullException.ThrowIfNull(ocrRecognizer);
 
@@ -108,6 +109,80 @@ public sealed class ScreenshotAffixAnalyzer
             recognitionElapsed,
             match);
     }
+
+    /// <summary>
+    /// Evaluates every compiled condition over one batched OCR request per scan. A recognizer may
+    /// request bounded progressive continuation on the same frame, but this never invokes OCR once
+    /// per condition, so rule count cannot multiply full-frame recognition work.
+    /// </summary>
+    public async Task<ScreenshotRuleAnalysis> AnalyzeRulesAsync(
+        string imagePath,
+        CompiledRuleSet rules,
+        ScreenRegion? cropRegion = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(imagePath);
+        ArgumentNullException.ThrowIfNull(rules);
+        if (_ocrRecognizer.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
+        {
+            throw new NotSupportedException(
+                $"{_ocrRecognizer.GetType().Name} has not passed structured-rule batch OCR validation.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var resolvedPath = Path.GetFullPath(imagePath);
+        var loadWatch = Stopwatch.StartNew();
+        var frame = await _frameLoader
+            .LoadAsync(resolvedPath, cropRegion, cancellationToken)
+            .ConfigureAwait(false);
+        loadWatch.Stop();
+
+        var preprocessingElapsed = TimeSpan.Zero;
+        var recognitionElapsed = TimeSpan.Zero;
+        var evaluationElapsed = TimeSpan.Zero;
+        OcrRecognitionResult? ocrResult = null;
+        RuleEvaluationResult? evaluation = null;
+        for (var scan = 0; scan < MaximumContinuationScans; scan++)
+        {
+            // One request represents the complete, deduplicated target set. A progressive
+            // recognizer may continue the same frame, but target count never multiplies calls.
+            ocrResult = await _ocrRecognizer
+                .RecognizeAsync(frame, rules.Targets, cancellationToken)
+                .ConfigureAwait(false);
+            preprocessingElapsed += ocrResult.PreprocessingElapsed;
+            recognitionElapsed += ocrResult.RecognitionElapsed;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var evaluationWatch = Stopwatch.StartNew();
+            evaluation = rules.Evaluate(ocrResult.Lines);
+            evaluationWatch.Stop();
+            evaluationElapsed += evaluationWatch.Elapsed;
+            if (evaluation.IsMatch || !ocrResult.RequiresRescan)
+            {
+                break;
+            }
+        }
+
+        if (ocrResult is null || evaluation is null ||
+            (ocrResult.RequiresRescan && !evaluation.IsMatch))
+        {
+            throw new InvalidDataException(
+                $"OCR did not finish after {MaximumContinuationScans} progressive structured-rule scans.");
+        }
+
+        return new ScreenshotRuleAnalysis(
+            resolvedPath,
+            cropRegion,
+            frame.Width,
+            frame.Height,
+            ocrResult.Lines,
+            loadWatch.Elapsed,
+            preprocessingElapsed,
+            recognitionElapsed,
+            evaluationElapsed,
+            evaluation);
+    }
 }
 
 public sealed record ScreenshotAffixAnalysis(
@@ -126,4 +201,23 @@ public sealed record ScreenshotAffixAnalysis(
     public TimeSpan OcrElapsed => PreprocessingElapsed + RecognitionElapsed;
 
     public TimeSpan TotalElapsed => ImageLoadElapsed + OcrElapsed;
+}
+
+public sealed record ScreenshotRuleAnalysis(
+    string ImagePath,
+    ScreenRegion? CropRegion,
+    int FrameWidth,
+    int FrameHeight,
+    IReadOnlyList<string> Lines,
+    TimeSpan ImageLoadElapsed,
+    TimeSpan PreprocessingElapsed,
+    TimeSpan RecognitionElapsed,
+    TimeSpan RuleEvaluationElapsed,
+    RuleEvaluationResult Evaluation)
+{
+    public bool IsMatch => Evaluation.IsMatch;
+
+    public TimeSpan OcrElapsed => PreprocessingElapsed + RecognitionElapsed;
+
+    public TimeSpan TotalElapsed => ImageLoadElapsed + OcrElapsed + RuleEvaluationElapsed;
 }

@@ -3,6 +3,7 @@
 .tools/
 .packages/
 .dotnet-home/
+.dotnet-cli/
 **/bin/
 **/obj/
 artifacts/

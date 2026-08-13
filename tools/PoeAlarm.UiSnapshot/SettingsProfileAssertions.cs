@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Configuration;
+using PoeAlarm.Core.Rules;
 
 internal static class SettingsProfileAssertions
 {
@@ -32,12 +33,20 @@ internal static class SettingsProfileAssertions
             var store = new SettingsStore(settingsPath);
             var migrated = await store.LoadAsync();
             Assert(migrated.SelectedGameProfile == GameProfile.Poe1, "Legacy selected profile");
+            Assert(migrated.SchemaVersion == AppSettings.CurrentSchemaVersion,
+                "Legacy settings migrate to the current schema");
             Assert(migrated.Profiles is not null, "Legacy profiles created");
             var poe1 = migrated.Profiles!.Get(GameProfile.Poe1);
             Assert(poe1.TargetAffix == "legacy poe1 target", "Legacy POE1 target retained");
             Assert(poe1.CaptureRegion == new ScreenRegion(12, 34, 560, 420),
                 "Legacy POE1 region retained");
             Assert(poe1.OcrLanguage == "zh-TW", "Legacy POE1 OCR language retained");
+            Assert(poe1.RuleEditorMode == RuleEditorMode.Quick,
+                "Legacy POE1 target remains on the quick matcher path");
+            Assert(poe1.StructuredRuleSet is null,
+                "Legacy migration does not invent structured rules");
+            Assert(poe1.MonitoringPolicy == MonitoringPolicyId.Fast,
+                "Legacy POE1 settings retain the verified fast monitoring policy");
             var emptyPoe2 = migrated.Profiles.Get(GameProfile.Poe2);
             Assert(emptyPoe2.TargetAffix.Length == 0, "Migration does not copy target to POE2");
             Assert(emptyPoe2.CaptureRegion is null, "Migration does not copy region to POE2");
@@ -53,6 +62,25 @@ internal static class SettingsProfileAssertions
                     TargetAffix = "poe2 tablet target",
                     CaptureRegion = new ScreenRegion(700, 80, 640, 920),
                     OcrLanguage = "en",
+                    RuleEditorMode = RuleEditorMode.Structured,
+                    MonitoringPolicy = MonitoringPolicyId.Fast,
+                    StructuredRuleSet = new RuleSetDefinition(
+                        "poe2 crafting rules",
+                        [
+                            new AcceptableResultGroup(
+                                "critical result",
+                                ResultGroupMode.AtLeast,
+                                [
+                                    new AffixCondition(
+                                        "spell critical chance",
+                                        "#% increased Spell Critical Hit Chance",
+                                        [NumericConstraint.AtLeast(170)]),
+                                    new AffixCondition(
+                                        "critical multiplier",
+                                        "+#% to Critical Strike Multiplier"),
+                                ],
+                                threshold: 2),
+                        ]),
                 });
             var updated = migrated with
             {
@@ -73,6 +101,15 @@ internal static class SettingsProfileAssertions
             Assert(poe2.TargetAffix == "poe2 tablet target", "POE2 target round-trip");
             Assert(poe2.CaptureRegion == new ScreenRegion(700, 80, 640, 920),
                 "POE2 region round-trip");
+            Assert(poe2.RuleEditorMode == RuleEditorMode.Structured,
+                "Structured rule mode round-trip");
+            Assert(poe2.MonitoringPolicy == MonitoringPolicyId.Fast,
+                "Monitoring policy remains orthogonal to structured rules");
+            Assert(poe2.StructuredRuleSet?.Groups.Count == 1,
+                "Structured acceptable results round-trip");
+            Assert(
+                poe2.StructuredRuleSet?.Groups[0].Conditions[0].NumericConstraints[0].Minimum == 170,
+                "Structured numeric constraint round-trip");
 
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(settingsPath));
             Assert(!document.RootElement.TryGetProperty("TargetAffix", out _),
@@ -81,8 +118,37 @@ internal static class SettingsProfileAssertions
                 "Saved settings remove the legacy root CaptureRegion");
             Assert(document.RootElement.TryGetProperty("Profiles", out _),
                 "Saved settings use profile-aware storage");
+            Assert(document.RootElement.GetProperty("SchemaVersion").GetInt32() ==
+                   AppSettings.CurrentSchemaVersion,
+                "Saved settings declare their schema");
 
-            Console.WriteLine("Settings profile assertions: 18/18 passed");
+            const string futureSettings =
+                """
+                {
+                  "SchemaVersion": 999,
+                  "SelectedGameProfile": "Poe2",
+                  "FutureOnlyValue": "must survive"
+                }
+                """;
+            await File.WriteAllTextAsync(settingsPath, futureSettings);
+            var futureStore = new SettingsStore(settingsPath);
+            var futureFallback = await futureStore.LoadAsync();
+            Assert(futureFallback.SchemaVersion == AppSettings.CurrentSchemaVersion,
+                "Future settings load safe in-memory defaults");
+            try
+            {
+                await futureStore.SaveAsync(futureFallback);
+                throw new InvalidOperationException(
+                    "A future settings schema was silently overwritten.");
+            }
+            catch (SettingsSchemaTooNewException)
+            {
+                // Expected: this binary becomes read-only for a newer file.
+            }
+            Assert(await File.ReadAllTextAsync(settingsPath) == futureSettings,
+                "Future settings remain byte-for-byte unchanged");
+
+            Console.WriteLine("Settings profile assertions: 30/30 passed");
         }
         finally
         {

@@ -121,25 +121,85 @@
                     Style="{StaticResource SecondaryButton}" />
           </Grid>
 
-          <TextBox x:Name="TargetAffixTextBox"
-                   Height="76"
-                   AcceptsReturn="True"
-                   TextWrapping="Wrap"
-                   VerticalScrollBarVisibility="Auto"
-                   TextChanged="OnTargetAffixChanged"
-                   Style="{StaticResource GlassTextBox}"
-                   ToolTip="直接粘贴 PoEDB 的完整词缀；数值大小会自动忽略。" />
-
-          <Border Margin="0,8,0,0"
-                  Padding="10,7"
-                  Background="{StaticResource SurfaceTintBrush}"
-                  CornerRadius="9">
-            <TextBlock x:Name="CanonicalPreviewText"
+          <Grid Margin="2,0,2,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="250" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="RuleModeLabelText"
+                       Grid.Column="0"
+                       Margin="0,0,12,0"
+                       VerticalAlignment="Center"
                        Foreground="{StaticResource TextSecondaryBrush}"
-                       FontFamily="{StaticResource MonoFont}"
-                       FontSize="12"
-                       TextWrapping="Wrap"
-                       Text="等待输入完整词缀；所有文字都会参与匹配，数值大小会自动忽略。" />
+                       Text="目标模式" />
+            <ComboBox x:Name="RuleModeComboBox"
+                      Grid.Column="1"
+                      SelectedIndex="0"
+                      SelectedValuePath="Tag"
+                      SelectionChanged="OnRuleModeChanged"
+                      Style="{StaticResource GlassComboBox}"
+                      ToolTip="快速模式保留原有整句匹配；多词缀模式支持多个可接受结果与数值约束。">
+              <ComboBoxItem x:Name="QuickRuleModeOption" Tag="Quick" Content="快速模式（单条整句）" />
+              <ComboBoxItem x:Name="StructuredRuleModeOption" Tag="Structured" Content="多词缀命中模式" />
+            </ComboBox>
+          </Grid>
+
+          <StackPanel x:Name="QuickRulePanel">
+            <TextBox x:Name="TargetAffixTextBox"
+                     Height="76"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     TextChanged="OnTargetAffixChanged"
+                     Style="{StaticResource GlassTextBox}"
+                     ToolTip="直接粘贴 PoEDB 的完整词缀；数值大小会自动忽略。" />
+
+            <Border Margin="0,8,0,0"
+                    Padding="10,7"
+                    Background="{StaticResource SurfaceTintBrush}"
+                    CornerRadius="9">
+              <TextBlock x:Name="CanonicalPreviewText"
+                         Foreground="{StaticResource TextSecondaryBrush}"
+                         FontFamily="{StaticResource MonoFont}"
+                         FontSize="12"
+                         TextWrapping="Wrap"
+                         Text="等待输入完整词缀；所有文字都会参与匹配，数值大小会自动忽略。" />
+            </Border>
+          </StackPanel>
+
+          <Border x:Name="StructuredRulePanel"
+                  Padding="12,10"
+                  Background="{StaticResource SurfaceTintBrush}"
+                  CornerRadius="9"
+                  Visibility="Collapsed">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                <TextBlock x:Name="StructuredRuleSummaryText"
+                           Foreground="{StaticResource TextPrimaryBrush}"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Text="尚未配置多词缀规则" />
+                <TextBlock x:Name="StructuredRuleHintText"
+                           Margin="0,4,0,0"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Text="命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。"
+                           ToolTip="命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。" />
+              </StackPanel>
+              <Button x:Name="EditStructuredRulesButton"
+                      Grid.Column="1"
+                      MinWidth="118"
+                      VerticalAlignment="Center"
+                      Content="编辑规则"
+                      Click="OnEditStructuredRules"
+                      Style="{StaticResource SecondaryButton}" />
+            </Grid>
           </Border>
 
           <Grid Margin="2,10,2,0">

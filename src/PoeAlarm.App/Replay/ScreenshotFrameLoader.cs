@@ -10,7 +10,15 @@ namespace PoeAlarm.App.Replay;
 /// Loads a PNG or JPEG screenshot into the same tightly packed BGRA8 frame shape
 /// used by live screen capture. Decoding and cropping happen in memory.
 /// </summary>
-public sealed class ScreenshotFrameLoader
+public interface IScreenshotFrameLoader
+{
+    Task<CapturedFrame> LoadAsync(
+        string imagePath,
+        ScreenRegion? cropRegion = null,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class ScreenshotFrameLoader : IScreenshotFrameLoader
 {
     private const int BytesPerPixel = 4;
 

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Globalization;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
+using PoeAlarm.Core.Matching;
 
 namespace PoeAlarm.App.Recognition;
 
@@ -67,6 +68,25 @@ public sealed class WindowsOcrRecognizer : IOcrRecognizer
     /// constructor leaves collection disabled, preserving its allocation and recognition path.
     /// </summary>
     internal IReadOnlyList<WindowsRecognizedBand> LastRecognizedBands => _lastRecognizedBands;
+
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        StructuredRuleOcrSupport.StrictBatch;
+
+    public Task<OcrRecognitionResult> RecognizeAsync(
+        Capture.CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        if (targets.Any(static target => target is null))
+        {
+            throw new ArgumentException("The structured target set contains a null target.", nameof(targets));
+        }
+
+        // Windows English OCR has no target-conditioned inference. One exhaustive pass is the
+        // complete verified path; every strict rule is evaluated later against these shared lines.
+        return RecognizeAsync(frame, cancellationToken);
+    }
 
     public async Task<OcrRecognitionResult> RecognizeAsync(
         Capture.CapturedFrame frame,

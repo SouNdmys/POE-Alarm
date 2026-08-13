@@ -14,7 +14,9 @@ using PoeAlarm.App.Capture;
 using PoeAlarm.App.Configuration;
 using PoeAlarm.App.Monitoring;
 using PoeAlarm.App.Recognition;
+using PoeAlarm.App.RulesUi;
 using PoeAlarm.Core.Matching;
+using PoeAlarm.Core.Rules;
 
 internal static class Program
 {
@@ -40,6 +42,8 @@ internal static class Program
         var assertStopMatchRace = args.Contains("--assert-stop-match-race", StringComparer.OrdinalIgnoreCase);
         var assertBandFingerprints = args.Contains("--assert-band-fingerprints", StringComparer.OrdinalIgnoreCase);
         var assertTargetAwareMonitor = args.Contains("--assert-target-aware-monitor", StringComparer.OrdinalIgnoreCase);
+        var assertStructuredMonitor = args.Contains("--assert-structured-monitor", StringComparer.OrdinalIgnoreCase);
+        var assertStructuredReplay = args.Contains("--assert-structured-replay", StringComparer.OrdinalIgnoreCase);
         var assertConcurrentDispose = args.Contains("--assert-concurrent-dispose", StringComparer.OrdinalIgnoreCase);
         var assertInputGuard = args.Contains("--assert-input-guard", StringComparer.OrdinalIgnoreCase);
         var assertSettingsProfiles = args.Contains(
@@ -54,6 +58,10 @@ internal static class Program
         var helpMode = args.Contains("--help-window", StringComparer.OrdinalIgnoreCase);
         var englishMode = args.Contains("--english", StringComparer.OrdinalIgnoreCase);
         var poe2Mode = args.Contains("--poe2", StringComparer.OrdinalIgnoreCase);
+        var structuredMode = args.Contains("--structured", StringComparer.OrdinalIgnoreCase);
+        var structuredEditorMode = args.Contains(
+            "--structured-editor",
+            StringComparer.OrdinalIgnoreCase);
         var pathArgument = args.FirstOrDefault(argument => !argument.StartsWith("--", StringComparison.Ordinal));
         var outputPath = pathArgument is not null
             ? Path.GetFullPath(pathArgument)
@@ -105,6 +113,19 @@ internal static class Program
                 AssertTargetAwareMonitorAsync().GetAwaiter().GetResult();
             }
 
+            if (assertStructuredMonitor)
+            {
+                AssertStructuredMonitorAsync().GetAwaiter().GetResult();
+                AssertUnsupportedStructuredMonitorIsRejectedAsync().GetAwaiter().GetResult();
+                AssertStructuredStopWinsPendingRecognitionAsync().GetAwaiter().GetResult();
+                AssertStructuredProgressiveInputGuardAsync().GetAwaiter().GetResult();
+            }
+
+            if (assertStructuredReplay)
+            {
+                AssertStructuredScreenshotReplayAsync().GetAwaiter().GetResult();
+            }
+
             if (assertConcurrentDispose)
             {
                 AssertConcurrentDisposeAsync().GetAwaiter().GetResult();
@@ -119,7 +140,11 @@ internal static class Program
                 AssertProgressiveInputGuardAsync().GetAwaiter().GetResult();
             }
 
-            if (helpMode)
+            if (structuredEditorMode)
+            {
+                RenderStructuredEditor(outputPath, englishMode, poe2Mode);
+            }
+            else if (helpMode)
             {
                 RenderHelpWindow(outputPath, englishMode);
             }
@@ -138,6 +163,7 @@ internal static class Program
                     bottomMode,
                     englishMode,
                     poe2Mode,
+                    structuredMode,
                     assertStartHotKey);
             }
 
@@ -612,6 +638,173 @@ internal static class Program
             "A validated target-assisted result must lock monitoring in MatchFound.");
     }
 
+    private static async Task AssertStructuredMonitorAsync()
+    {
+        var recognizer = new StructuredCountingRecognizer();
+        await using var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
+        var detected = new TaskCompletionSource<AffixDetectedEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        monitor.AffixDetected += (_, args) => detected.TrySetResult(args);
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "structured smoke",
+            [
+                new AcceptableResultGroup(
+                    "T1 physical plus speed",
+                    ResultGroupMode.AtLeast,
+                    [
+                        new AffixCondition(
+                            "physical",
+                            "#% increased Physical Damage",
+                            [NumericConstraint.Range(170m, 179m)]),
+                        new AffixCondition(
+                            "speed",
+                            "#% increased Attack Speed",
+                            [NumericConstraint.AtLeast(20m)]),
+                        new AffixCondition(
+                            "life",
+                            "+# to maximum Life"),
+                    ],
+                    threshold: 2),
+            ]));
+
+        monitor.Start(rules, new ScreenRegion(0, 0, 1, 1));
+        var result = await detected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(result.RuleEvaluation?.IsMatch == true,
+            "Structured monitoring must expose the complete rule evaluation.");
+        var evaluation = result.RuleEvaluation
+                         ?? throw new InvalidOperationException(
+                             "Structured monitoring returned no rule evaluation.");
+        Assert(evaluation.MatchedGroup?.Name == "T1 physical plus speed",
+            "Structured monitoring must identify the acceptable result that stopped crafting.");
+        Assert(recognizer.BatchCalls == 1,
+            "Structured monitoring must run one batched OCR request for all conditions.");
+        Assert(recognizer.ReceivedTargetCount == 3,
+            "Structured monitoring must forward the deduplicated compiled target set once.");
+        Assert(recognizer.ExhaustiveCalls == 0,
+            "A recognizer with batch support must not fall back to another OCR request.");
+        Assert(recognizer.TargetAwareCalls == 0,
+            "Structured monitoring must not repeat target-aware OCR per condition.");
+        Assert(result.DetectedText.Contains("179% increased Physical Damage", StringComparison.Ordinal),
+            "Structured alert details must preserve observed affix text.");
+        Assert(monitor.State == MonitorState.MatchFound,
+            "A structured match must lock monitoring in MatchFound.");
+    }
+
+    private static async Task AssertStructuredStopWinsPendingRecognitionAsync()
+    {
+        var recognizer = new ControlledStructuredOcrRecognizer();
+        await using var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
+        var detected = false;
+        monitor.AffixDetected += (_, _) => detected = true;
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "stop race",
+            [new AcceptableResultGroup(
+                "target",
+                ResultGroupMode.Any,
+                [new AffixCondition("life", "+# to maximum Life")])]));
+
+        monitor.Start(rules, new ScreenRegion(0, 0, 1, 1));
+        await recognizer.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var stopTask = monitor.StopAsync();
+        recognizer.Complete("+70 to maximum Life");
+        await stopTask;
+
+        Assert(!detected,
+            "A structured recognition completed after Stop began must not raise an alert.");
+        Assert(monitor.State == MonitorState.Idle,
+            "A structured stop/match race must finish Idle.");
+    }
+
+    private static async Task AssertUnsupportedStructuredMonitorIsRejectedAsync()
+    {
+        await using var monitor = new AffixMonitor(
+            new EmptyCapture(),
+            new UnsupportedStructuredRecognizer());
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "unsupported",
+            [new AcceptableResultGroup(
+                "target",
+                ResultGroupMode.Any,
+                [new AffixCondition("life", "+# to maximum Life")])]));
+        try
+        {
+            monitor.Start(rules, new ScreenRegion(0, 0, 1, 1));
+            throw new InvalidOperationException(
+                "An unsupported recognizer was allowed to start structured monitoring.");
+        }
+        catch (NotSupportedException)
+        {
+            Assert(monitor.State == MonitorState.Idle,
+                "Rejected structured monitoring must remain Idle.");
+        }
+    }
+
+    private static async Task AssertStructuredScreenshotReplayAsync()
+    {
+        var recognizer = new ProgressiveReplayRecognizer(neverCompletes: false);
+        var analyzer = new PoeAlarm.App.Replay.ScreenshotAffixAnalyzer(
+            recognizer,
+            new FakeScreenshotFrameLoader());
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "replay",
+            [new AcceptableResultGroup(
+                "target",
+                ResultGroupMode.Any,
+                [new AffixCondition("life", "+# to maximum Life")])]));
+        var analysis = await analyzer.AnalyzeRulesAsync("fake.png", rules);
+        Assert(analysis.IsMatch && recognizer.Calls == 2,
+            "Structured screenshot replay must continue the same batch after RequiresRescan.");
+        Assert(analysis.PreprocessingElapsed == TimeSpan.FromMilliseconds(3) &&
+               analysis.RecognitionElapsed == TimeSpan.FromMilliseconds(5),
+            "Structured screenshot replay must accumulate progressive OCR timings.");
+
+        var stuckRecognizer = new ProgressiveReplayRecognizer(neverCompletes: true);
+        var stuckAnalyzer = new PoeAlarm.App.Replay.ScreenshotAffixAnalyzer(
+            stuckRecognizer,
+            new FakeScreenshotFrameLoader());
+        try
+        {
+            _ = await stuckAnalyzer.AnalyzeRulesAsync("fake.png", rules);
+            throw new InvalidOperationException(
+                "A permanently progressive structured replay did not fail at its bounded limit.");
+        }
+        catch (InvalidDataException)
+        {
+            Assert(stuckRecognizer.Calls == 128,
+                "Structured replay continuation must remain bounded at 128 scans.");
+        }
+    }
+
+    private static async Task AssertStructuredProgressiveInputGuardAsync()
+    {
+        var recognizer = new ProgressiveStructuredRecognizer();
+        await using var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
+        var requested = 0;
+        var released = 0;
+        var releaseObserved = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        monitor.InputGuardRequested += (_, _) => Interlocked.Increment(ref requested);
+        monitor.InputGuardReleased += (_, _) =>
+        {
+            Interlocked.Increment(ref released);
+            releaseObserved.TrySetResult();
+        };
+        var rules = RuleCompiler.Compile(new RuleSetDefinition(
+            "progressive",
+            [new AcceptableResultGroup(
+                "target",
+                ResultGroupMode.Any,
+                [new AffixCondition("life", "+# to maximum Life")])]));
+
+        monitor.Start(rules, new ScreenRegion(0, 0, 1, 1));
+        await releaseObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(requested >= 2,
+            "Structured progressive scans must refresh the changed-frame input guard.");
+        Assert(released == 1,
+            "A completed structured non-match must release its guard exactly once.");
+        await monitor.StopAsync();
+    }
+
     private static async Task AssertConcurrentDisposeAsync()
     {
         var capture = new EmptyCapture();
@@ -900,6 +1093,7 @@ internal static class Program
         bool bottomMode,
         bool englishMode,
         bool poe2Mode,
+        bool structuredMode,
         bool assertStartHotKey)
     {
         var closed = false;
@@ -936,6 +1130,11 @@ internal static class Program
                     ?? throw new InvalidOperationException(
                         "Main window game-profile selector was not found.");
                 gameProfile.SelectedValue = "Poe2";
+            }
+
+            if (structuredMode)
+            {
+                ApplyStructuredSnapshotState(window);
             }
 
             if (bottomMode)
@@ -1589,6 +1788,263 @@ internal static class Program
                     1,
                     "增加24%量眩恢復和格擋恢復",
                     target.Template.Text)));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private static void RenderStructuredEditor(
+        string outputPath,
+        bool englishMode,
+        bool poe2Mode)
+    {
+        var definition = new RuleSetDefinition(
+            englishMode ? "Critical jewel" : "暴击珠宝",
+            [
+                new AcceptableResultGroup(
+                    englishMode ? "Critical result" : "可接受结果 1",
+                    ResultGroupMode.AtLeast,
+                    [
+                        new AffixCondition(
+                            englishMode ? "Spell critical chance" : "法术暴击率",
+                            "#% increased Spell Critical Hit Chance",
+                            [NumericConstraint.AtLeast(170)]),
+                        new AffixCondition(
+                            englishMode ? "Critical multiplier" : "法术暴击伤害",
+                            "+#% to Critical Strike Multiplier",
+                            [NumericConstraint.Ignored()]),
+                    ],
+                    threshold: 2),
+                new AcceptableResultGroup(
+                    englishMode ? "Speed result" : "可接受结果 2",
+                    ResultGroupMode.Any,
+                    [new AffixCondition(
+                        englishMode ? "Attack speed" : "攻击速度",
+                        "#% increased Attack Speed")],
+                    threshold: 1),
+            ]);
+        var editor = new StructuredRuleEditorWindow(
+            definition,
+            englishMode,
+            poe2Mode ? 3 : 2)
+        {
+            Width = 850,
+            Height = 820,
+            Left = -10_000,
+            Top = -10_000,
+            ShowActivated = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+        };
+        try
+        {
+            editor.Show();
+            editor.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
+            RenderElement(editor, 850, 820, outputPath);
+        }
+        finally
+        {
+            editor.Close();
+        }
+    }
+
+    private static void ApplyStructuredSnapshotState(MainWindow window)
+    {
+        var ruleSetField = typeof(MainWindow).GetField(
+                               "_structuredRuleSet",
+                               BindingFlags.Instance | BindingFlags.NonPublic)
+                           ?? throw new InvalidOperationException(
+                               "Main window structured-rule field was not found.");
+        ruleSetField.SetValue(
+            window,
+            new RuleSetDefinition(
+                "Critical jewel",
+                [
+                    new AcceptableResultGroup(
+                        "Critical result",
+                        ResultGroupMode.AtLeast,
+                        [
+                            new AffixCondition(
+                                "Spell critical chance",
+                                "#% increased Spell Critical Hit Chance",
+                                [NumericConstraint.AtLeast(170)]),
+                            new AffixCondition(
+                                "Critical multiplier",
+                                "+#% to Critical Strike Multiplier"),
+                        ],
+                        threshold: 2),
+                ]));
+        var modeCombo = window.FindName("RuleModeComboBox") as
+            System.Windows.Controls.ComboBox
+            ?? throw new InvalidOperationException(
+                "Main window target-mode selector was not found.");
+        modeCombo.SelectedValue = "Structured";
+        window.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
+    }
+
+    private sealed class StructuredCountingRecognizer : IOcrRecognizer
+    {
+        public StructuredRuleOcrSupport StructuredRuleSupport =>
+            StructuredRuleOcrSupport.StrictBatch;
+
+        public int ExhaustiveCalls { get; private set; }
+
+        public int TargetAwareCalls { get; private set; }
+
+        public int BatchCalls { get; private set; }
+
+        public int ReceivedTargetCount { get; private set; }
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default)
+        {
+            ExhaustiveCalls++;
+            return Task.FromResult(new OcrRecognitionResult(
+                ["179% increased Physical Damage", "21% increased Attack Speed"],
+                TimeSpan.Zero,
+                TimeSpan.Zero));
+        }
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            FullLineAffixMatcher target,
+            CancellationToken cancellationToken = default)
+        {
+            TargetAwareCalls++;
+            return RecognizeAsync(frame, cancellationToken);
+        }
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            IReadOnlyList<FullLineAffixMatcher> targets,
+            CancellationToken cancellationToken = default)
+        {
+            BatchCalls++;
+            ReceivedTargetCount = targets.Count;
+            return Task.FromResult(new OcrRecognitionResult(
+                ["179% increased Physical Damage", "21% increased Attack Speed"],
+                TimeSpan.Zero,
+                TimeSpan.Zero));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ControlledStructuredOcrRecognizer : IOcrRecognizer
+    {
+        public StructuredRuleOcrSupport StructuredRuleSupport =>
+            StructuredRuleOcrSupport.StrictBatch;
+
+        private readonly TaskCompletionSource<OcrRecognitionResult> completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Structured test expected the batch overload.");
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            IReadOnlyList<FullLineAffixMatcher> targets,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            return completion.Task;
+        }
+
+        public void Complete(string line) => completion.TrySetResult(
+            new OcrRecognitionResult([line], TimeSpan.Zero, TimeSpan.Zero));
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class UnsupportedStructuredRecognizer : IOcrRecognizer
+    {
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new OcrRecognitionResult([], TimeSpan.Zero, TimeSpan.Zero));
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ProgressiveReplayRecognizer(bool neverCompletes) : IOcrRecognizer
+    {
+        public int Calls { get; private set; }
+
+        public StructuredRuleOcrSupport StructuredRuleSupport =>
+            StructuredRuleOcrSupport.StrictBatch;
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Replay expected the batch overload.");
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            IReadOnlyList<FullLineAffixMatcher> targets,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new OcrRecognitionResult(
+                !neverCompletes && Calls == 2 ? ["+70 to maximum Life"] : [],
+                TimeSpan.FromMilliseconds(Calls),
+                TimeSpan.FromMilliseconds(Calls + 1),
+                RequiresRescan: neverCompletes || Calls == 1));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class FakeScreenshotFrameLoader : PoeAlarm.App.Replay.IScreenshotFrameLoader
+    {
+        public Task<CapturedFrame> LoadAsync(
+            string imagePath,
+            ScreenRegion? cropRegion = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CapturedFrame(1, 1, 4, new byte[4], DateTimeOffset.UtcNow));
+    }
+
+    private sealed class ProgressiveStructuredRecognizer
+        : IOcrRecognizer, IFrameFingerprintProvider
+    {
+        public StructuredRuleOcrSupport StructuredRuleSupport =>
+            StructuredRuleOcrSupport.StrictBatch;
+
+        private int calls;
+
+        public ulong ComputeFrameFingerprint(CapturedFrame frame) => 73;
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Structured test expected the batch overload.");
+
+        public Task<OcrRecognitionResult> RecognizeAsync(
+            CapturedFrame frame,
+            IReadOnlyList<FullLineAffixMatcher> targets,
+            CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref calls);
+            return Task.FromResult(new OcrRecognitionResult(
+                [],
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                RequiresRescan: call == 1));
         }
 
         public void Dispose()
