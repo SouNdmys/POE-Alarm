@@ -1,12 +1,21 @@
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Input;
 using PoeAlarm.App.Monitoring;
+using PoeAlarm.Core.Rules;
 using System.Text.Json.Serialization;
 
 namespace PoeAlarm.App.Configuration;
 
 public sealed record AppSettings
 {
+    /// <summary>
+    /// Settings schema 1 is the profile-aware POE1/POE2 format shipped by 0.6.1. Schema 2 adds
+    /// structured rules without changing or reinterpreting the legacy TargetAffix fast path.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
+
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
+
     public GameProfile SelectedGameProfile { get; init; } = GameProfile.Poe1;
 
     /// <summary>
@@ -73,6 +82,7 @@ public sealed record AppSettings
 
         return this with
         {
+            SchemaVersion = CurrentSchemaVersion,
             SelectedGameProfile = selectedProfile,
             Profiles = profiles,
             TargetAffix = null,
@@ -92,6 +102,23 @@ public enum GameProfile
     Poe2,
 }
 
+/// <summary>
+/// Selects only how stop conditions are expressed. Input protection is a separate monitoring
+/// policy so Mirror safety can later be combined with either quick or structured rules.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum RuleEditorMode
+{
+    Quick,
+    Structured,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum MonitoringPolicyId
+{
+    Fast,
+}
+
 public sealed record GameProfileSettings
 {
     public string TargetAffix { get; init; } = string.Empty;
@@ -100,11 +127,33 @@ public sealed record GameProfileSettings
 
     public string OcrLanguage { get; init; } = "en";
 
+    /// <summary>
+    /// Quick keeps the 0.6.1 TargetAffix matcher contract. Structured selects the versioned rule
+    /// set; merely storing a rule set never diverts the quick monitoring path.
+    /// </summary>
+    public RuleEditorMode RuleEditorMode { get; init; } = RuleEditorMode.Quick;
+
+    /// <summary>
+    /// Monitoring cadence and input protection are intentionally independent from rule syntax.
+    /// Only the verified Fast policy is persisted today; Guarded will be added when the Mirror
+    /// state machine and its yellow uncertain state pass their own safety gate.
+    /// </summary>
+    public MonitoringPolicyId MonitoringPolicy { get; init; } = MonitoringPolicyId.Fast;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RuleSetDefinition? StructuredRuleSet { get; init; }
+
     public GameProfileSettings Normalize() => this with
     {
         TargetAffix = TargetAffix?.Trim() ?? string.Empty,
         CaptureRegion = CaptureRegion is { IsValid: true } region ? region : null,
         OcrLanguage = NormalizeOcrLanguage(OcrLanguage),
+        RuleEditorMode = Enum.IsDefined(RuleEditorMode)
+            ? RuleEditorMode
+            : RuleEditorMode.Quick,
+        MonitoringPolicy = Enum.IsDefined(MonitoringPolicy)
+            ? MonitoringPolicy
+            : MonitoringPolicyId.Fast,
     };
 
     internal static string NormalizeOcrLanguage(string? language) =>

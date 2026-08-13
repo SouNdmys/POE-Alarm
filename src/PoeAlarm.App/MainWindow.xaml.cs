@@ -15,8 +15,10 @@ using PoeAlarm.App.Localization;
 using PoeAlarm.App.Monitoring;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.App.Replay;
+using PoeAlarm.App.RulesUi;
 using PoeAlarm.App.Selection;
 using PoeAlarm.Core.Matching;
+using PoeAlarm.Core.Rules;
 
 namespace PoeAlarm.App;
 
@@ -32,6 +34,8 @@ public partial class MainWindow : Window
     private ScreenRegion? _captureRegion;
     private AppSettings _settings = new AppSettings().Normalize();
     private GameProfile _selectedGameProfile = GameProfile.Poe1;
+    private RuleEditorMode _ruleEditorMode = RuleEditorMode.Quick;
+    private RuleSetDefinition? _structuredRuleSet;
     private HudPlacement _hudPlacement = HudPlacement.Default;
     private string _uiLanguage = UiText.DefaultLanguageCode;
     private string? _customAlertSoundPath;
@@ -185,6 +189,71 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnRuleModeChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        // ComboBox raises SelectionChanged while InitializeComponent is still constructing the
+        // visual tree. At that point alert/HUD services and sibling controls are not ready.
+        if (!_isLoaded || _isApplyingProfileSettings || RuleModeComboBox is null)
+        {
+            return;
+        }
+
+        if (_monitor?.State == MonitorState.Running ||
+            _alertService.IsActive ||
+            _alertService.IsInputGuardActive)
+        {
+            RuleModeComboBox.SelectedValue = _ruleEditorMode.ToString();
+            return;
+        }
+
+        _ruleEditorMode = ParseRuleEditorMode(RuleModeComboBox.SelectedValue?.ToString());
+        UpdateRuleEditorUi();
+        ShowIdleHudIfEnabled();
+        if (_ruleEditorMode == RuleEditorMode.Structured &&
+            SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese)
+        {
+            SetStatus(UiText.Current.StructuredOcrUnsupported, UiStatusKind.Warning);
+        }
+
+        if (_isLoaded && !_isClosing)
+        {
+            await SaveSettingsAsync();
+        }
+    }
+
+    private async void OnEditStructuredRules(object sender, RoutedEventArgs e)
+    {
+        if (_isClosing || _monitor?.State == MonitorState.Running ||
+            _alertService.IsActive || _alertService.IsInputGuardActive)
+        {
+            return;
+        }
+
+        var edited = StructuredRuleEditorWindow.Edit(
+            this,
+            _structuredRuleSet,
+            string.Equals(_uiLanguage, "en", StringComparison.OrdinalIgnoreCase),
+            SelectedMaximumLineSpan);
+        if (edited is null)
+        {
+            return;
+        }
+
+        // The editor returns only a successfully compiled replacement. Cancelling never mutates
+        // the previously saved definition.
+        _structuredRuleSet = edited;
+        _ruleEditorMode = RuleEditorMode.Structured;
+        RuleModeComboBox.SelectedValue = _ruleEditorMode.ToString();
+        UpdateRuleEditorUi();
+        ShowIdleHudIfEnabled();
+        if (_isLoaded)
+        {
+            await SaveSettingsAsync();
+        }
+    }
+
     private void OnShowHelp(object sender, RoutedEventArgs e)
     {
         var help = new HelpWindow { Owner = this };
@@ -221,7 +290,7 @@ public partial class MainWindow : Window
         _keepHudVisible = KeepHudVisibleCheckBox.IsChecked == true;
         if (_monitor?.State == MonitorState.Running)
         {
-            ShowMonitoringHud(TargetAffixTextBox.Text.Trim(), _captureRegion!.Value);
+            ShowMonitoringHud(ActiveRuleDisplayText, _captureRegion!.Value);
         }
         else if (_keepHudVisible)
         {
@@ -252,7 +321,7 @@ public partial class MainWindow : Window
         var hud = EnsureHudCreated();
         _isHudPlacementMode = true;
         PositionHudButton.Content = UiText.Current.FinishHudPosition;
-        hud.BeginPlacement(TargetAffixTextBox.Text.Trim(), _captureRegion);
+        hud.BeginPlacement(ActiveRuleDisplayText, _captureRegion);
         SetStatus(UiText.Current.HudPlacementStarted, UiStatusKind.Neutral);
     }
 
@@ -331,11 +400,18 @@ public partial class MainWindow : Window
 
         await StopMonitorAsync(showIdleStatus: false);
         await ReleaseMonitorAsync();
+        UpdateRuleEditorUi();
         SetStatus(
             SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese
                 ? UiText.Current.SwitchedChineseOcr
                 : UiText.Current.SwitchedEnglishOcr,
             UiStatusKind.Neutral);
+        if (_ruleEditorMode == RuleEditorMode.Structured &&
+            SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese)
+        {
+            SetStatus(UiText.Current.StructuredOcrUnsupported, UiStatusKind.Warning);
+        }
+
         await SaveSettingsAsync();
     }
 
@@ -396,8 +472,31 @@ public partial class MainWindow : Window
         _isStartingMonitoring = true;
         try
         {
+            var isStructured = _ruleEditorMode == RuleEditorMode.Structured;
             var template = TargetAffixTextBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(template))
+            CompiledRuleSet? compiledRules = null;
+            if (isStructured)
+            {
+                if (_structuredRuleSet is null)
+                {
+                    ShowValidationMessage(UiText.Current.NeedStructuredRules);
+                    return;
+                }
+
+                try
+                {
+                    compiledRules = RuleCompiler.Compile(
+                        _structuredRuleSet,
+                        SelectedMaximumLineSpan);
+                }
+                catch (RuleValidationException exception)
+                {
+                    ShowValidationMessage(
+                        UiText.Current.CannotStartMonitoring(exception.Message));
+                    return;
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(template))
             {
                 ShowValidationMessage(UiText.Current.NeedTarget);
                 return;
@@ -412,8 +511,20 @@ public partial class MainWindow : Window
             try
             {
                 var maximumLineSpan = SelectedMaximumLineSpan;
-                _ = new FullLineAffixMatcher(template, maximumLineSpan);
+                if (!isStructured)
+                {
+                    // Keep the verified 0.6.1 quick matcher path exactly target-aware. It is not
+                    // wrapped into a one-condition structured rule.
+                    _ = new FullLineAffixMatcher(template, maximumLineSpan);
+                }
                 EnsureMonitorCreated();
+                if (compiledRules is not null &&
+                    _monitor!.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
+                {
+                    ShowValidationMessage(UiText.Current.StructuredOcrUnsupported);
+                    return;
+                }
+
                 _alertService.Acknowledge();
                 _alertService.Prepare(
                     preparePendingInputGuard:
@@ -424,11 +535,18 @@ public partial class MainWindow : Window
                 Interlocked.Exchange(ref _activeMonitoringSession, session);
                 try
                 {
-                    _monitor!.Start(template, region, maximumLineSpan);
+                    if (compiledRules is not null)
+                    {
+                        _monitor!.Start(compiledRules, region);
+                    }
+                    else
+                    {
+                        _monitor!.Start(template, region, maximumLineSpan);
+                    }
                     if (_monitor.State == MonitorState.Running &&
                         Interlocked.Read(ref _activeMonitoringSession) == session)
                     {
-                        ShowMonitoringHud(template, region);
+                        ShowMonitoringHud(ActiveRuleDisplayText, region);
                         StartButton.IsEnabled = false;
                         StopButton.IsEnabled = true;
                         SetProfileSelectorsEnabled(false);
@@ -654,7 +772,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _alertService.Trigger(e.Match.OriginalText, _captureRegion);
+        _alertService.Trigger(e.DetectedText, _captureRegion);
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
         {
             if (_isClosing || _monitor?.State != MonitorState.MatchFound)
@@ -663,7 +781,11 @@ public partial class MainWindow : Window
             }
 
             _monitoringHud?.HideHud();
-            SetStatus(UiText.Current.TargetMatched, UiStatusKind.Alert);
+            SetStatus(
+                e.RuleEvaluation is null
+                    ? UiText.Current.TargetMatched
+                    : UiText.Current.StructuredTargetMatched,
+                UiStatusKind.Alert);
             StartButton.IsEnabled = true;
             StopButton.IsEnabled = false;
             AcknowledgeButton.IsEnabled = true;
@@ -791,12 +913,12 @@ public partial class MainWindow : Window
 
         try
         {
-            EnsureHudCreated().ShowIdle(TargetAffixTextBox.Text.Trim(), _captureRegion);
+            EnsureHudCreated().ShowIdle(ActiveRuleDisplayText, _captureRegion);
         }
         catch (InvalidOperationException)
         {
             ReplaceHud();
-            _monitoringHud!.ShowIdle(TargetAffixTextBox.Text.Trim(), _captureRegion);
+            _monitoringHud!.ShowIdle(ActiveRuleDisplayText, _captureRegion);
         }
     }
 
@@ -828,6 +950,12 @@ public partial class MainWindow : Window
         TargetSectionTitleText.Text = text.TargetSectionTitle.Replace("1  ", string.Empty);
         PasteButton.Content = text.PasteFromClipboard;
         TargetAffixTextBox.ToolTip = text.TargetTextToolTip;
+        RuleModeLabelText.Text = text.RuleModeLabel;
+        RuleModeComboBox.ToolTip = text.RuleModeToolTip;
+        QuickRuleModeOption.Content = text.QuickRuleMode;
+        StructuredRuleModeOption.Content = text.StructuredRuleMode;
+        EditStructuredRulesButton.Content = text.EditStructuredRules;
+        StructuredRuleHintText.Text = text.StructuredRuleHint;
         OcrLanguageLabelText.Text = text.OcrLanguageLabel;
         OcrLanguageComboBox.ToolTip = text.OcrLanguageToolTip;
         EnglishOcrOption.Content = text.OcrEnglishOption;
@@ -866,6 +994,7 @@ public partial class MainWindow : Window
         UpdateGameProfileUi();
 
         UpdateCanonicalPreview();
+        UpdateRuleEditorUi();
         UpdateRegionText();
         UpdateCustomSoundText();
         if (!_isLoaded)
@@ -877,7 +1006,11 @@ public partial class MainWindow : Window
         }
         else if (_alertService.IsActive)
         {
-            SetStatus(text.TargetMatched, UiStatusKind.Alert);
+            SetStatus(
+                _ruleEditorMode == RuleEditorMode.Structured
+                    ? text.StructuredTargetMatched
+                    : text.TargetMatched,
+                UiStatusKind.Alert);
         }
         else if (_monitor?.State == MonitorState.Running)
         {
@@ -934,6 +1067,10 @@ public partial class MainWindow : Window
             ? FullLineAffixMatcher.MaximumSupportedPhysicalLineSpan
             : FullLineAffixMatcher.MaximumPhysicalLineSpan;
 
+    private string ActiveRuleDisplayText => _ruleEditorMode == RuleEditorMode.Structured
+        ? CreateStructuredRuleSummary(_structuredRuleSet)
+        : TargetAffixTextBox.Text.Trim();
+
     private IOcrRecognizer CreateOcrRecognizer() =>
         SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese
             ? CreateTraditionalChineseRecognizer()
@@ -987,6 +1124,43 @@ public partial class MainWindow : Window
             : UiText.Current.CanonicalEmpty;
     }
 
+    private void UpdateRuleEditorUi()
+    {
+        if (!IsInitialized || RuleModeComboBox is null || QuickRulePanel is null ||
+            StructuredRulePanel is null)
+        {
+            return;
+        }
+
+        var isStructured = _ruleEditorMode == RuleEditorMode.Structured;
+        RuleModeComboBox.SelectedValue = _ruleEditorMode.ToString();
+        QuickRulePanel.Visibility = isStructured ? Visibility.Collapsed : Visibility.Visible;
+        StructuredRulePanel.Visibility = isStructured ? Visibility.Visible : Visibility.Collapsed;
+        PasteButton.Visibility = isStructured ? Visibility.Collapsed : Visibility.Visible;
+        StructuredRuleSummaryText.Text = CreateStructuredRuleSummary(_structuredRuleSet);
+        var structuredHint = isStructured &&
+                             SelectedOcrLanguage ==
+                             OcrRecognitionLanguage.TraditionalChinese
+            ? UiText.Current.StructuredOcrUnsupported
+            : UiText.Current.StructuredRuleHint;
+        StructuredRuleHintText.Text = structuredHint;
+        StructuredRuleHintText.ToolTip = structuredHint;
+    }
+
+    private string CreateStructuredRuleSummary(RuleSetDefinition? definition)
+    {
+        if (definition?.Groups is not { Count: > 0 } groups)
+        {
+            return UiText.Current.NoStructuredRules;
+        }
+
+        var name = string.IsNullOrWhiteSpace(definition.Name)
+            ? UiText.Current.StructuredRuleMode
+            : definition.Name.Trim();
+        var conditionCount = groups.Sum(static group => group?.Conditions?.Count ?? 0);
+        return UiText.Current.StructuredRuleSummary(name, groups.Count, conditionCount);
+    }
+
     private void UpdateRegionText()
     {
         RegionText.Text = _captureRegion is { IsValid: true } region
@@ -1000,11 +1174,14 @@ public partial class MainWindow : Window
         try
         {
             TargetAffixTextBox.Text = profile.TargetAffix;
+            _ruleEditorMode = profile.RuleEditorMode;
+            _structuredRuleSet = profile.StructuredRuleSet;
             _captureRegion = profile.CaptureRegion is { IsValid: true } region ? region : null;
             OcrLanguageComboBox.SelectedValue = profile.OcrLanguage;
             OcrOutputTextBox.Text = UiText.Current.OcrOutputPlaceholder;
             LatencyText.Text = UiText.Current.NoScanData;
             UpdateCanonicalPreview();
+            UpdateRuleEditorUi();
             UpdateRegionText();
         }
         finally
@@ -1093,10 +1270,15 @@ public partial class MainWindow : Window
 
     private void CaptureCurrentProfileSettings()
     {
-        var profile = new GameProfileSettings
+        // Keep vNext structured rules intact while the 0.6.1 quick editor is still the only
+        // editor rendered by this window. Editing a target, region, or OCR language must never
+        // erase a rule set that was loaded from the versioned settings schema.
+        var profile = CurrentProfileSettings with
         {
             TargetAffix = TargetAffixTextBox.Text.Trim(),
             CaptureRegion = _captureRegion,
+            RuleEditorMode = _ruleEditorMode,
+            StructuredRuleSet = _structuredRuleSet,
             OcrLanguage = SelectedOcrLanguage == OcrRecognitionLanguage.TraditionalChinese
                 ? "zh-TW"
                 : "en",
@@ -1115,7 +1297,15 @@ public partial class MainWindow : Window
     private void SetProfileSelectorsEnabled(bool enabled)
     {
         GameProfileComboBox.IsEnabled = enabled;
+        RuleModeComboBox.IsEnabled = enabled;
+        EditStructuredRulesButton.IsEnabled = enabled;
     }
+
+    private static RuleEditorMode ParseRuleEditorMode(string? value) =>
+        Enum.TryParse<RuleEditorMode>(value, ignoreCase: true, out var mode) &&
+        Enum.IsDefined(mode)
+            ? mode
+            : RuleEditorMode.Quick;
 
     private static GameProfile ParseGameProfile(string? value) =>
         Enum.TryParse<GameProfile>(value, ignoreCase: true, out var profile) &&
@@ -1131,6 +1321,12 @@ public partial class MainWindow : Window
 
     private async Task AnalyzeScreenshotAsync(string path)
     {
+        if (_ruleEditorMode == RuleEditorMode.Structured)
+        {
+            await AnalyzeStructuredScreenshotAsync(path);
+            return;
+        }
+
         var template = TargetAffixTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(template))
         {
@@ -1181,6 +1377,73 @@ public partial class MainWindow : Window
             SetStatus(UiText.Current.ScreenshotNotMatched, UiStatusKind.Neutral);
             ShowIdleHudIfEnabled();
         }
+    }
+
+    private async Task AnalyzeStructuredScreenshotAsync(string path)
+    {
+        if (_structuredRuleSet is null)
+        {
+            throw new InvalidOperationException(UiText.Current.NeedStructuredRules);
+        }
+
+        var rules = RuleCompiler.Compile(_structuredRuleSet, SelectedMaximumLineSpan);
+        using var recognizer = CreateOcrRecognizer();
+        if (recognizer.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
+        {
+            throw new NotSupportedException(UiText.Current.StructuredOcrUnsupported);
+        }
+
+        var analyzer = new ScreenshotAffixAnalyzer(recognizer);
+        ScreenshotRuleAnalysis analysis;
+        try
+        {
+            analysis = await analyzer.AnalyzeRulesAsync(path, rules, _captureRegion);
+        }
+        catch (ArgumentOutOfRangeException) when (_captureRegion is not null)
+        {
+            analysis = await analyzer.AnalyzeRulesAsync(path, rules, cropRegion: null);
+        }
+
+        OcrOutputTextBox.Text = analysis.Lines.Count == 0
+            ? UiText.Current.ScreenshotNoBlueText
+            : string.Join(Environment.NewLine, analysis.Lines);
+        LatencyText.Text = UiText.Current.ScreenshotMetrics(
+            analysis.ImageLoadElapsed.TotalMilliseconds,
+            analysis.PreprocessingElapsed.TotalMilliseconds,
+            analysis.RecognitionElapsed.TotalMilliseconds);
+
+        if (analysis.IsMatch)
+        {
+            var detail = CreateStructuredMatchDetail(analysis.Evaluation);
+            _monitoringHud?.HideHud();
+            _alertService.Trigger(detail, _captureRegion);
+            SetProfileSelectorsEnabled(false);
+            AcknowledgeButton.IsEnabled = true;
+            SetStatus(UiText.Current.ScreenshotStructuredMatched, UiStatusKind.Alert);
+        }
+        else
+        {
+            SetStatus(UiText.Current.ScreenshotStructuredNotMatched, UiStatusKind.Neutral);
+            ShowIdleHudIfEnabled();
+        }
+    }
+
+    private static string CreateStructuredMatchDetail(RuleEvaluationResult evaluation)
+    {
+        var group = evaluation.MatchedGroup;
+        if (group is null)
+        {
+            return UiText.Current.DefaultDetectedText;
+        }
+
+        var observations = group.Conditions
+            .Where(static condition => condition.IsMatched && condition.Observation is not null)
+            .Select(static condition => condition.Observation!.OriginalText)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return observations.Length == 0
+            ? group.Name
+            : $"{group.Name}: {string.Join(" + ", observations)}";
     }
 
     private async Task SaveSettingsAsync(long? expectedMonitoringSession = null)

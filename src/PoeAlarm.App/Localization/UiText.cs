@@ -62,6 +62,19 @@ internal static class UiText
         PasteFromClipboard = "从剪贴板粘贴",
         TargetTextToolTip = "粘贴 PoEDB 中的完整词缀；数值大小会自动忽略。",
         CanonicalEmpty = "等待输入完整词缀；文字必须完整一致，数值大小会自动忽略。",
+        RuleModeLabel = "目标模式",
+        RuleModeToolTip = "快速模式保留原有整句匹配；多词缀模式支持多个可接受结果与数值约束。",
+        QuickRuleMode = "快速模式（单条整句）",
+        StructuredRuleMode = "多词缀命中模式",
+        EditStructuredRules = "编辑规则",
+        NoStructuredRules = "尚未配置多词缀规则",
+        StructuredRuleHint = "命中任意一种可接受结果即报警；同一条实际词缀在结果内最多计数一次。",
+        StructuredRuleSummaryTemplate = "{0} · {1} 个可接受结果 / {2} 条条件（开发预览）",
+        NeedStructuredRules = "请先编辑并保存至少一种可接受结果。",
+        StructuredOcrUnsupported = "当前游戏语言的批量目标 OCR 尚未通过发布门禁。已保留规则，但不会降级到缺少局部复核的识别路径。请先切换回快速模式。",
+        StructuredTargetMatched = "已命中可接受结果；监控已锁停，先检查装备再确认。",
+        ScreenshotStructuredMatched = "截图中命中可接受结果；已触发与实战相同的锁定告警。",
+        ScreenshotStructuredNotMatched = "截图分析完成：未命中任何可接受结果。可在下方检查 OCR 物理行。",
         OcrLanguageLabel = "游戏语言",
         OcrLanguageToolTip = "请选择游戏内词缀使用的语言。这与程序界面语言相互独立。",
         OcrEnglishOption = "English（稳定）",
@@ -199,6 +212,19 @@ internal static class UiText
         PasteFromClipboard = "Paste from clipboard",
         TargetTextToolTip = "Paste the complete affix from PoEDB. Numeric magnitudes are ignored.",
         CanonicalEmpty = "Paste a complete affix. All wording must match; numeric magnitudes are ignored.",
+        RuleModeLabel = "Target mode",
+        RuleModeToolTip = "Quick mode retains the original complete-affix matcher. Multi-affix mode adds acceptable results and numeric constraints.",
+        QuickRuleMode = "Quick (one complete affix)",
+        StructuredRuleMode = "Multi-affix rules",
+        EditStructuredRules = "Edit rules",
+        NoStructuredRules = "No multi-affix rule configured",
+        StructuredRuleHint = "Matching any acceptable result triggers the alarm. One observed modifier counts at most once within a result.",
+        StructuredRuleSummaryTemplate = "{0} · {1} acceptable result(s) / {2} condition(s) (preview)",
+        NeedStructuredRules = "Edit and save at least one acceptable result first.",
+        StructuredOcrUnsupported = "Batch target OCR for the current game language has not passed the release gate. Your rules are preserved, but the app will not fall back to recognition without its verified recovery path. Use Quick mode for now.",
+        StructuredTargetMatched = "An acceptable result matched. Monitoring is locked and stopped; inspect the item before acknowledging.",
+        ScreenshotStructuredMatched = "The screenshot matches an acceptable result; the same blocking alert used in live monitoring was triggered.",
+        ScreenshotStructuredNotMatched = "Screenshot analysis complete: no acceptable result matched. Review the OCR lines below.",
         OcrLanguageLabel = "Game language",
         OcrLanguageToolTip = "Select the language used for affixes in the game. This is independent of the app's interface language.",
         OcrEnglishOption = "English (stable)",
@@ -338,6 +364,19 @@ internal sealed record UiStrings
     public required string PasteFromClipboard { get; init; }
     public required string TargetTextToolTip { get; init; }
     public required string CanonicalEmpty { get; init; }
+    public required string RuleModeLabel { get; init; }
+    public required string RuleModeToolTip { get; init; }
+    public required string QuickRuleMode { get; init; }
+    public required string StructuredRuleMode { get; init; }
+    public required string EditStructuredRules { get; init; }
+    public required string NoStructuredRules { get; init; }
+    public required string StructuredRuleHint { get; init; }
+    public required string StructuredRuleSummaryTemplate { get; init; }
+    public required string NeedStructuredRules { get; init; }
+    public required string StructuredOcrUnsupported { get; init; }
+    public required string StructuredTargetMatched { get; init; }
+    public required string ScreenshotStructuredMatched { get; init; }
+    public required string ScreenshotStructuredNotMatched { get; init; }
     public required string OcrLanguageLabel { get; init; }
     public required string OcrLanguageToolTip { get; init; }
     public required string OcrEnglishOption { get; init; }
@@ -486,6 +525,9 @@ internal sealed record UiStrings
 
     public string CanonicalMatch(string canonicalText) =>
         Format(CanonicalMatchTemplate, canonicalText);
+
+    public string StructuredRuleSummary(string name, int groupCount, int conditionCount) =>
+        Format(StructuredRuleSummaryTemplate, name, groupCount, conditionCount);
 
     public string SelectedRegion(string region) =>
         Format(SelectedRegionTemplate, region);

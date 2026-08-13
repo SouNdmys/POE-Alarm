@@ -2,6 +2,7 @@ using System.Diagnostics;
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Recognition;
 using PoeAlarm.Core.Matching;
+using PoeAlarm.Core.Rules;
 
 namespace PoeAlarm.App.Monitoring;
 
@@ -62,25 +63,45 @@ public sealed class AffixMonitor : IAsyncDisposable
 
         lock (_stateGate)
         {
-            if (_disposeTask is not null)
-            {
-                throw new ObjectDisposedException(nameof(AffixMonitor));
-            }
-
-            if (_stopInProgress)
-            {
-                throw new InvalidOperationException("Monitoring is still stopping.");
-            }
-
-            if (_loopTask is { IsCompleted: false })
-            {
-                throw new InvalidOperationException("Monitoring is already running.");
-            }
-
+            EnsureCanStart();
             _loopCancellation?.Dispose();
             _loopCancellation = new CancellationTokenSource();
             _state = MonitorState.Running;
             _loopTask = RunLoopAsync(matcher, region, _loopCancellation.Token);
+        }
+    }
+
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        _ocrRecognizer.StructuredRuleSupport;
+
+    /// <summary>
+    /// Starts the structured-rule path. The legacy string overload above remains unchanged and
+    /// keeps its target-aware 0.6.1 behavior. Structured rules perform one batched OCR call per
+    /// frame and then evaluate all conditions in memory; they never multiply OCR work by the
+    /// number of conditions. Recognizers must explicitly opt in after preserving their verified
+    /// safety contract; an unsupported recognizer is rejected instead of silently degrading.
+    /// </summary>
+    public void Start(CompiledRuleSet rules, ScreenRegion region)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        if (_ocrRecognizer.StructuredRuleSupport == StructuredRuleOcrSupport.Unsupported)
+        {
+            throw new NotSupportedException(
+                $"{_ocrRecognizer.GetType().Name} has not passed structured-rule batch OCR validation.");
+        }
+
+        if (!region.IsValid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(region), "Select a valid tooltip region before monitoring.");
+        }
+
+        lock (_stateGate)
+        {
+            EnsureCanStart();
+            _loopCancellation?.Dispose();
+            _loopCancellation = new CancellationTokenSource();
+            _state = MonitorState.Running;
+            _loopTask = RunRuleLoopAsync(rules, region, _loopCancellation.Token);
         }
     }
 
@@ -266,6 +287,154 @@ public sealed class AffixMonitor : IAsyncDisposable
                 InputGuardReleased?.Invoke(this, EventArgs.Empty);
             }
         }
+    }
+
+    private async Task RunRuleLoopAsync(
+        CompiledRuleSet rules,
+        ScreenRegion region,
+        CancellationToken cancellationToken)
+    {
+        long scanCount = 0;
+        var fingerprintProvider = _ocrRecognizer as IFrameFingerprintProvider;
+        ulong? acceptedFingerprint = null;
+        var inputGuardHeld = false;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var captureWatch = Stopwatch.StartNew();
+                var frame = _screenCapture.Capture(region);
+
+                ulong? frameFingerprint = null;
+                if (fingerprintProvider is not null)
+                {
+                    frameFingerprint = fingerprintProvider.ComputeFrameFingerprint(frame);
+                    if (!acceptedFingerprint.HasValue ||
+                        frameFingerprint.Value != acceptedFingerprint.Value)
+                    {
+                        inputGuardHeld = true;
+                        InputGuardRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                }
+
+                var captureElapsed = captureWatch.Elapsed;
+                var ocrResult = await _ocrRecognizer
+                    .RecognizeAsync(frame, rules.Targets, cancellationToken)
+                    .ConfigureAwait(false);
+                scanCount++;
+
+                cancellationToken.ThrowIfCancellationRequested();
+                var evaluation = rules.Evaluate(ocrResult.Lines);
+                var snapshot = new MonitorSnapshot(
+                    MonitorState.Running,
+                    scanCount,
+                    captureElapsed,
+                    ocrResult.TotalElapsed,
+                    ocrResult.Lines,
+                    OcrWasCached: ocrResult.WasCached);
+
+                if (evaluation.IsMatch)
+                {
+                    if (!TrySetMatchFound(cancellationToken))
+                    {
+                        return;
+                    }
+
+                    var detectedText = CreateRuleMatchDetail(evaluation);
+                    snapshot = snapshot with
+                    {
+                        State = MonitorState.MatchFound,
+                        Detail = detectedText,
+                    };
+                    RaiseSnapshot(snapshot);
+                    AffixDetected?.Invoke(
+                        this,
+                        new AffixDetectedEventArgs(evaluation, detectedText, snapshot));
+                    return;
+                }
+
+                RaiseSnapshot(snapshot);
+                if (!ocrResult.RequiresRescan && frameFingerprint.HasValue)
+                {
+                    acceptedFingerprint = frameFingerprint.Value;
+                    if (inputGuardHeld)
+                    {
+                        InputGuardReleased?.Invoke(this, EventArgs.Empty);
+                        inputGuardHeld = false;
+                    }
+                }
+
+                if (ocrResult.RequiresRescan)
+                {
+                    await Task.Yield();
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                else
+                {
+                    await Task.Delay(ocrResult.WasCached ? 8 : 4, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected when the user stops or acknowledges an alert.
+        }
+        catch (Exception exception)
+        {
+            SetState(MonitorState.Faulted);
+            RaiseSnapshot(new MonitorSnapshot(
+                MonitorState.Faulted,
+                scanCount,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                [],
+                exception.Message));
+        }
+        finally
+        {
+            if (inputGuardHeld)
+            {
+                InputGuardReleased?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    private void EnsureCanStart()
+    {
+        if (_disposeTask is not null)
+        {
+            throw new ObjectDisposedException(nameof(AffixMonitor));
+        }
+
+        if (_stopInProgress)
+        {
+            throw new InvalidOperationException("Monitoring is still stopping.");
+        }
+
+        if (_loopTask is { IsCompleted: false })
+        {
+            throw new InvalidOperationException("Monitoring is already running.");
+        }
+    }
+
+    private static string CreateRuleMatchDetail(RuleEvaluationResult evaluation)
+    {
+        var group = evaluation.MatchedGroup;
+        if (group is null)
+        {
+            return "Structured rule matched.";
+        }
+
+        var observations = group.Conditions
+            .Where(static condition => condition.IsMatched && condition.Observation is not null)
+            .Select(static condition => condition.Observation!.OriginalText)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return observations.Length == 0
+            ? group.Name
+            : $"{group.Name}: {string.Join(" + ", observations)}";
     }
 
     private void SetState(MonitorState state)

@@ -52,6 +52,12 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
 
     public string RecognizerLanguageTag => _engine.RecognizerLanguage.LanguageTag;
 
+    // The single-target path can safely localize and independently refine one candidate. The
+    // current OCR result cannot represent several assisted matches with physical-band identity,
+    // so structured live monitoring is deliberately unavailable instead of silently weakening it.
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        StructuredRuleOcrSupport.Unsupported;
+
     public ulong ComputeFrameFingerprint(CapturedFrame frame)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

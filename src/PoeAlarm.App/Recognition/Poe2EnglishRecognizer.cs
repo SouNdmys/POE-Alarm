@@ -21,6 +21,8 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
     private ulong _prefetchedFingerprint;
     private PendingNoMatch? _pendingNoMatch;
     private ConfirmedNoMatch? _confirmedNoMatch;
+    private PendingNoMatch? _pendingBatchNoMatch;
+    private ConfirmedNoMatch? _confirmedBatchNoMatch;
     private bool _disposed;
 
     public Poe2EnglishRecognizer(PoeTextPreprocessor? preprocessor = null)
@@ -43,6 +45,9 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
     }
 
     public string RecognizerLanguageTag => _primary.RecognizerLanguageTag;
+
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        StructuredRuleOcrSupport.ConfirmedStrictBatch;
 
     public ulong ComputeFrameFingerprint(CapturedFrame frame)
     {
@@ -156,6 +161,102 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
         }
     }
 
+    /// <summary>
+    /// Runs one shared Windows OCR pass and checks every deduplicated target strictly in memory.
+    /// A changed frame not accepted by the caller's full rule evaluation is confirmed by the
+    /// independent Windows engine on the next scan. Localized Paddle recovery remains single-target-only until assisted evidence
+    /// can carry stable physical-band identity for several targets.
+    /// </summary>
+    public async Task<OcrRecognitionResult> RecognizeAsync(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var targetSet = NormalizeTargetSet(targets);
+        if (targetSet.Count == 0)
+        {
+            return await _primary.RecognizeAsync(frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        await _recognitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var fingerprint = ReferenceEquals(frame, _prefetchedSourceFrame)
+                ? _prefetchedFingerprint
+                : _preprocessor.ComputeBlueTextFingerprint(frame);
+            _prefetchedSourceFrame = null;
+            var targetKey = CreateTargetSetKey(targetSet);
+
+            // Never let a pending state from the legacy single-target route influence a batch.
+            _pendingNoMatch = null;
+            _confirmedNoMatch = null;
+
+            if (_confirmedBatchNoMatch is { } confirmed &&
+                confirmed.Fingerprint == fingerprint &&
+                string.Equals(confirmed.TargetKey, targetKey, StringComparison.Ordinal))
+            {
+                return confirmed.Result with
+                {
+                    PreprocessingElapsed = TimeSpan.Zero,
+                    RecognitionElapsed = TimeSpan.Zero,
+                    WasCached = true,
+                    RequiresRescan = false,
+                };
+            }
+
+            var confirmingSameFrame = _pendingBatchNoMatch is { } pending &&
+                                      pending.Fingerprint == fingerprint &&
+                                      string.Equals(pending.TargetKey, targetKey, StringComparison.Ordinal);
+            if (!confirmingSameFrame)
+            {
+                _pendingBatchNoMatch = null;
+                _confirmedBatchNoMatch = null;
+            }
+
+            var windows = confirmingSameFrame ? _confirmation : _primary;
+            var result = await windows
+                .RecognizeAsync(frame, cancellationToken)
+                .ConfigureAwait(false);
+            var hasStrictTarget = HasAnyStrictTarget(result.Lines, targetSet);
+
+            if (!confirmingSameFrame)
+            {
+                // A lexical target can still fail a numeric constraint or an AtLeast group in
+                // the caller. Keep the changed-frame guard held unless the caller's full rule
+                // evaluation accepts this first result; if it does not, the next scan uses the
+                // independent confirmation engine before a non-match is released.
+                _pendingBatchNoMatch = new PendingNoMatch(
+                    fingerprint,
+                    targetKey,
+                    RecoveryAttempted: false);
+                return result with
+                {
+                    TargetAssistedMatch = null,
+                    RequiresRescan = true,
+                };
+            }
+
+            _pendingBatchNoMatch = null;
+            var final = result with
+            {
+                TargetAssistedMatch = null,
+                RequiresRescan = false,
+            };
+            // A strict target can still fail a numeric constraint or AtLeast group in the caller.
+            // Cache only a lexical non-match; a candidate frame must remain re-evaluable.
+            _confirmedBatchNoMatch = hasStrictTarget
+                ? null
+                : new ConfirmedNoMatch(fingerprint, targetKey, final);
+            return final;
+        }
+        finally
+        {
+            _recognitionGate.Release();
+        }
+    }
+
     public void Dispose()
     {
         _recognitionGate.Wait();
@@ -170,6 +271,8 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
             _prefetchedSourceFrame = null;
             _pendingNoMatch = null;
             _confirmedNoMatch = null;
+            _pendingBatchNoMatch = null;
+            _confirmedBatchNoMatch = null;
             _confirmation.Dispose();
             _primary.Dispose();
             if (_paddleSessionTask.IsCompletedSuccessfully)
@@ -280,6 +383,37 @@ public sealed class Poe2EnglishRecognizer : IOcrRecognizer, IFrameFingerprintPro
 
     private static string CreateTargetKey(FullLineAffixMatcher target) =>
         $"{target.MaximumLineSpan}:{target.Template.Text}";
+
+    internal static IReadOnlyList<FullLineAffixMatcher> NormalizeTargetSet(
+        IReadOnlyList<FullLineAffixMatcher> targets)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        if (targets.Any(static target => target is null))
+        {
+            throw new ArgumentException("The structured target set contains a null target.", nameof(targets));
+        }
+
+        return targets
+            .GroupBy(CreateTargetKey, StringComparer.Ordinal)
+            .Select(static group => group.First())
+            .OrderBy(CreateTargetKey, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    internal static string CreateTargetSetKey(IReadOnlyList<FullLineAffixMatcher> targets)
+    {
+        ArgumentNullException.ThrowIfNull(targets);
+        return string.Concat(targets.Select(target =>
+        {
+            var key = CreateTargetKey(target);
+            return $"{key.Length}:{key};";
+        }));
+    }
+
+    internal static bool HasAnyStrictTarget(
+        IReadOnlyList<string> lines,
+        IReadOnlyList<FullLineAffixMatcher> targets) =>
+        targets.Any(target => target.TryFindMatch(lines, out _));
 
     private static bool HasOneLocalizedLexicalCandidate(
         IReadOnlyList<string> lines,
