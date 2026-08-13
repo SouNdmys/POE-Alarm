@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "locale": "en-US",
+  "game": "Path of Exile 1",
+  "roi": [0, 100, 1100, 900],
+  "screenshots": [
+    {
+      "image": "poe1-en-a.png",
+      "cases": [
+        "#% increased Critical Strike Chance",
+        "+#% to Fire Resistance"
+      ],
+      "negativeCases": [
+        {
+          "id": "a-semantic-spell-critical",
+          "kind": "semantic-neighbor",
+          "template": "#% increased Critical Strike Chance for Spells",
+          "evidenceTemplate": "#% increased Critical Strike Chance"
+        },
+        {
+          "id": "a-cross-life",
+          "kind": "cross-screenshot",
+          "template": "+# to maximum Life",
+          "positiveImage": "poe1-en-b.png"
+        }
+      ]
+    },
+    {
+      "image": "poe1-en-b.png",
+      "cases": [
+        "+# to maximum Life",
+        "#% increased Attack Speed"
+      ],
+      "negativeCases": [
+        {
+          "id": "b-semantic-cast-speed",
+          "kind": "semantic-neighbor",
+          "template": "#% increased Cast Speed",
+          "evidenceTemplate": "#% increased Attack Speed"
+        },
+        {
+          "id": "b-cross-fire-resistance",
+          "kind": "cross-screenshot",
+          "template": "+#% to Fire Resistance",
+          "positiveImage": "poe1-en-a.png"
+        }
+      ]
+    }
+  ]
+}

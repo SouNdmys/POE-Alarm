@@ -5,6 +5,8 @@
 .dotnet-home/
 .dotnet-cli/
 **/bin/
+!rust/crates/**/src/bin/
+!rust/crates/**/src/bin/*.rs
 **/obj/
 rust/target/
 rust/target-*/

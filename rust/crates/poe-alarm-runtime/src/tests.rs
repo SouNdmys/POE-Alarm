@@ -20,7 +20,7 @@ use crate::{
     AlertLatchStatus, AlertPresentation, BackendError, BackendFactory, CaptureBackend,
     ProtectionError, ProtectionEvent, ProtectionService, RecognizerBackend, RuntimeEvent,
     RuntimeGeneration, RuntimeHandle, RuntimeOperation, RuntimeRequestId, RuntimeSendError,
-    RuntimeState, ScreenshotRequest,
+    RuntimeState, ScreenshotBackend, ScreenshotRequest,
 };
 
 #[derive(Clone)]
@@ -44,6 +44,8 @@ struct FakeBackendState {
     screenshot_pass_delay_millis: AtomicUsize,
     recognizers_alive: AtomicUsize,
     recognizers_peak: AtomicUsize,
+    screenshot_backends: AtomicUsize,
+    screenshot_request_starts: AtomicUsize,
     decoded: Mutex<CapturedFrame>,
     profiles: Mutex<Vec<RecognitionProfile>>,
 }
@@ -68,6 +70,8 @@ impl FakeFactory {
                 screenshot_pass_delay_millis: AtomicUsize::new(0),
                 recognizers_alive: AtomicUsize::new(0),
                 recognizers_peak: AtomicUsize::new(0),
+                screenshot_backends: AtomicUsize::new(0),
+                screenshot_request_starts: AtomicUsize::new(0),
                 decoded: Mutex::new(first),
                 profiles: Mutex::new(Vec::new()),
             }),
@@ -86,18 +90,87 @@ impl BackendFactory for FakeFactory {
         &self,
         profile: RecognitionProfile,
     ) -> Result<Box<dyn RecognizerBackend>, BackendError> {
-        self.state.profiles.lock().unwrap().push(profile);
-        let alive = self.state.recognizers_alive.fetch_add(1, Ordering::AcqRel) + 1;
-        self.state
-            .recognizers_peak
-            .fetch_max(alive, Ordering::AcqRel);
-        Ok(Box::new(FakeRecognizer {
-            state: Arc::clone(&self.state),
-        }))
+        Ok(Box::new(FakeRecognizer::new(
+            Arc::clone(&self.state),
+            profile,
+        )))
     }
 
-    fn decode_screenshot(&self, _path: &Path) -> Result<CapturedFrame, BackendError> {
+    fn create_screenshot_backend(&self) -> Result<Box<dyn ScreenshotBackend>, BackendError> {
+        self.state
+            .screenshot_backends
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(Box::new(FakeScreenshotBackend {
+            state: Arc::clone(&self.state),
+            recognizer: None,
+        }))
+    }
+}
+
+struct FakeScreenshotBackend {
+    state: Arc<FakeBackendState>,
+    recognizer: Option<(RecognitionProfile, FakeRecognizer)>,
+}
+
+impl ScreenshotBackend for FakeScreenshotBackend {
+    fn decode(&mut self, _path: &Path) -> Result<CapturedFrame, BackendError> {
         Ok(self.state.decoded.lock().unwrap().clone())
+    }
+
+    fn begin_request(&mut self) {
+        self.state
+            .screenshot_request_starts
+            .fetch_add(1, Ordering::AcqRel);
+        if let Some((_, recognizer)) = self.recognizer.as_mut() {
+            recognizer.begin_screenshot_request();
+        }
+    }
+
+    fn recognize_quick(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        target: &FullLineAffixMatcher,
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError> {
+        self.ensure_recognizer(profile)
+            .recognize_quick_screenshot(prepared, target, cancelled)
+    }
+
+    fn recognize_structured(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        targets: &[FullLineAffixMatcher],
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError> {
+        self.ensure_recognizer(profile)
+            .recognize_structured_screenshot(prepared, targets, cancelled)
+    }
+
+    fn release_recognizer(&mut self) {
+        self.recognizer = None;
+    }
+}
+
+impl FakeScreenshotBackend {
+    fn ensure_recognizer(&mut self, profile: RecognitionProfile) -> &mut FakeRecognizer {
+        if self
+            .recognizer
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != profile)
+        {
+            self.recognizer = None;
+            self.recognizer = Some((
+                profile,
+                FakeRecognizer::new(Arc::clone(&self.state), profile),
+            ));
+        }
+        &mut self
+            .recognizer
+            .as_mut()
+            .expect("fake screenshot recognizer initialized above")
+            .1
     }
 }
 
@@ -135,6 +208,13 @@ impl Drop for FakeRecognizer {
 }
 
 impl FakeRecognizer {
+    fn new(state: Arc<FakeBackendState>, profile: RecognitionProfile) -> Self {
+        state.profiles.lock().unwrap().push(profile);
+        let alive = state.recognizers_alive.fetch_add(1, Ordering::AcqRel) + 1;
+        state.recognizers_peak.fetch_max(alive, Ordering::AcqRel);
+        Self { state }
+    }
+
     fn next_live(&self) -> RecognitionResult {
         pop_or_default(&self.state.live_results)
     }
@@ -152,6 +232,8 @@ impl RecognizerBackend for FakeRecognizer {
             _ => StructuredOcrSupport::StrictBatch,
         }
     }
+
+    fn begin_screenshot_request(&mut self) {}
 
     fn recognize_quick_live(
         &mut self,
@@ -700,6 +782,88 @@ fn screenshot_progressive_recognition_can_converge_after_more_than_three_passes(
     };
     assert!(report.evaluation.is_match);
     assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 6);
+    shutdown(&handle);
+}
+
+#[test]
+fn sequential_screenshots_reuse_one_backend_and_one_profile_recognizer() {
+    let factory = FakeFactory::new(
+        vec![frame(1, 64, 64)],
+        vec![result(&["not one"]), result(&["not two"])],
+    );
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&factory, &protection);
+
+    for request in 1..=2 {
+        handle
+            .test_screenshot(ScreenshotRequest::new(
+                RuntimeRequestId(request),
+                quick_settings(),
+                "unused.png",
+            ))
+            .unwrap();
+        wait_for(&handle, Duration::from_secs(2), |event| {
+            matches!(
+                event,
+                RuntimeEvent::ScreenshotCompleted(report)
+                    if report.request_id == RuntimeRequestId(request)
+            )
+        });
+    }
+
+    assert_eq!(factory.state.screenshot_backends.load(Ordering::Acquire), 1);
+    assert_eq!(
+        factory
+            .state
+            .screenshot_request_starts
+            .load(Ordering::Acquire),
+        2
+    );
+    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
+    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
+    shutdown(&handle);
+}
+
+#[test]
+fn screenshot_rule_changes_reuse_profile_but_profile_switch_rebuilds_once() {
+    let factory = FakeFactory::new(
+        vec![frame(1, 64, 64)],
+        vec![result(&["first"]), result(&["second"]), result(&["third"])],
+    );
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&factory, &protection);
+
+    let mut same_profile_new_rule = quick_settings();
+    same_profile_new_rule.profiles.poe1.target_affix = "+# to Strength".to_owned();
+    let mut poe2 = quick_settings();
+    poe2.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
+    poe2.profiles.poe2 = poe2.profiles.poe1.clone();
+    for (request, settings) in [quick_settings(), same_profile_new_rule, poe2]
+        .into_iter()
+        .enumerate()
+    {
+        let request_id = RuntimeRequestId(request as u64 + 1);
+        handle
+            .test_screenshot(ScreenshotRequest::new(request_id, settings, "unused.png"))
+            .unwrap();
+        wait_for(&handle, Duration::from_secs(2), |event| {
+            matches!(
+                event,
+                RuntimeEvent::ScreenshotCompleted(report) if report.request_id == request_id
+            )
+        });
+    }
+
+    assert_eq!(factory.state.screenshot_backends.load(Ordering::Acquire), 1);
+    assert_eq!(
+        factory.state.profiles.lock().unwrap().as_slice(),
+        [
+            RecognitionProfile::POE1_ENGLISH,
+            RecognitionProfile::POE2_ENGLISH
+        ]
+    );
+    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
+    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
     shutdown(&handle);
 }
 
@@ -1268,7 +1432,7 @@ fn one_hundred_screenshot_replacements_keep_only_the_latest_intent() {
         thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 2);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 2);
+    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
     assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
 
     let shutdown_started = Instant::now();
@@ -1461,8 +1625,8 @@ fn five_hundred_screenshot_replacements_and_cancels_are_coalesced() {
     };
     assert_eq!(report.request_id, RuntimeRequestId(final_request_id));
     assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 2);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 2);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 0);
+    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
+    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
     assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
 
     thread::sleep(Duration::from_millis(30));

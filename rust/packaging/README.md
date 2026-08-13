@@ -19,3 +19,14 @@ the runtime Cargo license graph, an exact file allowlist, and unpacked/ZIP size 
 
 For the Rust preview, the default gates are 50 MiB unpacked and 45 MiB zipped. The output remains
 version `0.1.0` and must not be published as the final 1.0 release.
+
+After packaging, the following smoke test starts the real executable with an empty isolated user
+profile and a minimal system `PATH`, finds the real configuration window, closes it normally, and
+verifies that the released .NET settings file was not changed:
+
+```powershell
+.\rust\packaging\test-rust-preview-isolated.ps1
+```
+
+This checks side-by-side native loading, settings isolation, and graceful startup/shutdown on the
+current Windows installation. It deliberately does not claim to replace a clean-Windows field test.

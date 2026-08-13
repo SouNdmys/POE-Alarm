@@ -273,7 +273,12 @@ artifacts\publish\1.0.0\win-x64\PoeAlarm.exe --audio-self-test artifacts\baselin
 
 `tools/PoeAlarm.OcrProbe` 用于隔离 Windows OCR 延迟；`tools/PoeAlarm.RecognizerProbe` 用于模型、字典、单行/整区、CER 和 manifest 诊断。它们不直接宣告产品命中，但 Rust 对照必须保留对应的 recognizer-only microbenchmark，才能区分“像素热路径变快”和“Windows OCR 本身波动”。
 
-瞬态回放必须按 `tools/PoeAlarm.TransientReplay/README.md` 的四类路径运行：普通 top-1、真实像素换行、CTC-assisted、调度 rank-3。`guarded` 参数仍表示短时输入闸门模型，不表示已删除的谨慎模式。
+瞬态回放必须覆盖普通 top-1、游戏自然两行词缀、CTC-assisted、调度 rank-3。
+`tools/PoeAlarm.TransientReplay --wrap-case` 仅把真实字形像素人工重排为两行，可作为布局压力
+诊断，不能充当“游戏自然两行词缀”的发布证据。真实两行素材必须来自游戏原生 tooltip，
+并在生产 OCR 预检中得到 strict `physical_line_count=2`；`guarded` 参数仍表示短时输入
+闸门模型，不表示已删除的谨慎模式。2026-08-13 对现有 25 张私图、8 份清单的有界审计
+得到 125 个严格命中，全部为一行，因此当前缺口是采集素材，不是可用合成测试绕过的代码项。
 
 Rust 当前工作区统一验证入口为：
 
