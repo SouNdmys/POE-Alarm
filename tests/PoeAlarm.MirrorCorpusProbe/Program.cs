@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PoeAlarm.App.Recognition;
 using PoeAlarm.Core.Rules;
 
 const string DefaultCorpus = @"tests\fixtures\mirror-tier-composite-rules.json";
@@ -30,6 +31,7 @@ var nearNegativeCount = 0;
 var oneShortCount = 0;
 var boundaryCount = 0;
 var oneToOneCount = 0;
+var identityContractCount = 0;
 
 foreach (var scenario in corpus.Scenarios)
 {
@@ -54,7 +56,24 @@ foreach (var scenario in corpus.Scenarios)
         boundaryCount += item.Tags.Any(tag => tag.StartsWith("numeric-boundary", StringComparison.Ordinal)) ? 1 : 0;
         oneToOneCount += item.Tags.Contains("one-modifier-one-count", StringComparer.Ordinal) ? 1 : 0;
 
-        var result = rules.Evaluate(item.Lines);
+        var ocrResult = CreateOcrResult(item);
+        var result = EvaluateRules(rules, ocrResult);
+        if (item.Tags.Contains("one-modifier-one-count", StringComparer.Ordinal))
+        {
+            identityContractCount++;
+            var withoutPrimaryIdentity = rules.Evaluate(
+                ocrResult.Lines,
+                ToAssistedObservations(ocrResult),
+                []);
+            if (!withoutPrimaryIdentity.IsMatch || result.IsMatch)
+            {
+                failures.Add(
+                    $"{scenario.Id}/{item.Id}: identity-contract case is not discriminating; " +
+                    $"expected match without primary physical identity and no match with identity, " +
+                    $"got without={withoutPrimaryIdentity.IsMatch}, with={result.IsMatch}.");
+            }
+        }
+
         var actualGroup = result.MatchedGroupId;
         var groupMatches = item.ExpectedGroup is null ||
                            string.Equals(item.ExpectedGroup, actualGroup, StringComparison.Ordinal);
@@ -85,6 +104,7 @@ Console.WriteLine($"Near-neighbour negatives: {nearNegativeCount}");
 Console.WriteLine($"One-short negatives:      {oneShortCount}");
 Console.WriteLine($"Numeric boundary cases:   {boundaryCount}");
 Console.WriteLine($"One-modifier-one-count:   {oneToOneCount}");
+Console.WriteLine($"OCR identity contracts:   {identityContractCount}");
 Console.WriteLine();
 
 if (failures.Count == 0)
@@ -249,6 +269,17 @@ static void ValidateCorpus(MirrorCorpus corpus, ICollection<string> failures)
     RequireTag(allCases, "numeric-boundary-below", failures);
     RequireTag(allCases, "one-modifier-one-count", failures);
 
+    foreach (var item in allCases.Where(item =>
+                 item.Tags.Contains("one-modifier-one-count", StringComparer.Ordinal)))
+    {
+        if (item.AssistedObservations.Count == 0 || item.PhysicalLines.Count == 0)
+        {
+            failures.Add(
+                $"{item.Id}: one-modifier-one-count must exercise both assisted and primary " +
+                "physical identity through OcrRecognitionResult.");
+        }
+    }
+
     if (!corpus.Limitations.Any(item =>
             item.Contains("Alt", StringComparison.OrdinalIgnoreCase) &&
             item.Contains("fractured", StringComparison.OrdinalIgnoreCase)))
@@ -256,6 +287,43 @@ static void ValidateCorpus(MirrorCorpus corpus, ICollection<string> failures)
         failures.Add("Corpus must state the fractured/Alt observability limitation.");
     }
 }
+
+static OcrRecognitionResult CreateOcrResult(CorpusCase item) => new(
+    item.Lines,
+    TimeSpan.Zero,
+    TimeSpan.Zero,
+    AssistedObservations: item.AssistedObservations.Select(static observation =>
+        new OcrAssistedObservation(
+            observation.PhysicalBandId,
+            observation.OriginalText,
+            observation.CanonicalTarget,
+            observation.SourceTop,
+            observation.SourceBottom,
+            observation.RelatedPhysicalBandIds)).ToArray(),
+    PhysicalLines: item.PhysicalLines.Select(static line =>
+        new OcrPhysicalLine(
+            line.LineIndex,
+            line.PhysicalBandId,
+            line.SourceTop,
+            line.SourceBottom)).ToArray());
+
+static RuleEvaluationResult EvaluateRules(
+    CompiledRuleSet rules,
+    OcrRecognitionResult ocrResult) =>
+    rules.Evaluate(
+        ocrResult.Lines,
+        ToAssistedObservations(ocrResult),
+        ocrResult.BatchPhysicalLines.Select(static line =>
+            new PhysicalLineIdentity(line.LineIndex, line.PhysicalBandId)).ToArray());
+
+static AssistedModifierObservation[] ToAssistedObservations(
+    OcrRecognitionResult ocrResult) =>
+    ocrResult.BatchAssistedObservations.Select(static observation =>
+        new AssistedModifierObservation(
+            observation.PhysicalBandId,
+            observation.OriginalText,
+            observation.CanonicalTarget,
+            observation.RelatedPhysicalBandIds)).ToArray();
 
 static void RequireTag(
     IReadOnlyList<CorpusCase> cases,
@@ -339,4 +407,34 @@ internal sealed record CorpusCase
     public IReadOnlyList<string> Tags { get; init; } = [];
 
     public IReadOnlyList<string> Lines { get; init; } = [];
+
+    public IReadOnlyList<CorpusAssistedObservation> AssistedObservations { get; init; } = [];
+
+    public IReadOnlyList<CorpusPhysicalLine> PhysicalLines { get; init; } = [];
+}
+
+internal sealed record CorpusAssistedObservation
+{
+    public string PhysicalBandId { get; init; } = string.Empty;
+
+    public string OriginalText { get; init; } = string.Empty;
+
+    public string CanonicalTarget { get; init; } = string.Empty;
+
+    public int SourceTop { get; init; }
+
+    public int SourceBottom { get; init; }
+
+    public IReadOnlyList<string>? RelatedPhysicalBandIds { get; init; }
+}
+
+internal sealed record CorpusPhysicalLine
+{
+    public int LineIndex { get; init; }
+
+    public string PhysicalBandId { get; init; } = string.Empty;
+
+    public int SourceTop { get; init; }
+
+    public int SourceBottom { get; init; }
 }
