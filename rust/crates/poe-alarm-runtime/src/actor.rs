@@ -15,7 +15,7 @@ use poe_alarm_monitoring::{
 use poe_alarm_recognition::PaddleBackendConfig;
 use poe_alarm_vision::{BlueMaskSettings, CaptureRegion, CapturedFrame, build_blue_mask};
 
-use crate::backend::{CaptureAdapter, RecognizerAdapter};
+use crate::backend::{CaptureAdapter, RecognizerAdapter, ScreenshotBackend};
 use crate::protection::AlertPresentation;
 use crate::{
     AlertLatchStatus, BackendError, BackendFactory, CompiledRuntimeSettings, DetectionSummary,
@@ -99,15 +99,25 @@ impl RuntimeHandle {
             .name("poe-alarm-runtime".to_owned())
             .spawn(move || match initialize() {
                 Ok((factory, protection)) => {
-                    let _ = event_sender.send(RuntimeEvent::Ready);
-                    RuntimeActor::new(
+                    match RuntimeActor::new(
                         command_receiver,
-                        event_sender,
+                        event_sender.clone(),
                         actor_snapshot,
                         factory,
                         protection,
-                    )
-                    .run();
+                    ) {
+                        Ok(actor) => {
+                            let _ = event_sender.send(RuntimeEvent::Ready);
+                            actor.run();
+                        }
+                        Err(error) => {
+                            let _ = event_sender.send(RuntimeEvent::Fault {
+                                generation: None,
+                                operation: RuntimeOperation::Startup,
+                                detail: format!("could not start screenshot worker: {error}"),
+                            });
+                        }
+                    }
                 }
                 Err(error) => {
                     let _ = event_sender.send(RuntimeEvent::Fault {
@@ -183,6 +193,7 @@ struct RuntimeActor {
         Arc<std::sync::Mutex<Option<(RuntimeGeneration, poe_alarm_monitoring::MonitorSnapshot)>>>,
     public_snapshot: Arc<std::sync::Mutex<Option<RuntimeEvent>>>,
     factory: Arc<dyn BackendFactory>,
+    screenshot_worker: ScreenshotWorker,
     protection: Arc<dyn ProtectionService>,
     live: Option<LiveSession>,
     screenshot: Option<ScreenshotTask>,
@@ -203,6 +214,125 @@ struct ScreenshotTask {
     request_id: RuntimeRequestId,
     generation: RuntimeGeneration,
     cancelled: Arc<AtomicBool>,
+}
+
+enum ScreenshotWorkerCommand {
+    Run {
+        generation: RuntimeGeneration,
+        request_id: RuntimeRequestId,
+        path: std::path::PathBuf,
+        compiled: Box<CompiledRuntimeSettings>,
+        cancelled: Arc<AtomicBool>,
+    },
+    ReleaseRecognizer {
+        acknowledged: mpsc::SyncSender<()>,
+    },
+    Stop,
+}
+
+/// The only screenshot execution thread in a runtime process.
+///
+/// It owns WIC's COM apartment and the cached native recognizer, preventing
+/// every UI screenshot test from creating and destroying an ONNX session,
+/// thread stacks and COM/WIC state. The actor still owns cancellation,
+/// generation filtering and latest-intent coalescing.
+struct ScreenshotWorker {
+    commands: mpsc::SyncSender<ScreenshotWorkerCommand>,
+}
+
+impl ScreenshotWorker {
+    fn start(
+        factory: Arc<dyn BackendFactory>,
+        events: mpsc::Sender<InternalEvent>,
+    ) -> io::Result<Self> {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("poe-alarm-screenshot".to_owned())
+            .spawn(move || {
+                let mut backend: Option<Box<dyn ScreenshotBackend>> = None;
+                while let Ok(command) = receiver.recv() {
+                    match command {
+                        ScreenshotWorkerCommand::Run {
+                            generation,
+                            request_id,
+                            path,
+                            compiled,
+                            cancelled,
+                        } => {
+                            let result = catch_unwind(AssertUnwindSafe(|| {
+                                if backend.is_none() {
+                                    backend = Some(factory.create_screenshot_backend()?);
+                                }
+                                let backend = backend
+                                    .as_deref_mut()
+                                    .expect("the screenshot backend was initialized above");
+                                run_screenshot(
+                                    backend, generation, request_id, &path, &compiled, &cancelled,
+                                )
+                            }));
+                            let result = match result {
+                                Ok(result) => result,
+                                Err(_) => {
+                                    // Do not reuse native state across an unwind. A later request
+                                    // can rebuild it on this same bounded worker.
+                                    backend = None;
+                                    Err(BackendError(
+                                        "screenshot worker panicked during native recognition"
+                                            .to_owned(),
+                                    ))
+                                }
+                            };
+                            let _ = events.send(InternalEvent::ScreenshotFinished {
+                                generation,
+                                request_id,
+                                result,
+                            });
+                        }
+                        ScreenshotWorkerCommand::ReleaseRecognizer { acknowledged } => {
+                            if let Some(backend) = backend.as_mut() {
+                                backend.release_recognizer();
+                            }
+                            let _ = acknowledged.send(());
+                        }
+                        ScreenshotWorkerCommand::Stop => break,
+                    }
+                }
+            })?;
+        Ok(Self { commands })
+    }
+
+    fn submit(&self, command: ScreenshotWorkerCommand) -> Result<(), BackendError> {
+        self.commands
+            .try_send(command)
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => {
+                    BackendError("screenshot worker queue is unexpectedly full".to_owned())
+                }
+                mpsc::TrySendError::Disconnected(_) => {
+                    BackendError("screenshot worker is no longer running".to_owned())
+                }
+            })
+    }
+
+    fn stop(&self) {
+        let _ = self.commands.try_send(ScreenshotWorkerCommand::Stop);
+    }
+
+    fn release_recognizer(&self) -> Result<(), BackendError> {
+        let (acknowledged, acknowledgement) = mpsc::sync_channel(1);
+        self.commands
+            .send(ScreenshotWorkerCommand::ReleaseRecognizer { acknowledged })
+            .map_err(|_| BackendError("screenshot worker is no longer running".to_owned()))?;
+        acknowledgement
+            .recv_timeout(Duration::from_secs(1))
+            .map_err(|_| BackendError("screenshot recognizer release timed out".to_owned()))
+    }
+}
+
+impl Drop for ScreenshotWorker {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -232,9 +362,11 @@ impl RuntimeActor {
         public_snapshot: Arc<std::sync::Mutex<Option<RuntimeEvent>>>,
         factory: Arc<dyn BackendFactory>,
         protection: Arc<dyn ProtectionService>,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let (internal_sender, internal_events) = mpsc::channel();
-        Self {
+        let screenshot_worker =
+            ScreenshotWorker::start(Arc::clone(&factory), internal_sender.clone())?;
+        Ok(Self {
             commands,
             events,
             internal_sender,
@@ -242,6 +374,7 @@ impl RuntimeActor {
             monitor_snapshot: Arc::new(std::sync::Mutex::new(None)),
             public_snapshot,
             factory,
+            screenshot_worker,
             protection,
             live: None,
             screenshot: None,
@@ -250,7 +383,7 @@ impl RuntimeActor {
             active_generation: None,
             next_generation: 1,
             state: RuntimeState::Idle,
-        }
+        })
     }
 
     fn run(mut self) {
@@ -344,6 +477,13 @@ impl RuntimeActor {
         };
         self.publish_compiled(generation, &compiled);
 
+        // A live monitor owns its own recognizer. Drop the idle screenshot
+        // cache so native model memory remains bounded to one active session.
+        if let Err(error) = self.screenshot_worker.release_recognizer() {
+            self.fault(Some(generation), RuntimeOperation::Start, error.to_string());
+            return;
+        }
+
         let capture = match self.factory.create_capture() {
             Ok(capture) => capture,
             Err(error) => {
@@ -432,35 +572,15 @@ impl RuntimeActor {
             generation,
             cancelled: Arc::clone(&cancelled),
         });
-        let factory = Arc::clone(&self.factory);
-        let sender = self.internal_sender.clone();
         let request_id = request.request_id;
         let path = request.path;
-        if let Err(error) = thread::Builder::new()
-            .name("poe-alarm-screenshot".to_owned())
-            .spawn(move || {
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    run_screenshot(
-                        factory.as_ref(),
-                        generation,
-                        request_id,
-                        &path,
-                        &compiled,
-                        &cancelled,
-                    )
-                }))
-                .unwrap_or_else(|_| {
-                    Err(BackendError(
-                        "screenshot worker panicked during native recognition".to_owned(),
-                    ))
-                });
-                let _ = sender.send(InternalEvent::ScreenshotFinished {
-                    generation,
-                    request_id,
-                    result,
-                });
-            })
-        {
+        if let Err(error) = self.screenshot_worker.submit(ScreenshotWorkerCommand::Run {
+            generation,
+            request_id,
+            path,
+            compiled: Box::new(compiled),
+            cancelled,
+        }) {
             self.screenshot = None;
             self.fault(
                 Some(generation),
@@ -607,6 +727,7 @@ impl RuntimeActor {
         self.cancel_pending_intent(false);
         self.cancel_screenshot_task(None, false);
         self.drain_live_for_shutdown();
+        self.screenshot_worker.stop();
         self.active_generation = None;
         self.clear_snapshots();
         if let Err(error) = self.protection.shutdown_fail_open() {
@@ -1008,7 +1129,7 @@ fn detection_summary(detection: &MonitorDetection) -> DetectionSummary {
 }
 
 fn run_screenshot(
-    factory: &dyn BackendFactory,
+    backend: &mut dyn ScreenshotBackend,
     generation: RuntimeGeneration,
     request_id: RuntimeRequestId,
     path: &std::path::Path,
@@ -1017,7 +1138,7 @@ fn run_screenshot(
 ) -> Result<ScreenshotReport, BackendError> {
     ensure_not_cancelled(cancelled)?;
     let load_started = Instant::now();
-    let full_frame = factory.decode_screenshot(path)?;
+    let full_frame = backend.decode(path)?;
     let (frame, used_full_image_fallback) = crop_or_full(full_frame, compiled.region)?;
     let load_elapsed = load_started.elapsed();
     ensure_not_cancelled(cancelled)?;
@@ -1025,7 +1146,7 @@ fn run_screenshot(
     let mask_started = Instant::now();
     let blue_mask = build_blue_mask(&frame, BlueMaskSettings::default());
     let mask_elapsed = mask_started.elapsed();
-    let mut recognizer = factory.create_recognizer(compiled.profile)?;
+    backend.begin_request();
     let mut preprocessing_elapsed = mask_elapsed;
     let mut recognition_elapsed = Duration::ZERO;
     let mut final_result = None;
@@ -1038,11 +1159,14 @@ fn run_screenshot(
         };
         let result = match &compiled.plan {
             MonitorPlan::Quick(target) => {
-                recognizer.recognize_quick_screenshot(prepared, target, cancelled)?
+                backend.recognize_quick(compiled.profile, prepared, target, cancelled)?
             }
-            MonitorPlan::Structured(rules) => {
-                recognizer.recognize_structured_screenshot(prepared, rules.targets(), cancelled)?
-            }
+            MonitorPlan::Structured(rules) => backend.recognize_structured(
+                compiled.profile,
+                prepared,
+                rules.targets(),
+                cancelled,
+            )?,
         };
         preprocessing_elapsed = preprocessing_elapsed.saturating_add(result.preprocessing_elapsed);
         recognition_elapsed = recognition_elapsed.saturating_add(result.recognition_elapsed);

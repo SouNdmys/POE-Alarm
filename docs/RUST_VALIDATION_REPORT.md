@@ -14,8 +14,8 @@
 为 `36.3542/57.2188 ms`，`.NET` 为 `40.1/61.1 ms`。但 POE2 p50 只快约 `2.4%`，
 POE1 p50 只快约 `9.3%`，仍没有达到验收合同中“p50 至少快 10%”的理想门槛。
 这项结果只能说明 Rust 已追平现有体验，不能单独支持正式切换。2 小时真实游戏监控、
-四种配置各 30 分钟实机制作、POE1 English 私有截图清单、真实两行瞬态和干净
-Windows 回滚演练也仍未完成，因此当前版本继续标为 Preview。
+四种配置各 30 分钟实机制作、POE1 English 私有截图清单、真实两行瞬态和真正的干净
+Windows 验收也仍未完成，因此当前版本继续标为 Preview。
 
 ## 测试环境与原始证据
 
@@ -69,6 +69,14 @@ POE2 English、POE2 繁中和 POE1 8.11 繁中清单均在独立进程中重复�
 POE1 English 的原始图片清单在当前仓库和本机历史截图树中均不存在，因此本轮没有用
 POE2 English 图片冒充该证据；此项保持 pending。
 
+补充审计还检查了本机另一个 POE1 项目的 English fixtures：那里确有真实 POE1
+English 截图，但内容是游戏内通货交易所、订单表格和市场字段，不是 POE Alarm 的装备
+提示框词缀，因此同样不能作为本门禁证据。Rust manifest probe 现已支持显式
+`semantic-neighbor` 与 `cross-screenshot` 负例，并提供 `--require-negative-contract` 发布
+合同；采集要求和 Quick/Structured 命令见
+`rust/crates/poe-alarm-recognition/POE1_ENGLISH_PRIVATE_GATE.md`。由于缺少适用的真实图片，
+本轮只验证了门禁合同本身，未将 schema fixture 写成识别通过。
+
 最终五进程繁中样本位于忽略提交的
 `rust/target/recognition-evidence/zh-latency-final/`，汇总文件为 `aggregate.csv`；旧版
 繁中这里只记录实际执行的一轮 `26/26`。早期 A/B 原始文件仍位于
@@ -120,6 +128,27 @@ POE2 English 图片冒充该证据；此项保持 pending。
 本轮 `weapon-shrine-on-kill` 使用真实长词缀原始行，没有像 .NET 专项探针那样把像素
 重排成两个物理行；因此“真实像素两行换行瞬态”仍需另补，不能由这 480 次结果代替。
 
+2026-08-13 又对当前私有截图树做了有界素材审计：共检查 `25` 张原图和 `8` 份清单，
+以生产 Quick OCR 的严格匹配证据逐目标统计，得到 `125` 个 strict match，
+`physical_line_count=1` 为 `125` 个，`physical_line_count=2` 为 `0` 个。两个肉眼最像
+候选的 POE1 长词缀——`weapon-shrine-on-kill` 与 `true-guard-explode-on-kill`——在游戏
+原图本身也是单行；前者命中依赖目标辅助证据，后者当前 OCR 同样没有形成跨两行严格
+证据。POE2 中英文完整清单的严格命中也全部是单行。旧 `.NET --wrap-case` 会把真实字形
+像素人工重排成相邻两行，虽然没有渲染假字，但仍不是游戏自然排版，因此本次没有拿它
+冒充真实两行门禁。
+
+审计原始 CSV、日志及原图 SHA-256 索引位于忽略提交的
+`transient/natural-two-line-audit/`。由于当前素材集中不存在合格输入，六档回放本轮没有
+执行，也没有生成虚假的 hit/timely 统计。补齐门禁所需的新素材必须是游戏原生 tooltip：
+同一条目标词缀肉眼占相邻两行，完整 tooltip 和所选 ROI 均保留，且生产预检必须返回
+strict `physical_line_count=2`；然后才能按既定 `30/40/50/60/80/100 ms × 20` 运行。
+
+逐目标审计使用 `recognition-manifest-probe --mode quick --show-physical-matches
+--physical-match-csv <ignored.csv> --audit-physical-matches`。最后一个开关只跳过旧清单的
+“图片名必须唯一”和逐 band Paddle 复核，以便盘点重复 ROI；它不改变生产 OCR、matcher
+或匹配结果。进程退出码仍会暴露普通清单回归失败，物理行 CSV 只写 strict evidence，
+所以“125 个严格证据均为一行”不把辅助命中误记为严格两行。
+
 原始文件：`transient/rust-guarded-real-pixel.csv`、
 `transient/rust-guarded-summary.csv`。
 
@@ -143,6 +172,32 @@ POE2 English 图片冒充该证据；此项保持 pending。
 - 红色告警每次显示都会重新查询虚拟桌面和目标显示器，并响应显示器拓扑/DPI 变化；只有
   在红窗可见、可点击且覆盖完整虚拟桌面之后，短时输入闸门才转交所有权。录屏亲和性设置
   失败只给出兼容性警告，不会阻止告警本身。
+
+资源预检另使用生产 Runtime、WIC、WinRT 和 Paddle/ONNX 路径完成：60 秒未变化桌面
+监控的平均整机 CPU 为 `0.0048%`，private bytes 只增加 `20,480 B`，handles
+`220→216`；固定用户真实截图逐次重新识别 60 秒共 `630` 轮、OCR 累计 `34.554 s`，
+平均整机 CPU 为 `1.7979%`，private bytes `70,451,200→71,618,560 B`
+（增加 `1,167,360 B`，低于 5 MiB 门槛），handles `218→217`，threads
+`11→13`。截图线程、WIC decoder 和同 profile ONNX recognizer 现在由一个容量为 1 的
+常驻 worker 复用；每个截图请求仍清除临时识别证据，不能借上次结果空转通过。该 60 秒
+测试是固定真实截图的生产 OCR 资源预检，不是 2 小时真实游戏门禁。
+
+同一候选二进制随后执行 300 秒诊断，共 `3,157` 轮、OCR 累计 `172.785 s`。脚本原有的
+首末单点算法得到 private bytes `74,481,664→83,013,632 B`（增加 `8,531,968 B`），
+因此 JSON 仍如实记录为 **fail**；`-SkipThresholds` 只让脚本在写完证据后正常返回，
+不会把失败改成通过。handles `220→217`、threads `11→8`，后 150 秒线性斜率约
+`+0.382 MiB/min`，最后 90 秒的首/末 30 秒窗口均值为 `73.188→73.694 MiB`。
+30 秒窗口均值依次为 `69.529、71.049、71.119、70.494、72.951、71.856、72.690、
+73.110、72.521、73.775 MiB`，更符合原生分配器预热/高水位后在约 `72–74 MiB`
+附近的平台，而不是句柄或线程随轮次线性累积。不过这只能辅助解释首末单点的相位敏感性；
+它既不能覆盖原始门槛失败，也不能代替 2 小时真实游戏门禁。
+
+可信证据为 `resource-soak/20260813-153727-screenshot-*`（60 秒）和
+`resource-soak/20260813-153926-screenshot-*`（300 秒），二者的可执行文件 SHA-256 均为
+`DF7FE34CBF70755F0B5E039B5408EE40CB3EAA915DF5463C41CB959EE92513DC`。更早的
+`20260813-153154` 运行虽然通过资源阈值，但 `1,711` 轮只累计 `0.074 s` OCR，暴露了
+跨独立截图请求复用临时指纹结果的诊断盲点；修复后才得到上述每轮约 `54.8 ms` 的真实
+OCR 压力数据，因此该次空转结果不计入验收。
 
 自动化必须按 PID 和窗口标题选择配置主窗。`Process.MainWindowHandle` 会优先返回状态
 浮窗；向状态浮窗或无标题辅助窗发送 `WM_CLOSE` 得到的超时是假结果，不应据此修改产品
@@ -170,14 +225,20 @@ POE2 English 图片冒充该证据；此项保持 pending。
 
 当前预览候选包已从最终源码连续生成两次，两次 ZIP 字节级一致：
 
-- 解压：`35,712,709 B`（约 `34.06 MiB`），共 `96` 个文件；
-- ZIP：`21,431,506 B`（约 `20.44 MiB`）；
-- SHA-256：`6266C10A08C5AB16D407A1E73D7F9D99868100625C321AFE4935A42E4E41CAF3`。
+- 解压：`35,748,549 B`（约 `34.09 MiB`），共 `96` 个文件；
+- ZIP：`21,445,349 B`（约 `20.45 MiB`）；
+- SHA-256：`526A11F070D9A9311C2C09CC9E45BE2F2CAFDCB6FA698DC2A86362BDD0FF7E5C`。
 
 包内包含 EXE、ONNX Runtime、模型、字典、官方 VC 运行库和实际依赖的
 许可证文件。打包脚本已通过 PE 资源、必需文件、哈希、微软签名、依赖白名单、
 禁止 `.NET` / Tauri / WebView / Node / Python 和包内原生自检。解压与 ZIP 体积均通过
 `50 MiB / 45 MiB` 门槛。
+
+最终旁置包还在空白隔离用户目录和最小系统 `PATH` 下连续启动/关闭 `20/20` 次：主窗
+出现 p50/p95 为 `73.239/109.830 ms`，关闭为 `66.721/70.862 ms`，退出码全部为 0。
+`.NET 1.0.0` 正式设置文件在每次测试前后哈希均未改变；随后从已发布目录启动并关闭
+`.NET 1.0.0`，同样退出码 0 且设置哈希不变。这证明当前机器上的旁置原生依赖、设置隔离
+和回滚程序仍可用；它不是另一台无开发环境 Windows 的替代证据。
 
 ## 8. 正式切换前仍需完成
 
@@ -186,11 +247,13 @@ POE2 English 图片冒充该证据；此项保持 pending。
 必须取得的证据是：
 
 1. 恢复 POE1 English 私有真实截图清单并跑五轮正例、语义近邻和跨截图反例。
-2. 补跑把真实长词缀像素重排成两个物理行的六档瞬态回放。
-3. 测量 60 秒未变化监控 CPU、WinRT warm、ONNX warm private bytes，以及 2 小时增长、
-   handle 和 thread 变化；当前只有 UI 空闲内存点。
+2. 采集一张游戏原生 tooltip 中同一词缀自然换成两行的私有截图；生产 strict 预检确认
+   `physical_line_count=2` 后，补跑六档瞬态回放。不得用 `.NET --wrap-case` 人工重排素材
+   代替这项证据。
+3. 已完成 60 秒未变化监控和固定真实截图生产 OCR 预检，但同二进制 300 秒首末 private
+   bytes 门槛仍失败；需继续 15 分钟稳定段诊断和 2 小时真实游戏增长、handle、thread 门禁。
 4. POE1/POE2 × English/繁中各 30 分钟真实游戏高速制作，并完成至少三次独立使用时段。
-5. 在干净 Windows 用户环境验证无需安装 Rust/.NET/VC，演练设置备份、正式路径切换与
-   `.NET 1.0.0` 回滚。
+5. 已在当前机器完成隔离目录旁置启动和 `.NET 1.0.0` 回滚 smoke；仍须在真正干净的
+   Windows 用户环境验证无需安装 Rust/.NET/VC，并演练设置备份和正式路径切换。
 
 在以上项目完成前，`.NET 1.0.0` 仍是正式可回退版本，Rust 不得标为完全替代版本。

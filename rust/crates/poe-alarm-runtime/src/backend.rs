@@ -35,6 +35,10 @@ pub trait CaptureBackend: Send + 'static {
 pub trait RecognizerBackend: Send + 'static {
     fn structured_support(&self) -> StructuredOcrSupport;
 
+    /// Clears request-scoped evidence without releasing heavyweight native
+    /// OCR engines or model sessions.
+    fn begin_screenshot_request(&mut self);
+
     fn recognize_quick_live(
         &mut self,
         prepared: PreparedFrame<'_>,
@@ -64,6 +68,44 @@ pub trait RecognizerBackend: Send + 'static {
     ) -> Result<RecognitionResult, BackendError>;
 }
 
+/// Thread-affine resources reused by the runtime's single screenshot worker.
+///
+/// WIC owns a COM apartment and Paddle owns a native ONNX session, so rebuilding
+/// either object for every screenshot creates large transient allocations and
+/// native worker-thread churn. Implementations keep one decoder and one
+/// profile-keyed recognizer alive on the screenshot thread. Changing profiles
+/// replaces the cached recognizer; rule/settings changes do not.
+pub trait ScreenshotBackend: 'static {
+    /// Decodes the complete image. Runtime-owned crop validation then applies
+    /// the configured region or deliberately falls back to the whole image.
+    fn decode(&mut self, path: &Path) -> Result<CapturedFrame, BackendError>;
+
+    /// Starts a logically independent screenshot request while retaining the
+    /// heavyweight WIC/ONNX resources. Implementations must clear evidence and
+    /// fingerprint caches that are valid only within one request.
+    fn begin_request(&mut self);
+
+    fn recognize_quick(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        target: &FullLineAffixMatcher,
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError>;
+
+    fn recognize_structured(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        targets: &[FullLineAffixMatcher],
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError>;
+
+    /// Releases native model state before live monitoring creates its own
+    /// recognizer. The WIC decoder remains warm for a later screenshot.
+    fn release_recognizer(&mut self);
+}
+
 pub trait BackendFactory: Send + Sync + 'static {
     fn create_capture(&self) -> Result<Box<dyn CaptureBackend>, BackendError>;
 
@@ -72,9 +114,9 @@ pub trait BackendFactory: Send + Sync + 'static {
         profile: RecognitionProfile,
     ) -> Result<Box<dyn RecognizerBackend>, BackendError>;
 
-    /// Decodes the complete image. Runtime-owned crop validation then applies
-    /// the configured region or deliberately falls back to the whole image.
-    fn decode_screenshot(&self, path: &Path) -> Result<CapturedFrame, BackendError>;
+    /// Creates the thread-affine screenshot resources once for the process
+    /// runtime. This method is invoked on the screenshot worker itself.
+    fn create_screenshot_backend(&self) -> Result<Box<dyn ScreenshotBackend>, BackendError>;
 }
 
 pub(crate) struct CaptureAdapter(pub Box<dyn CaptureBackend>);
@@ -156,11 +198,85 @@ impl BackendFactory for ProductionBackendFactory {
         Ok(Box::new(ProductionRecognition(recognizer)))
     }
 
-    fn decode_screenshot(&self, path: &Path) -> Result<CapturedFrame, BackendError> {
-        WicScreenshotDecoder::new()
-            .map_err(|error| BackendError(error.to_string()))?
+    fn create_screenshot_backend(&self) -> Result<Box<dyn ScreenshotBackend>, BackendError> {
+        Ok(Box::new(ProductionScreenshotBackend {
+            factory: self.clone(),
+            decoder: WicScreenshotDecoder::new()
+                .map_err(|error| BackendError(error.to_string()))?,
+            recognizer: None,
+        }))
+    }
+}
+
+struct ProductionScreenshotBackend {
+    factory: ProductionBackendFactory,
+    decoder: WicScreenshotDecoder,
+    /// Capacity one deliberately bounds native model memory. Profile changes
+    /// are rare and replace this entry instead of retaining four ONNX sessions.
+    recognizer: Option<(RecognitionProfile, Box<dyn RecognizerBackend>)>,
+}
+
+impl ScreenshotBackend for ProductionScreenshotBackend {
+    fn decode(&mut self, path: &Path) -> Result<CapturedFrame, BackendError> {
+        self.decoder
             .decode(path, None)
             .map_err(|error| BackendError(error.to_string()))
+    }
+
+    fn begin_request(&mut self) {
+        if let Some((_, recognizer)) = self.recognizer.as_mut() {
+            recognizer.begin_screenshot_request();
+        }
+    }
+
+    fn recognize_quick(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        target: &FullLineAffixMatcher,
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError> {
+        self.ensure_recognizer(profile)?
+            .recognize_quick_screenshot(prepared, target, cancelled)
+    }
+
+    fn recognize_structured(
+        &mut self,
+        profile: RecognitionProfile,
+        prepared: PreparedFrame<'_>,
+        targets: &[FullLineAffixMatcher],
+        cancelled: &AtomicBool,
+    ) -> Result<RecognitionResult, BackendError> {
+        self.ensure_recognizer(profile)?
+            .recognize_structured_screenshot(prepared, targets, cancelled)
+    }
+
+    fn release_recognizer(&mut self) {
+        self.recognizer = None;
+    }
+}
+
+impl ProductionScreenshotBackend {
+    fn ensure_recognizer(
+        &mut self,
+        profile: RecognitionProfile,
+    ) -> Result<&mut dyn RecognizerBackend, BackendError> {
+        if self
+            .recognizer
+            .as_ref()
+            .is_none_or(|(cached_profile, _)| *cached_profile != profile)
+        {
+            // Release the old native session before constructing another so a
+            // profile switch never holds two ONNX sessions at once.
+            self.recognizer = None;
+            self.recognizer = Some((profile, self.factory.create_recognizer(profile)?));
+        }
+        Ok(self
+            .recognizer
+            .as_mut()
+            .expect("the screenshot recognizer was initialized above")
+            .1
+            .as_mut())
     }
 }
 
@@ -191,6 +307,10 @@ struct ProductionRecognition(ProductionRecognizer);
 impl RecognizerBackend for ProductionRecognition {
     fn structured_support(&self) -> StructuredOcrSupport {
         OcrRecognizer::structured_support(&self.0)
+    }
+
+    fn begin_screenshot_request(&mut self) {
+        self.0.begin_screenshot_request();
     }
 
     fn recognize_quick_live(

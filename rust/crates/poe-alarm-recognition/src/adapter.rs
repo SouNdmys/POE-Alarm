@@ -260,6 +260,12 @@ impl ProductionRecognizer {
         self.adapter.localized.is_some()
     }
 
+    /// Starts a logically independent screenshot request while retaining the
+    /// heavyweight WinRT/Paddle workers and ONNX session.
+    pub fn begin_screenshot_request(&mut self) {
+        self.adapter.begin_screenshot_request();
+    }
+
     /// Offline/screenshot Quick entry point. Live monitoring uses the cancellable trait method.
     pub fn recognize_quick_prepared(
         &mut self,
@@ -390,6 +396,19 @@ impl RecognitionAdapter {
         } else {
             StructuredOcrSupport::StrictBatch
         }
+    }
+
+    fn begin_screenshot_request(&mut self) {
+        self.quick_pending = None;
+        self.quick_confirmed = None;
+        self.structured_pending = None;
+        self.structured_confirmed = None;
+        self.pending_structured_assisted.clear();
+        self.chinese_quick_cache = None;
+        self.chinese_structured_cache = None;
+        self.segmented_cache = BoundedSegmentedCache::default();
+        self.chinese_paddle_mask.source_fingerprint = None;
+        self.chinese_paddle_progress = None;
     }
 
     fn recognize_quick_with(
