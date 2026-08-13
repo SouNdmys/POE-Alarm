@@ -1,0 +1,12 @@
+[package]
+name = "poe-alarm-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Schema-compatible and crash-safe POE Alarm settings storage"
+
+[dependencies]
+poe-alarm-core = { path = "../poe-alarm-core" }
+serde.workspace = true
+serde_json.workspace = true

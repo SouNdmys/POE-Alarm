@@ -4,6 +4,16 @@ POE 制作时的本地 OCR 告警工具。它读取选定屏幕区域中的蓝�
 
 当前正式版本：`1.0.0`。目标环境为 Windows 10/11 x64，支持 POE1 / POE2 的 English 与繁體中文客户端。两款游戏会分别保存目标词缀、框选区域和游戏语言；POE1 English 保持原有 Windows OCR 路径，POE2 English 使用独立复核层，繁中使用 Windows 中文多行 OCR 快速路径，并仅在局部疑难内容或系统没有中文 OCR 能力时使用内置 PP-OCRv5。实测数据与边界见[繁體中文 OCR 生产说明](docs/traditional-chinese-ocr.md)。
 
+仓库正在以 1.0.0 为不可变对照开发纯原生 Win32/WinRT Rust 版本。当前正式版仍是 `.NET 1.0.0`；Rust 只作为并排预览，不覆盖正式版设置，也不会在实机门禁完成前替代它。功能矩阵、基准命令、切换与回滚条件见 [Rust 全量迁移规格](docs/RUST_MIGRATION_PLAN.md)，实测数据见 [Rust 原生预览版验收报告](docs/RUST_VALIDATION_REPORT.md)。
+
+## Rust 原生预览进度
+
+Rust 版的主功能链已经接通：单词缀、多词缀组合、数值条件、POE1/POE2、English/繁中、POE2 最多 8 行、截图测试、F10 启动、F11 框选、F12 停止/确认、状态浮窗、提示音和红色阻挡告警都使用真实设置与生产运行时。没有 Windows 繁中 OCR 时，也能进入完整的 Paddle 兼容路径；繁中蓝字阈值保持 `.NET 1.0` 的 `100/14/72`，不会为了提速放宽成关键词匹配。
+
+主界面已按工作区适配高 DPI，覆盖 `96/120/144 DPI` 与 `1024×768/1920×1080` 的边界测试；HUD 会随 DPI 缩放并保存拖动位置。截图渐进识别不再被三轮截断，最多推进 128 轮后给出明确错误，取消始终优先。红色告警会在每次命中时重新检查显示器拓扑，并在确认窗口可见、可点击且完整覆盖虚拟桌面后才接管输入。
+
+最终五进程繁中回归保持准确率：POE2 `190/190`，warm p50/p95 为 `31.0343/47.8532 ms`；POE1 8.11 `135/135`，为 `36.3542/57.2188 ms`。两者已经追平或快于同机 `.NET`，但 POE2 p50 只快约 `2.4%`，POE1 p50 只快约 `9.3%`，仍未达到迁移合同中 p50 快 10% 的理想门槛，所以当前名称仍是 **Rust Preview**。最终候选包已连续生成两次且 ZIP 字节一致：解压约 `34.06 MiB`、ZIP 约 `20.44 MiB`，SHA-256 为 `6266C10A08C5AB16D407A1E73D7F9D99868100625C321AFE4935A42E4E41CAF3`。
+
 ## 直接试用
 
 开发者在本地执行本文的 `dotnet publish` 后，自包含构建产物位于：
@@ -124,6 +134,7 @@ POE1 逻辑词缀可以由 1–4 条相邻 OCR 物理行组成；POE2 支持最�
 - `tools/PoeAlarm.TransientReplay`：内置 Paddle 路径的瞬态目标与点击节奏实验工具。
 - `tools/PoeAlarm.EndToEndProbe`：English 与 Windows-first 繁中真实截图的产品管线端到端探针。
 - `tools/PoeAlarm.UiSnapshot`：主界面、监控浮窗与红色告警的离线视觉快照、窗口行为断言及 PoEDB 合成目标/近邻负例测试。
+- `rust/`：纯原生 Rust 工作区，按 core、vision、Windows OCR、Paddle OCR、recognition、monitoring、runtime、platform、alert 和 Win32 app 分层；不使用 Tauri、WebView 或 .NET 运行时。
 
 OCR、截屏和告警均位于独立接口后。首版的小区域 GDI/DIB 截屏已经避免每帧重建原生资源；如果实机基准证明截屏成为瓶颈，可直接替换为 DXGI Desktop Duplication，而无需改动匹配与界面。
 
@@ -150,16 +161,25 @@ dotnet restore src\PoeAlarm.App\PoeAlarm.App.csproj -r win-x64 -p:NuGetAudit=fal
 dotnet publish src\PoeAlarm.App\PoeAlarm.App.csproj -c Release -p:PublishProfile=PortableWinX64 --no-restore -m:1
 ```
 
+Rust 工作区统一验证入口：
+
+```powershell
+cargo fmt --manifest-path rust\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --locked -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace --all-targets --locked --release --no-fail-fast
+```
+
 `-m:1` 是当前受管执行环境的规避项：这里的并行 MSBuild 节点通信会留下孤儿进程；项目与 `.slnx` 本身没有并行配置错误。
 
 ## 下一阶段
 
-1. 在 POE1 / POE2 内做长时间高速制作与不同分辨率、UI 缩放的漏报/误报采样。
-2. 持续把新繁中与碑牌截图加入 manifest，特别覆盖真实八行换行和不同字体缩放。
-3. 根据实测加入可保存的识别配置档，而不是修改 English 的稳定阈值。
-4. 若 GDI 在特定全屏模式下不可用，再加入 DXGI 捕获实现。
-5. 增加代码签名、安装包、更新清单和可回滚版本。
-6. 按另一项目的迁移计划将已验证的限定词库、分区识别和数字专用识别器抽成可复用 OCR 内核，供 POE1/POE2 Trade Tracker 使用。
+1. 恢复 POE1 English 私有真实截图清单，完成五轮正例、语义近邻和跨截图反例。
+2. 补跑真实长词缀像素重排成两个物理行的六档瞬态回放。
+3. 测量 60 秒未变化监控 CPU、WinRT/ONNX warm 内存和连续 2 小时增长。
+4. POE1/POE2 × English/繁中四种配置各完成 30 分钟真实游戏高速制作，并至少经过三次独立使用时段。
+5. 在干净 Windows 用户环境验证预览包、设置备份、正式路径切换和 `.NET 1.0.0` 回滚。
+6. 只有上述证据与性能结论都满足迁移合同后，才讨论把 Rust 从 Preview 改为正式推荐版；在此之前 `.NET 1.0.0` 始终保留。
+7. 正式迁移完成后，再按另一项目的迁移计划将已验证的限定词库、分区识别和数字专用识别器抽成可复用 OCR 内核，供 POE1/POE2 Trade Tracker 使用。
 
 ## 作者与支持
 

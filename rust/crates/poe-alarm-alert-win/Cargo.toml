@@ -1,0 +1,20 @@
+[package]
+name = "poe-alarm-alert-win"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/SouNdmys/POE-Alarm"
+description = "Native Win32 blocking match alert for POE Alarm"
+
+[dependencies]
+poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
