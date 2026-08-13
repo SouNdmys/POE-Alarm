@@ -158,7 +158,6 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
                 .ToArray();
             var projection = BuildLogicalProjection(detectedLines, prepared);
             var assisted = new List<OcrAssistedObservation>();
-            var candidateEvidence = new List<OcrCandidateEvidence>();
 
             // Windows supplies all candidate bounds from one shared full-frame layout pass. A
             // batch spends no more than two localized recovery work units regardless of target
@@ -217,47 +216,6 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
                         (int)Math.Ceiling(job.Candidate.Bounds.Bottom),
                         relatedBandIds));
                 }
-
-                var observed = string.Join(' ', detectedLines
-                    .Skip(job.Candidate.StartLine)
-                    .Take(job.Candidate.LineCount)
-                    .Select(line => NormalizeChineseNumericDashes(line.Text.Trim())));
-                foreach (var unresolved in recovery.Unresolved)
-                {
-                    candidateEvidence.Add(new OcrCandidateEvidence(
-                        bandId,
-                        observed,
-                        unresolved.Template.Text,
-                        ClassifyCandidateEvidence(observed, unresolved),
-                        (int)Math.Floor(job.Candidate.Bounds.Top),
-                        (int)Math.Ceiling(job.Candidate.Bounds.Bottom)));
-                }
-            }
-
-            // Keep the expensive refinement ceiling independent of target count, while preserving
-            // every remaining conservative locator as unresolved evidence for Guarded yellow-stop.
-            foreach (var job in plan.DeferredItems)
-            {
-                var bandId = CreateDetectedBandId(
-                    detectedLines,
-                    job.Candidate.StartLine,
-                    job.Candidate.LineCount,
-                    prepared.ContentFingerprint);
-                var observed = string.Join(' ', detectedLines
-                    .Skip(job.Candidate.StartLine)
-                    .Take(job.Candidate.LineCount)
-                    .Select(line => NormalizeChineseNumericDashes(line.Text.Trim())));
-                var bounds = job.Candidate.Bounds;
-                foreach (var target in job.Targets)
-                {
-                    candidateEvidence.Add(new OcrCandidateEvidence(
-                        bandId,
-                        observed,
-                        target.Template.Text,
-                        OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
-                        (int)Math.Floor(bounds.Top),
-                        (int)Math.Ceiling(bounds.Bottom)));
-                }
             }
 
             var result = new OcrRecognitionResult(
@@ -268,8 +226,7 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
                 TargetAssistedMatch: null,
                 RequiresRescan: false,
                 AssistedObservations: assisted,
-                PhysicalLines: projection.PhysicalLines,
-                CandidateEvidence: candidateEvidence);
+                PhysicalLines: projection.PhysicalLines);
             _batchCache = new BatchCache(fingerprint, targetKey, result);
             return result;
         }
@@ -792,24 +749,6 @@ public sealed class WindowsChineseOcrRecognizer : IOcrRecognizer, IFrameFingerpr
         }
 
         return previous[^1];
-    }
-
-    private static OcrCandidateEvidenceKind ClassifyCandidateEvidence(
-        string observed,
-        FullLineAffixMatcher target)
-    {
-        var expectedNumeric = target.Template.Tokens.Count(static token =>
-            token.Kind != AffixTokenKind.Word);
-        var actualNumeric = AffixCanonicalizer.Normalize(observed).Tokens.Count(static token =>
-            token.Kind != AffixTokenKind.Word);
-        if (actualNumeric < expectedNumeric)
-        {
-            return OcrCandidateEvidenceKind.MissingNumericValue;
-        }
-
-        return actualNumeric > expectedNumeric
-            ? OcrCandidateEvidenceKind.ConflictingNumericValue
-            : OcrCandidateEvidenceKind.LocalizedLexicalCandidate;
     }
 
     private static string NormalizeChineseNumericDashes(string text)

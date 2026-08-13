@@ -300,37 +300,6 @@
                        Text="开始监控" />
           </Grid>
 
-          <Grid Margin="2,0,2,10">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="250" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="MonitoringPolicyLabelText"
-                       Grid.Column="0"
-                       Margin="0,0,12,0"
-                       VerticalAlignment="Center"
-                       Foreground="{StaticResource TextSecondaryBrush}"
-                       Text="点击保护" />
-            <ComboBox x:Name="MonitoringPolicyComboBox"
-                      Grid.Column="1"
-                      SelectedIndex="0"
-                      SelectedValuePath="Tag"
-                      SelectionChanged="OnMonitoringPolicyChanged"
-                      Style="{StaticResource GlassComboBox}"
-                      ToolTip="快速模式适合日常连点；谨慎模式会在每次制作后先拦住下一次点击，确认结果后再放行。">
-              <ComboBoxItem x:Name="FastMonitoringPolicyOption" Tag="Fast" Content="快速模式" />
-              <ComboBoxItem x:Name="GuardedMonitoringPolicyOption" Tag="Guarded" Content="谨慎模式" />
-            </ComboBox>
-          </Grid>
-
-          <TextBlock x:Name="MonitoringPolicyHintText"
-                     Margin="2,0,2,10"
-                     Foreground="{StaticResource TextSecondaryBrush}"
-                     FontSize="12"
-                     Text="保持低延迟识别，适合日常高频制作。"
-                     TextWrapping="Wrap" />
-
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="1.45*" />

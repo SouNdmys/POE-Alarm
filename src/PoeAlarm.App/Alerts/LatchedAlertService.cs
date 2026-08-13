@@ -23,13 +23,6 @@ public sealed class LatchedAlertService : IAlertService
 
     private bool isActive;
     private bool isInputGuardActive;
-    private bool isGuardedAlertActive;
-    private bool isGuardedOverlayPresented;
-    private bool isGuardedRedHandoff;
-    private bool isGuardedFailurePending;
-    private bool guardedPassCycleReady;
-    private bool guardedPassCycleAcknowledgementPending;
-    private TimeSpan guardedDecisionWatchdogTimeout;
     private bool isDisposed;
     private bool excludeOverlayFromCapture;
     private string? customWavePath;
@@ -48,8 +41,6 @@ public sealed class LatchedAlertService : IAlertService
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         this.dispatcher = dispatcher;
-        pendingMouseInputGuard.CausativeClickCompleted += OnCausativeClickCompleted;
-        pendingMouseInputGuard.CausativeClickStarted += OnCausativeClickStarted;
     }
 
     public bool IsActive
@@ -74,28 +65,7 @@ public sealed class LatchedAlertService : IAlertService
         }
     }
 
-    public bool IsGuardedAlertActive
-    {
-        get
-        {
-            lock (stateGate)
-            {
-                return isGuardedAlertActive || isGuardedRedHandoff || isGuardedFailurePending;
-            }
-        }
-    }
-
     public event EventHandler? Acknowledged;
-
-    public event EventHandler? GuardedContinueRequested;
-
-    public event EventHandler? GuardedStopRequested;
-
-    public event EventHandler<GuardedAlertFailOpenEventArgs>? GuardedFailOpen;
-
-    public event EventHandler? GuardedCausativeClickCompleted;
-
-    public event EventHandler? GuardedCausativeClickStarted;
 
     public void Configure(string? customWavePath, bool excludeOverlayFromCapture)
     {
@@ -159,7 +129,7 @@ public sealed class LatchedAlertService : IAlertService
         int guardGeneration;
         lock (stateGate)
         {
-            if (isDisposed || isActive || isGuardedAlertActive || isGuardedFailurePending)
+            if (isDisposed || isActive)
             {
                 return;
             }
@@ -190,113 +160,13 @@ public sealed class LatchedAlertService : IAlertService
         _ = FailOpenInputGuardAsync(guardGeneration);
     }
 
-    public void BeginGuardedInputGuard(TimeSpan watchdogTimeout, ScreenRegion? anchorRegion = null)
-    {
-        if (watchdogTimeout < TimeSpan.FromMilliseconds(50) ||
-            watchdogTimeout > TimeSpan.FromSeconds(30))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(watchdogTimeout),
-                "The Guarded input watchdog must be between 50 ms and 30 seconds.");
-        }
-
-        int guardGeneration;
-        var armFailed = false;
-        var refreshOnly = false;
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || isGuardedFailurePending)
-            {
-                return;
-            }
-
-            if (isGuardedAlertActive)
-            {
-                if (isGuardedOverlayPresented)
-                {
-                    return;
-                }
-
-                if (guardedPassCycleReady)
-                {
-                    // A changed frame can beat the low-level completion callback on another
-                    // thread. Arm is idempotent for the pass cycle and makes this decision the
-                    // new owner without allowing a second click through.
-                    if (!pendingMouseInputGuard.Arm())
-                    {
-                        isGuardedFailurePending = true;
-                        guardedPassCycleReady = false;
-                        guardedPassCycleAcknowledgementPending = false;
-                        guardGeneration = ++generation;
-                        armFailed = true;
-                    }
-                    else
-                    {
-                        guardedPassCycleReady = false;
-                        guardedPassCycleAcknowledgementPending = false;
-                        guardGeneration = ++generation;
-                        guardedDecisionWatchdogTimeout = watchdogTimeout;
-                        refreshOnly = true;
-                    }
-
-                    goto GuardStateResolved;
-                }
-
-                // Progressive/stability slices refresh the Guarded watchdog without releasing
-                // and re-arming the already held native gate. The hook therefore remains a
-                // continuous owner from the first changed frame through the final decision.
-                guardGeneration = ++generation;
-                refreshOnly = true;
-            }
-            else
-            {
-                isInputGuardActive = false;
-                isGuardedAlertActive = true;
-                isGuardedOverlayPresented = false;
-                guardedPassCycleAcknowledgementPending = false;
-                guardGeneration = ++generation;
-                if (!pendingMouseInputGuard.Arm())
-                {
-                    isGuardedAlertActive = false;
-                    generation++;
-                    armFailed = true;
-                }
-                else
-                {
-                    guardedDecisionWatchdogTimeout = watchdogTimeout;
-                }
-            }
-
-        GuardStateResolved:;
-        }
-
-        _ = anchorRegion;
-        if (refreshOnly)
-        {
-            _ = FailOpenGuardedInputGuardAsync(guardGeneration, watchdogTimeout);
-            return;
-        }
-
-        if (armFailed)
-        {
-            var args = new GuardedAlertFailOpenEventArgs(
-                GuardedAlertFailOpenReason.InputGuardUnavailable,
-                "The Guarded mouse input hook could not be armed.");
-            RaiseGuardedFailOpenSafely(args);
-            CompleteGuardedFailOpen(guardGeneration);
-            return;
-        }
-
-        _ = FailOpenGuardedInputGuardAsync(guardGeneration, watchdogTimeout);
-    }
-
     public void ReleaseInputGuard()
     {
         int releaseGeneration;
         var logicalGuardWasActive = false;
         lock (stateGate)
         {
-            if (isDisposed || isActive || isGuardedAlertActive || isGuardedFailurePending)
+            if (isDisposed || isActive)
             {
                 return;
             }
@@ -324,219 +194,22 @@ public sealed class LatchedAlertService : IAlertService
         _ = TryDispatch(() => CompleteInputGuardRelease(releaseGeneration));
     }
 
-    public void ReleaseGuardedInputGuard()
-    {
-        int releaseGeneration;
-        lock (stateGate)
-        {
-            if (isDisposed ||
-                (!isGuardedAlertActive && !isGuardedRedHandoff && !isGuardedFailurePending))
-            {
-                return;
-            }
-
-            if (isActive && isGuardedRedHandoff)
-            {
-                // A Guarded red hand-off fault synchronously re-enters here through the monitor's
-                // InputGuardReleased event. Complete the latched-alert terminal state now; the
-                // outer fail-open completion may be invalidated by this release generation.
-                isActive = false;
-                sound.Stop();
-            }
-
-            isGuardedAlertActive = false;
-            isGuardedOverlayPresented = false;
-            isGuardedRedHandoff = false;
-            isGuardedFailurePending = false;
-            guardedPassCycleReady = false;
-            guardedPassCycleAcknowledgementPending = false;
-            releaseGeneration = ++generation;
-            pendingMouseInputGuard.Release();
-        }
-
-        _ = TryDispatch(() => CompleteGuardedRelease(releaseGeneration));
-    }
-
-    public void ShowGuardedUncertain(
-        string title,
-        string detail,
-        string instruction,
-        string continueButtonText,
-        string stopButtonText,
-        ScreenRegion? anchorRegion = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(title);
-        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
-        ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
-        ArgumentException.ThrowIfNullOrWhiteSpace(continueButtonText);
-        ArgumentException.ThrowIfNullOrWhiteSpace(stopButtonText);
-
-        int guardedGeneration;
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || !isGuardedAlertActive || isGuardedOverlayPresented)
-            {
-                return;
-            }
-
-            guardedGeneration = generation;
-        }
-
-        if (!TryDispatch(() => ShowGuardedOverlay(
-                title.Trim(),
-                detail.Trim(),
-                instruction.Trim(),
-                continueButtonText.Trim(),
-                stopButtonText.Trim(),
-                guardedGeneration,
-                anchorRegion)))
-        {
-            FailOpenGuarded(
-                guardedGeneration,
-                GuardedAlertFailOpenReason.DispatcherUnavailable,
-                "The UI dispatcher was unavailable before the Guarded overlay could be shown.");
-            return;
-        }
-
-        _ = FailOpenGuardedPresentationAsync(guardedGeneration);
-    }
-
-    public bool AwaitNextGuardedClick(
-        TimeSpan decisionWatchdogTimeout,
-        ScreenRegion? anchorRegion = null)
-    {
-        if (decisionWatchdogTimeout < TimeSpan.FromMilliseconds(50) ||
-            decisionWatchdogTimeout > TimeSpan.FromSeconds(30))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(decisionWatchdogTimeout),
-                "The Guarded decision watchdog must be between 50 ms and 30 seconds.");
-        }
-
-        int failureGeneration = 0;
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || isGuardedFailurePending)
-            {
-                return false;
-            }
-
-            if (!isGuardedAlertActive)
-            {
-                // Initial baseline establishment has no pending decision to arm. Enter the same
-                // unbounded one-shot phase used after a conclusive miss without inventing a
-                // startup timeout or briefly blocking the user's mouse.
-                isGuardedAlertActive = true;
-                isGuardedOverlayPresented = false;
-                isGuardedRedHandoff = false;
-            }
-
-            if (guardedPassCycleAcknowledgementPending)
-            {
-                // Continue installs the one-shot gate before hiding the yellow overlay. The
-                // monitoring transition immediately repeats this request as its acknowledgement.
-                // Consume that acknowledgement even if the allowed Down/Up has already completed;
-                // re-entering the native state machine here would otherwise pass a second click.
-                guardedPassCycleAcknowledgementPending = false;
-                return true;
-            }
-
-            if (guardedPassCycleReady)
-            {
-                // Continue's overlay hand-off and the monitoring policy can request the same
-                // pass cycle synchronously. Never re-enter the native state machine: a very fast
-                // user Down between those calls must still be the one and only allowed click.
-                return true;
-            }
-
-            if (!pendingMouseInputGuard.AwaitNextCausativeClick())
-            {
-                isGuardedFailurePending = true;
-                failureGeneration = ++generation;
-            }
-            else
-            {
-                guardedPassCycleReady = true;
-                guardedDecisionWatchdogTimeout = decisionWatchdogTimeout;
-                // Invalidate the recognition/presentation watchdog. Waiting for the user's next
-                // click is intentionally unbounded; a new decision deadline starts on completion.
-                generation++;
-            }
-        }
-
-        _ = anchorRegion;
-        if (failureGeneration == 0)
-        {
-            return true;
-        }
-
-        RaiseGuardedFailOpenSafely(
-            new GuardedAlertFailOpenEventArgs(
-                GuardedAlertFailOpenReason.InputGuardUnavailable,
-                "The Guarded mouse input hook could not await the next causative click."));
-        CompleteGuardedFailOpen(failureGeneration);
-        return false;
-    }
-
     public void Trigger(string? detectedText = null, ScreenRegion? anchorRegion = null)
     {
         int triggerGeneration;
 
         lock (stateGate)
         {
-            if (isDisposed || isActive || isGuardedAlertActive || isGuardedFailurePending)
+            if (isDisposed || isActive)
             {
                 return;
             }
 
             isActive = true;
             isInputGuardActive = false;
-            isGuardedRedHandoff = false;
             triggerGeneration = ++generation;
+
         }
-
-        BeginRedPresentation(detectedText, anchorRegion, triggerGeneration, guardedMatch: false);
-    }
-
-    public bool TriggerGuardedMatch(
-        string? detectedText = null,
-        ScreenRegion? anchorRegion = null)
-    {
-        int triggerGeneration;
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || !isGuardedAlertActive ||
-                isGuardedOverlayPresented || isGuardedFailurePending)
-            {
-                return false;
-            }
-
-            // This lock is the single ownership linearization point shared with every Guarded
-            // watchdog. Either Match atomically reclassifies the existing native gate as the red
-            // hand-off, or a watchdog has already made failure pending and this call refuses it.
-            isActive = true;
-            isInputGuardActive = false;
-            isGuardedAlertActive = false;
-            isGuardedOverlayPresented = false;
-            isGuardedRedHandoff = true;
-            guardedPassCycleReady = false;
-            guardedPassCycleAcknowledgementPending = false;
-            triggerGeneration = ++generation;
-        }
-
-        return BeginRedPresentation(
-            detectedText,
-            anchorRegion,
-            triggerGeneration,
-            guardedMatch: true);
-    }
-
-    private bool BeginRedPresentation(
-        string? detectedText,
-        ScreenRegion? anchorRegion,
-        int triggerGeneration,
-        bool guardedMatch)
-    {
 
         var displayText = string.IsNullOrWhiteSpace(detectedText)
             ? UiText.Current.DefaultDetectedText
@@ -544,32 +217,16 @@ public sealed class LatchedAlertService : IAlertService
 
         // Queue or present the input shield before starting any non-critical alert work. Sound is
         // deliberately started by ShowOverlay only after the native shield is visible.
-        if (!TryDispatch(() => ShowOverlay(
-                displayText,
-                triggerGeneration,
-                anchorRegion,
-                guardedMatch)))
+        if (!TryDispatch(() => ShowOverlay(displayText, triggerGeneration, anchorRegion)))
         {
-            if (guardedMatch)
-            {
-                FailOpenGuardedRedHandoff(
-                    triggerGeneration,
-                    GuardedAlertFailOpenReason.DispatcherUnavailable,
-                    "The UI dispatcher was unavailable before the Guarded match alert could be shown.");
-            }
-            else
-            {
-                CancelTrigger(triggerGeneration);
-            }
-
-            return false;
+            CancelTrigger(triggerGeneration);
+            return;
         }
 
         // A queued dispatcher presentation must not leave the system-wide low-level hook armed
         // forever if the UI thread stalls. The red window may still appear later, but the hook
         // independently fails open after this bounded hand-off interval.
-        _ = FailOpenAlertHandoffAsync(triggerGeneration, guardedMatch);
-        return true;
+        _ = FailOpenAlertHandoffAsync(triggerGeneration);
     }
 
     public void Acknowledge()
@@ -583,17 +240,11 @@ public sealed class LatchedAlertService : IAlertService
                 return;
             }
 
-            if (isActive || isInputGuardActive || isGuardedAlertActive)
+            if (isActive || isInputGuardActive)
             {
                 var wasAlertActive = isActive;
                 isActive = false;
                 isInputGuardActive = false;
-                isGuardedAlertActive = false;
-                isGuardedOverlayPresented = false;
-                isGuardedRedHandoff = false;
-                isGuardedFailurePending = false;
-                guardedPassCycleReady = false;
-                guardedPassCycleAcknowledgementPending = false;
                 generation++;
                 sound.Stop();
                 transitionedToAcknowledged = wasAlertActive;
@@ -633,15 +284,7 @@ public sealed class LatchedAlertService : IAlertService
             isDisposed = true;
             isActive = false;
             isInputGuardActive = false;
-            isGuardedAlertActive = false;
-            isGuardedOverlayPresented = false;
-            isGuardedRedHandoff = false;
-            isGuardedFailurePending = false;
-            guardedPassCycleReady = false;
-            guardedPassCycleAcknowledgementPending = false;
             generation++;
-            pendingMouseInputGuard.CausativeClickCompleted -= OnCausativeClickCompleted;
-            pendingMouseInputGuard.CausativeClickStarted -= OnCausativeClickStarted;
             sound.Stop();
             sound.Dispose();
             pendingMouseInputGuard.Dispose();
@@ -654,8 +297,7 @@ public sealed class LatchedAlertService : IAlertService
     private void ShowOverlay(
         string detectedText,
         int triggerGeneration,
-        ScreenRegion? anchorRegion,
-        bool guardedMatch)
+        ScreenRegion? anchorRegion)
     {
         lock (stateGate)
         {
@@ -681,82 +323,10 @@ public sealed class LatchedAlertService : IAlertService
                 overlay.Arm(detectedText, triggerGeneration, anchorRegion);
                 overlay.Present();
             }
-            catch (Exception exception)
+            catch (InvalidOperationException)
             {
                 CloseOverlay();
-                HandleRedPresentationFailure(
-                    triggerGeneration,
-                    guardedMatch,
-                    exception);
-            }
-        }
-        catch (Exception exception)
-        {
-            CloseOverlay();
-            HandleRedPresentationFailure(triggerGeneration, guardedMatch, exception);
-        }
-    }
-
-    private void HandleRedPresentationFailure(
-        int triggerGeneration,
-        bool guardedMatch,
-        Exception exception)
-    {
-        if (guardedMatch)
-        {
-            FailOpenGuardedRedHandoff(
-                triggerGeneration,
-                GuardedAlertFailOpenReason.PresentationFailed,
-                $"The Guarded match alert could not be presented: {exception.Message}");
-            return;
-        }
-
-        CancelTrigger(triggerGeneration);
-    }
-
-    private void ShowGuardedOverlay(
-        string title,
-        string detail,
-        string instruction,
-        string continueButtonText,
-        string stopButtonText,
-        int guardedGeneration,
-        ScreenRegion? anchorRegion)
-    {
-        lock (stateGate)
-        {
-            if (isDisposed || !isGuardedAlertActive || isGuardedOverlayPresented ||
-                generation != guardedGeneration)
-            {
-                return;
-            }
-        }
-
-        try
-        {
-            overlay ??= CreateOverlay();
-            overlay.ArmGuarded(
-                title,
-                detail,
-                instruction,
-                continueButtonText,
-                stopButtonText,
-                guardedGeneration,
-                anchorRegion);
-            overlay.Present();
-        }
-        catch (Exception exception)
-        {
-            try
-            {
-                overlay?.ReleaseForReuse();
-            }
-            finally
-            {
-                FailOpenGuarded(
-                    guardedGeneration,
-                    GuardedAlertFailOpenReason.PresentationFailed,
-                    $"The Guarded overlay could not be presented: {exception.Message}");
+                CancelTrigger(triggerGeneration);
             }
         }
     }
@@ -765,7 +335,7 @@ public sealed class LatchedAlertService : IAlertService
     {
         lock (stateGate)
         {
-            if (isDisposed || isActive || isInputGuardActive || isGuardedAlertActive)
+            if (isDisposed || isActive || isInputGuardActive)
             {
                 return;
             }
@@ -804,38 +374,9 @@ public sealed class LatchedAlertService : IAlertService
         CancelInputGuard(guardGeneration);
     }
 
-    private async Task FailOpenGuardedInputGuardAsync(
-        int guardGeneration,
-        TimeSpan watchdogTimeout)
-    {
-        await Task.Delay(watchdogTimeout).ConfigureAwait(false);
-        FailOpenGuarded(
-            guardGeneration,
-            GuardedAlertFailOpenReason.InputGuardTimedOut,
-            "The Guarded decision watchdog expired before a conclusive decision.");
-    }
-
-    private async Task FailOpenGuardedPresentationAsync(int guardedGeneration)
+    private async Task FailOpenAlertHandoffAsync(int triggerGeneration)
     {
         await Task.Delay(AlertHandoffFailOpenTimeout).ConfigureAwait(false);
-        FailOpenGuarded(
-            guardedGeneration,
-            GuardedAlertFailOpenReason.PresentationTimedOut,
-            "The UI dispatcher did not present the Guarded overlay before its hand-off deadline.");
-    }
-
-    private async Task FailOpenAlertHandoffAsync(int triggerGeneration, bool guardedMatch)
-    {
-        await Task.Delay(AlertHandoffFailOpenTimeout).ConfigureAwait(false);
-        if (guardedMatch)
-        {
-            FailOpenGuardedRedHandoff(
-                triggerGeneration,
-                GuardedAlertFailOpenReason.PresentationTimedOut,
-                "The UI dispatcher did not present the Guarded match alert before its hand-off deadline.");
-            return;
-        }
-
         lock (stateGate)
         {
             if (isDisposed || !isActive || generation != triggerGeneration)
@@ -878,118 +419,6 @@ public sealed class LatchedAlertService : IAlertService
         }
 
         HideOverlay();
-    }
-
-    private void CompleteGuardedRelease(int releaseGeneration)
-    {
-        lock (stateGate)
-        {
-            if (isDisposed || isGuardedAlertActive || generation != releaseGeneration)
-            {
-                return;
-            }
-        }
-
-        HideOverlay();
-    }
-
-    private void FailOpenGuarded(
-        int guardedGeneration,
-        GuardedAlertFailOpenReason reason,
-        string detail)
-    {
-        int failureGeneration;
-        lock (stateGate)
-        {
-            if (isDisposed || !isGuardedAlertActive || isGuardedOverlayPresented ||
-                isGuardedFailurePending || generation != guardedGeneration)
-            {
-                return;
-            }
-
-            // Keep the native gate continuously armed while the terminal fault is delivered.
-            // TriggerGuardedMatch shares this lock and must now refuse ownership, while the
-            // synchronous subscriber gets the first opportunity to stop the monitor and release.
-            isGuardedFailurePending = true;
-            failureGeneration = ++generation;
-        }
-
-        RaiseGuardedFailOpenSafely(new GuardedAlertFailOpenEventArgs(reason, detail));
-        CompleteGuardedFailOpen(failureGeneration);
-    }
-
-    private void FailOpenGuardedRedHandoff(
-        int triggerGeneration,
-        GuardedAlertFailOpenReason reason,
-        string detail)
-    {
-        int failureGeneration;
-        lock (stateGate)
-        {
-            if (isDisposed || !isActive || !isGuardedRedHandoff ||
-                isGuardedFailurePending || generation != triggerGeneration)
-            {
-                return;
-            }
-
-            // The old Guarded watchdog was invalidated when the match incremented generation.
-            // This new red-handoff watchdog owns the same still-armed hook and marks failure
-            // before notifying, so no late Trigger or ordinary release can create an input gap.
-            isGuardedFailurePending = true;
-            failureGeneration = ++generation;
-        }
-
-        RaiseGuardedFailOpenSafely(new GuardedAlertFailOpenEventArgs(reason, detail));
-        CompleteGuardedFailOpen(failureGeneration);
-    }
-
-    private void CompleteGuardedFailOpen(int failureGeneration)
-    {
-        lock (stateGate)
-        {
-            if (!isDisposed && isGuardedFailurePending && generation == failureGeneration)
-            {
-                isActive = false;
-                isInputGuardActive = false;
-                isGuardedAlertActive = false;
-                isGuardedOverlayPresented = false;
-                isGuardedRedHandoff = false;
-                isGuardedFailurePending = false;
-                guardedPassCycleReady = false;
-                guardedPassCycleAcknowledgementPending = false;
-                generation++;
-                sound.Stop();
-                pendingMouseInputGuard.Release();
-            }
-        }
-
-        // This can run on an independent watchdog while WPF is stalled. It is an idempotent
-        // native fallback after subscribers have had a synchronous chance to release normally.
-        overlay?.FailOpenNativeInputShield();
-        _ = TryDispatch(HideOverlay);
-    }
-
-    private void RaiseGuardedFailOpenSafely(GuardedAlertFailOpenEventArgs args)
-    {
-        var handlers = GuardedFailOpen;
-        if (handlers is null)
-        {
-            return;
-        }
-
-        foreach (EventHandler<GuardedAlertFailOpenEventArgs> handler in
-                 handlers.GetInvocationList())
-        {
-            try
-            {
-                handler(this, args);
-            }
-            catch
-            {
-                // Protection has already failed open. A subscriber must not crash the watchdog
-                // thread or prevent other owners from receiving the terminal fault.
-            }
-        }
     }
 
     private void CloseOverlay()
@@ -1042,7 +471,6 @@ public sealed class LatchedAlertService : IAlertService
         var window = new AffixHitOverlayWindow(excludeOverlayFromCapture);
         window.AcknowledgeRequested += OnOverlayAcknowledgementRequested;
         window.AlertPresented += OnOverlayAlertPresented;
-        window.GuardedActionRequested += OnOverlayGuardedActionRequested;
         return window;
     }
 
@@ -1050,171 +478,17 @@ public sealed class LatchedAlertService : IAlertService
     {
         lock (stateGate)
         {
-            if (!ReferenceEquals(sender, overlay) || isDisposed || generation != e.Generation)
-            {
-                return;
-            }
-
-            if (isGuardedAlertActive)
-            {
-                // This event is synchronous with native visibility. The full-desktop yellow HWND
-                // now owns all input, so the system-wide hook can be released without a gap.
-                isGuardedOverlayPresented = true;
-                pendingMouseInputGuard.TransferToBlockingOverlay();
-                return;
-            }
-
-            if (!isActive)
+            if (!ReferenceEquals(sender, overlay) || isDisposed || !isActive ||
+                generation != e.Generation)
             {
                 return;
             }
 
             // AffixHitOverlayWindow raises this only after its native topmost HWND is visible and
             // hit-testable. Hand input ownership to that window before doing audible work.
-            isGuardedRedHandoff = false;
             pendingMouseInputGuard.TransferToBlockingOverlay();
             sound.Start();
         }
-    }
-
-    private void OnCausativeClickCompleted(object? sender, EventArgs e)
-    {
-        int watchdogGeneration;
-        TimeSpan watchdogTimeout;
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || !isGuardedAlertActive || isGuardedOverlayPresented ||
-                isGuardedFailurePending || !guardedPassCycleReady ||
-                pendingMouseInputGuard.Mode != MouseInputGuardMode.Guarding)
-            {
-                return;
-            }
-
-            // The low-level CAS has already changed to Guarding before raising this event. From
-            // this instant the decision has a bounded lifetime even if the allowed click failed
-            // to change the tooltip and the monitor never observes a new fingerprint.
-            guardedPassCycleReady = false;
-            watchdogGeneration = ++generation;
-            watchdogTimeout = guardedDecisionWatchdogTimeout;
-        }
-
-        _ = FailOpenGuardedInputGuardAsync(watchdogGeneration, watchdogTimeout);
-        RaiseGuardedCausativeClickCompletedSafely();
-    }
-
-    private void OnCausativeClickStarted(object? sender, EventArgs e)
-    {
-        lock (stateGate)
-        {
-            if (isDisposed || isActive || !isGuardedAlertActive || isGuardedOverlayPresented ||
-                isGuardedFailurePending || !guardedPassCycleReady)
-            {
-                return;
-            }
-        }
-
-        RaiseGuardedCausativeClickEventSafely(GuardedCausativeClickStarted);
-    }
-
-    private void RaiseGuardedCausativeClickCompletedSafely()
-    {
-        RaiseGuardedCausativeClickEventSafely(GuardedCausativeClickCompleted);
-    }
-
-    private void RaiseGuardedCausativeClickEventSafely(EventHandler? handlers)
-    {
-        if (handlers is null)
-        {
-            return;
-        }
-
-        foreach (EventHandler handler in handlers.GetInvocationList())
-        {
-            try
-            {
-                handler(this, EventArgs.Empty);
-            }
-            catch
-            {
-                // Never unwind application code through WH_MOUSE_LL. The already-running
-                // watchdog remains the fail-open owner when a subscriber cannot accept notice.
-            }
-        }
-    }
-
-    private void OnOverlayGuardedActionRequested(
-        object? sender,
-        GuardedOverlayActionRequestedEventArgs e)
-    {
-        EventHandler? callback;
-        GuardedAlertFailOpenEventArgs? failure = null;
-        int failureGeneration = 0;
-        lock (stateGate)
-        {
-            if (!ReferenceEquals(sender, overlay) || isDisposed || !isGuardedAlertActive ||
-                !isGuardedOverlayPresented || generation != e.Generation)
-            {
-                return;
-            }
-
-            if (e.Action == GuardedOverlayAction.ContinueMonitoring)
-            {
-                // The full-desktop overlay still owns input here. Install the one-click native
-                // gate before removing that HWND, so Continue never exposes an unguarded gap.
-                if (!pendingMouseInputGuard.AwaitNextCausativeClick())
-                {
-                    isGuardedFailurePending = true;
-                    failureGeneration = ++generation;
-                    callback = null;
-                    failure = new GuardedAlertFailOpenEventArgs(
-                        GuardedAlertFailOpenReason.InputGuardUnavailable,
-                        "The Guarded mouse input hook could not resume after manual review.");
-                }
-                else
-                {
-                    guardedPassCycleReady = true;
-                    isGuardedOverlayPresented = false;
-                    generation++;
-                    guardedPassCycleAcknowledgementPending = true;
-                    callback = GuardedContinueRequested;
-                }
-            }
-            else
-            {
-                isGuardedAlertActive = false;
-                isGuardedOverlayPresented = false;
-                guardedPassCycleReady = false;
-                guardedPassCycleAcknowledgementPending = false;
-                generation++;
-                pendingMouseInputGuard.Release();
-                callback = GuardedStopRequested;
-            }
-        }
-
-        if (failure is not null)
-        {
-            overlay?.ReleaseForReuse();
-            RaiseGuardedFailOpenSafely(failure);
-            CompleteGuardedFailOpen(failureGeneration);
-            return;
-        }
-
-        if (e.Action == GuardedOverlayAction.ContinueMonitoring)
-        {
-            // The one-shot hook is installed, but keep the yellow HWND blocking until the monitor
-            // has synchronously left PausedUncertain. Otherwise an extremely fast complete click
-            // can land after the overlay disappears while the monitor still rejects its native
-            // started/completed notifications. The monitor's duplicate Await request is consumed
-            // as the acknowledgement prepared above.
-            callback?.Invoke(this, EventArgs.Empty);
-            overlay?.ReleaseForReuse();
-            return;
-        }
-
-        // Stop has already begun terminal native release; no monitoring state needs to accept a
-        // future click before the overlay can leave.
-        overlay?.ReleaseForReuse();
-        callback?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnOverlayAcknowledgementRequested(

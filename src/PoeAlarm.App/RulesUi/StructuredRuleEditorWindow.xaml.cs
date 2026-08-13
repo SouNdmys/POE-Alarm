@@ -6,7 +6,7 @@ using PoeAlarm.Core.Rules;
 namespace PoeAlarm.App.RulesUi;
 
 /// <summary>
-/// Structured editor for the vNext multi-affix rule set. The supplied definition is copied into
+/// Editor for the versioned multi-affix rule set. The supplied definition is copied into
 /// editable view models; <see cref="Result"/> is assigned only after successful compilation.
 /// </summary>
 public partial class StructuredRuleEditorWindow : Window

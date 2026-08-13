@@ -10,8 +10,7 @@ public sealed record OcrRecognitionResult(
     LogicalAffixMatch? TargetAssistedMatch = null,
     bool RequiresRescan = false,
     IReadOnlyList<OcrAssistedObservation>? AssistedObservations = null,
-    IReadOnlyList<OcrPhysicalLine>? PhysicalLines = null,
-    IReadOnlyList<OcrCandidateEvidence>? CandidateEvidence = null)
+    IReadOnlyList<OcrPhysicalLine>? PhysicalLines = null)
 {
     public TimeSpan TotalElapsed => PreprocessingElapsed + RecognitionElapsed;
 
@@ -29,9 +28,6 @@ public sealed record OcrRecognitionResult(
     /// Empty logical-boundary entries intentionally have no projection.
     /// </summary>
     public IReadOnlyList<OcrPhysicalLine> BatchPhysicalLines => PhysicalLines ?? [];
-
-    /// <summary>Conservative localized near-target evidence for Guarded policy only.</summary>
-    public IReadOnlyList<OcrCandidateEvidence> BatchCandidateEvidence => CandidateEvidence ?? [];
 }
 
 /// <summary>
@@ -61,27 +57,3 @@ public sealed record OcrAssistedObservation(
             ? RelatedPhysicalBandIds
             : [PhysicalBandId];
 }
-
-public enum OcrCandidateEvidenceKind
-{
-    /// <summary>A bounded lexical locator fired, but independent strict verification failed.</summary>
-    LocalizedLexicalCandidate,
-
-    /// <summary>The target-related transcript omitted at least one numeric token.</summary>
-    MissingNumericValue,
-
-    /// <summary>The transcript had an incompatible numeric-token shape.</summary>
-    ConflictingNumericValue,
-}
-
-/// <summary>
-/// A physical row looked like one compiled target but did not pass authoritative strict
-/// recognition. Rule matching must ignore this; guarded monitoring may pause for confirmation.
-/// </summary>
-public sealed record OcrCandidateEvidence(
-    string PhysicalBandId,
-    string ObservedText,
-    string CandidateTarget,
-    OcrCandidateEvidenceKind Kind,
-    int SourceTop,
-    int SourceBottom);

@@ -34,7 +34,6 @@ var tests = new (string Name, Action Run)[]
     ("Specific affix semantics stay distinct", SpecificAffixSemanticsStayDistinct),
     ("Invalid rules are rejected with validation details", InvalidRulesAreRejectedWithValidationDetails),
     ("Evaluation explains matches and numeric failures", EvaluationExplainsMatchesAndNumericFailures),
-    ("Missing constrained numeric evidence is explicit", MissingConstrainedNumericEvidenceIsExplicit),
     ("Twenty-condition evaluation remains sub-millisecond per call", TwentyConditionEvaluationRemainsFast),
     ("Dense duplicate assignment remains bounded", DenseDuplicateAssignmentRemainsBounded),
 };
@@ -674,24 +673,6 @@ static void EvaluationExplainsMatchesAndNumericFailures()
     True(!string.IsNullOrWhiteSpace(missEvidence.FailureReason));
     Equal(169m, missEvidence.ActualValues.Single());
     False(missEvidence.NumericSlots.Single().IsMatch);
-}
-
-static void MissingConstrainedNumericEvidenceIsExplicit()
-{
-    var constrained = OneCondition(
-        "#% increased Physical Damage",
-        NumericConstraint.AtLeast(170m));
-    var constrainedEvidence = constrained.Evaluate(["#% increased Physical Damage"])
-        .Groups.Single().Conditions.Single();
-    True(constrainedEvidence.TextMatched);
-    True(constrainedEvidence.HasMissingRequiredNumericValue);
-    False(constrainedEvidence.IsMatched);
-
-    var ignored = OneCondition("#% increased Physical Damage");
-    var ignoredEvidence = ignored.Evaluate(["#% increased Physical Damage"])
-        .Groups.Single().Conditions.Single();
-    True(ignoredEvidence.IsMatched);
-    False(ignoredEvidence.HasMissingRequiredNumericValue);
 }
 
 static void TwentyConditionEvaluationRemainsFast()

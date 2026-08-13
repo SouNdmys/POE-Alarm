@@ -55,15 +55,6 @@ public sealed record ConditionEvaluation(
     public bool NumericConstraintsMatched =>
         TextMatched && NumericSlots.All(static slot => slot.IsSatisfied);
 
-    /// <summary>
-    /// The complete target text was identified, but OCR did not produce a value for one of the
-    /// slots that the rule actually constrains. Fast monitoring treats this as a miss; guarded
-    /// monitoring may pause for manual confirmation. Ignored slots never make evidence uncertain.
-    /// </summary>
-    public bool HasMissingRequiredNumericValue =>
-        TextMatched && NumericSlots.Any(static slot =>
-            slot.Constraint.Mode != NumericConstraintMode.Ignore && slot.ActualValue is null);
-
     public int? StartLineIndex => Observation?.StartLineIndex;
 
     public int? PhysicalLineCount => Observation?.PhysicalLineCount;
