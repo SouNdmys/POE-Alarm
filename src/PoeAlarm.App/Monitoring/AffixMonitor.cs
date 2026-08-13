@@ -18,6 +18,8 @@ public sealed class AffixMonitor : IAsyncDisposable
     private bool _stopInProgress;
     private GuardedPolicyStateMachine? _guardedStateMachine;
     private TaskCompletionSource _guardedResumeSignal = CreateGuardedResumeSignal();
+    private long _guardedCausativeClickCompletedUtcTicks;
+    private int _guardedCausativeClickStarted;
     private Task? _disposeTask;
     private bool _disposed;
 
@@ -185,6 +187,8 @@ public sealed class AffixMonitor : IAsyncDisposable
             _loopCancellation = new CancellationTokenSource();
             _guardedStateMachine = new GuardedPolicyStateMachine(guardedPolicy.Options);
             _guardedResumeSignal = CreateGuardedResumeSignal();
+            Interlocked.Exchange(ref _guardedCausativeClickCompletedUtcTicks, 0);
+            Interlocked.Exchange(ref _guardedCausativeClickStarted, 0);
             _state = MonitorState.Running;
             _loopTask = RunGuardedRuleLoopAsync(
                 rules,
@@ -192,6 +196,49 @@ public sealed class AffixMonitor : IAsyncDisposable
                 _guardedStateMachine,
                 _loopCancellation.Token);
         }
+    }
+
+    /// <summary>
+    /// Delivers the native gate's proof that one complete crafting click reached the game. Frame
+    /// changes are ignored until this signal, so overlay/background changes cannot self-trigger
+    /// a Guarded decision.
+    /// </summary>
+    public bool NotifyGuardedCausativeClickCompleted()
+    {
+        lock (_stateGate)
+        {
+            var guardedState = _guardedStateMachine?.State;
+            if (_disposed ||
+                guardedState is not GuardedSessionState.WaitingForChange and
+                    not GuardedSessionState.PausedUncertain ||
+                _state != MonitorState.Running)
+            {
+                return false;
+            }
+        }
+
+        Interlocked.Exchange(
+            ref _guardedCausativeClickCompletedUtcTicks,
+            DateTimeOffset.UtcNow.UtcDateTime.Ticks);
+        return true;
+    }
+
+    public bool NotifyGuardedCausativeClickStarted()
+    {
+        lock (_stateGate)
+        {
+            var guardedState = _guardedStateMachine?.State;
+            if (_disposed ||
+                guardedState is not GuardedSessionState.WaitingForChange and
+                    not GuardedSessionState.PausedUncertain ||
+                _state != MonitorState.Running)
+            {
+                return false;
+            }
+        }
+
+        Interlocked.Exchange(ref _guardedCausativeClickStarted, 1);
+        return true;
     }
 
     /// <summary>
@@ -600,6 +647,24 @@ public sealed class AffixMonitor : IAsyncDisposable
                 var frame = _screenCapture.Capture(region);
                 var fingerprint = ComputeGuardedFrameFingerprint(frame);
                 var captureElapsed = captureWatch.Elapsed;
+
+                // Drain native click evidence only after the captured frame has its fingerprint.
+                // A complete Down/Up can land while GDI is copying the tooltip. Consuming the
+                // mailbox before Capture would let that changed frame run through the idle path
+                // and replace the pre-click baseline, permanently hiding the crafted result.
+                if (Interlocked.Exchange(ref _guardedCausativeClickStarted, 0) != 0)
+                {
+                    guarded.NotifyCausativeClickStarted();
+                }
+                var causativeClickTicks = Interlocked.Exchange(
+                    ref _guardedCausativeClickCompletedUtcTicks,
+                    0);
+                if (causativeClickTicks != 0)
+                {
+                    guarded.NotifyCausativeClickCompleted(
+                        new DateTimeOffset(causativeClickTicks, TimeSpan.Zero));
+                }
+
                 var frameTransition = guarded.ObserveFrame(fingerprint, DateTimeOffset.UtcNow);
                 ApplyGuardTransition(frameTransition, lastSnapshot: lastSnapshot);
                 if (frameTransition.Decision?.Kind == GuardedDecisionKind.Faulted)

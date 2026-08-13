@@ -8,6 +8,10 @@ using PoeAlarm.Core.Rules;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("startup establishes baseline without guard or OCR", StartupEstablishesBaseline),
+    ("idle visual changes update baseline until causative click", IdleChangesWaitForClick),
+    ("causative down freezes baseline before button-up", CausativeDownFreezesBaseline),
+    ("manual continue ignores overlay changes until causative click", ManualContinueIgnoresOverlayChange),
     ("changed frame waits for stability behind guard", ChangedFrameWaitsForStability),
     ("stable no-match releases without fixed delay", StableNoMatchReleases),
     ("stable match remains guarded", StableMatchRemainsGuarded),
@@ -25,6 +29,10 @@ var tests = new (string Name, Action Run)[]
     ("exception fault transition releases", ExceptionFaultReleases),
     ("match handoff failure faults and cancels the guarded session",
         () => MatchHandoffFailureFaultsAndCancelsAsync().GetAwaiter().GetResult()),
+    ("causative click during capture cannot replace the baseline",
+        () => CausativeClickDuringCaptureIsNotAbsorbedAsync().GetAwaiter().GetResult()),
+    ("complete click at Continue handoff survives paused state",
+        () => PausedWindowClickSurvivesContinueAsync().GetAwaiter().GetResult()),
     ("guard state machine drains suppressed input pairs", InputPairsDrainWithoutReplay),
     ("guard waits for click causing change to release", ExistingClickCompletesBeforeBlocking),
     ("guard passes exactly one complete causative click", OneCausativeClickPassesThenGuards),
@@ -54,14 +62,89 @@ return passed == tests.Length ? 0 : 1;
 static void ChangedFrameWaitsForStability()
 {
     var (machine, now) = Machine(stableFrames: 2, recognitions: 2);
-    var first = machine.ObserveFrame(10, now);
+    var first = machine.ObserveFrame(10, now.AddMilliseconds(3));
     Assert(first.RequestInputGuard, "Changed frame did not synchronously request the guard.");
     Assert(!first.ShouldRecognize && machine.State == GuardedSessionState.WaitingForStableFrame,
         "OCR ran before the semantic frame was stable.");
 
-    var second = machine.ObserveFrame(10, now.AddMilliseconds(1));
+    var second = machine.ObserveFrame(10, now.AddMilliseconds(4));
     Assert(second.RequestInputGuard && second.ShouldRecognize,
         "Second identical frame did not refresh the guard and start OCR.");
+}
+
+static void StartupEstablishesBaseline()
+{
+    var machine = new GuardedPolicyStateMachine(Options(2, 1));
+    var now = DateTimeOffset.UnixEpoch;
+    var first = machine.ObserveFrame(10, now);
+    Assert(machine.State == GuardedSessionState.EstablishingBaseline &&
+           !first.RequestInputGuard && !first.ShouldRecognize && first.Decision is null,
+        "First startup frame armed or evaluated Guarded instead of sampling a baseline.");
+    var second = machine.ObserveFrame(10, now.AddMilliseconds(1));
+    Assert(machine.State == GuardedSessionState.WaitingForChange &&
+           second.AwaitNextCausativeClick && !second.RequestInputGuard &&
+           !second.ShouldRecognize && second.Decision is null,
+        "Stable startup baseline did not enter the unbounded one-click wait.");
+}
+
+static void IdleChangesWaitForClick()
+{
+    var machine = new GuardedPolicyStateMachine(Options(1, 1));
+    var now = DateTimeOffset.UnixEpoch;
+    EstablishBaseline(machine, now, 10);
+    var overlayGone = machine.ObserveFrame(20, now.AddSeconds(30));
+    var hoverSettled = machine.ObserveFrame(30, now.AddMinutes(5));
+    Assert(machine.State == GuardedSessionState.WaitingForChange &&
+           !machine.IsInputGuardHeld && overlayGone.Decision is null &&
+           hoverSettled.Decision is null && !overlayGone.RequestInputGuard,
+        "A pre-click visual change started a decision or timed out.");
+    Assert(machine.NotifyCausativeClickCompleted(now.AddMinutes(5).AddMilliseconds(1)),
+        "Native click completion was not accepted.");
+    var unchanged = machine.ObserveFrame(30, now.AddMinutes(5).AddMilliseconds(2));
+    Assert(!unchanged.RequestInputGuard && !unchanged.ShouldRecognize,
+        "The current pre-click baseline was incorrectly classified as a crafted change.");
+    var crafted = machine.ObserveFrame(31, now.AddMinutes(5).AddMilliseconds(3));
+    Assert(crafted.RequestInputGuard,
+        "A post-click fingerprint change did not start the guarded decision.");
+}
+
+static void ManualContinueIgnoresOverlayChange()
+{
+    var machine = new GuardedPolicyStateMachine(Options(1, 1));
+    var now = DateTimeOffset.UnixEpoch;
+    EstablishBaseline(machine, now, 10);
+    Assert(machine.NotifyCausativeClickCompleted(now.AddMilliseconds(1)),
+        "Initial causative click was not accepted.");
+    _ = machine.ObserveFrame(11, now.AddMilliseconds(2));
+    _ = machine.ObserveRecognition(Evidence(false, "crit:?", true, missing: true));
+    var continued = machine.ContinueAfterUncertain();
+    Assert(continued.AwaitNextCausativeClick,
+        "Continue did not return to one-click wait.");
+    var overlayRemoved = machine.ObserveFrame(99, now.AddSeconds(2));
+    Assert(overlayRemoved.Decision is null && !overlayRemoved.RequestInputGuard &&
+           machine.State == GuardedSessionState.WaitingForChange,
+        "The yellow overlay disappearing immediately retriggered Guarded.");
+    Assert(machine.NotifyCausativeClickCompleted(now.AddSeconds(10)),
+        "Continue's next causative click was not accepted after an unbounded wait.");
+    var crafted = machine.ObserveFrame(100, now.AddSeconds(10).AddMilliseconds(1));
+    Assert(crafted.RequestInputGuard,
+        "The first real post-Continue crafting change was not guarded.");
+}
+
+static void CausativeDownFreezesBaseline()
+{
+    var machine = new GuardedPolicyStateMachine(Options(1, 1));
+    var now = DateTimeOffset.UnixEpoch;
+    EstablishBaseline(machine, now, 10);
+    Assert(machine.NotifyCausativeClickStarted(), "Causative Down was not accepted.");
+    var changedBeforeUp = machine.ObserveFrame(11, now.AddMilliseconds(1));
+    Assert(!changedBeforeUp.RequestInputGuard && machine.State == GuardedSessionState.WaitingForChange,
+        "Frame capture before Up should remain pass-through while retaining the old baseline.");
+    Assert(machine.NotifyCausativeClickCompleted(now.AddMilliseconds(2)),
+        "Causative Up was not accepted.");
+    var afterUp = machine.ObserveFrame(11, now.AddMilliseconds(3));
+    Assert(afterUp.RequestInputGuard && afterUp.ShouldRecognize,
+        "The roll visible between Down and Up was absorbed into the baseline and missed.");
 }
 
 static void StableNoMatchReleases()
@@ -186,6 +269,9 @@ static void UnstableFramesPause()
     };
     var machine = new GuardedPolicyStateMachine(options);
     var now = DateTimeOffset.UnixEpoch;
+    EstablishBaseline(machine, now, 9, stableFrames: 2);
+    Assert(machine.NotifyCausativeClickCompleted(now.AddTicks(1)),
+        "Unstable-frame fixture did not enter a causative decision.");
     _ = machine.ObserveFrame(10, now);
     _ = machine.ObserveFrame(11, now.AddMilliseconds(1));
     _ = machine.ObserveFrame(12, now.AddMilliseconds(2));
@@ -201,6 +287,9 @@ static void ProgressiveRescanIsBounded()
         MaximumRecognitionRescans = 2,
     };
     var machine = new GuardedPolicyStateMachine(options);
+    EstablishBaseline(machine, DateTimeOffset.UnixEpoch, 9);
+    Assert(machine.NotifyCausativeClickCompleted(DateTimeOffset.UnixEpoch.AddTicks(1)),
+        "Progressive fixture did not enter a causative decision.");
     _ = machine.ObserveFrame(10, DateTimeOffset.UnixEpoch);
     var first = machine.ObserveRecognition(Evidence(false, "none", rescan: true));
     Assert(first.Decision is null, "One progressive slice paused too early.");
@@ -238,8 +327,11 @@ static void WatchdogFaultsOpen()
     var options = Options(2, 1) with { DecisionTimeout = TimeSpan.FromMilliseconds(100) };
     var machine = new GuardedPolicyStateMachine(options);
     var now = DateTimeOffset.UnixEpoch;
-    _ = machine.ObserveFrame(10, now);
-    var result = machine.ObserveFrame(10, now.AddMilliseconds(100));
+    EstablishBaseline(machine, now, 9, stableFrames: 2);
+    Assert(machine.NotifyCausativeClickCompleted(now.AddTicks(1)),
+        "Watchdog fixture did not enter a causative decision.");
+    _ = machine.ObserveFrame(10, now.AddTicks(2));
+    var result = machine.ObserveFrame(10, now.AddMilliseconds(101));
     Assert(result.Decision?.Kind == GuardedDecisionKind.Faulted &&
            result.Decision.FaultReason == GuardedFaultReason.DecisionTimedOut &&
            result.ReleaseInputGuard && !machine.IsInputGuardHeld,
@@ -264,6 +356,12 @@ static async Task MatchHandoffFailureFaultsAndCancelsAsync()
     var matchObserved = new TaskCompletionSource(
         TaskCreationOptions.RunContinuationsAsynchronously);
     var decisions = new List<GuardedDecisionEventArgs>();
+    monitor.GuardedPassCycleRequested += (_, _) =>
+    {
+        recognizer.AdvanceFingerprint();
+        Assert(monitor.NotifyGuardedCausativeClickCompleted(),
+            "Integration fixture did not deliver its simulated causative click.");
+    };
     monitor.GuardedDecisionChanged += (_, decision) =>
     {
         lock (decisions)
@@ -332,6 +430,109 @@ static async Task MatchHandoffFailureFaultsAndCancelsAsync()
         "The post-match protection failure did not publish an explainable terminal Faulted decision.");
 }
 
+static async Task CausativeClickDuringCaptureIsNotAbsorbedAsync()
+{
+    using var capture = new GuardedInjectingCapture();
+    using var recognizer = new GuardedMatchRecognizer();
+    await using var monitor = new AffixMonitor(capture, recognizer);
+    var detected = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    monitor.AffixDetected += (_, _) => detected.TrySetResult();
+    monitor.GuardedPassCycleRequested += (_, _) =>
+    {
+        capture.InjectOnNextCapture(() =>
+        {
+            recognizer.AdvanceFingerprint();
+            Assert(monitor.NotifyGuardedCausativeClickStarted(),
+                "Causative Down delivered during Capture was rejected.");
+            Assert(monitor.NotifyGuardedCausativeClickCompleted(),
+                "Causative Up delivered during Capture was rejected.");
+        });
+    };
+
+    monitor.Start(
+        GuardedLifeRules(),
+        new ScreenRegion(0, 0, 1, 1),
+        new GuardedMonitoringPolicy(new GuardedPolicyOptions
+        {
+            RequiredStableFrames = 1,
+            RequiredConsistentRecognitions = 1,
+            DecisionTimeout = TimeSpan.FromMilliseconds(500),
+        }));
+
+    await detected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    Assert(monitor.State == MonitorState.MatchFound,
+        "A click completed during Capture was absorbed into the idle baseline.");
+}
+
+static async Task PausedWindowClickSurvivesContinueAsync()
+{
+    using var capture = new GuardedMatchCapture();
+    using var recognizer = new GuardedPauseThenMatchRecognizer();
+    await using var monitor = new AffixMonitor(capture, recognizer);
+    var paused = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    var detected = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    var passCycleCount = 0;
+    monitor.GuardedDecisionChanged += (_, decision) =>
+    {
+        if (decision.Decision == GuardedDecisionKind.Uncertain)
+        {
+            paused.TrySetResult();
+        }
+    };
+    monitor.AffixDetected += (_, _) => detected.TrySetResult();
+    monitor.GuardedPassCycleRequested += (_, _) =>
+    {
+        if (Interlocked.Increment(ref passCycleCount) != 1)
+        {
+            return;
+        }
+
+        recognizer.AdvanceFingerprint();
+        Assert(monitor.NotifyGuardedCausativeClickStarted(),
+            "Initial causative Down was rejected.");
+        Assert(monitor.NotifyGuardedCausativeClickCompleted(),
+            "Initial causative Up was rejected.");
+    };
+
+    monitor.Start(
+        GuardedLifeRules(),
+        new ScreenRegion(0, 0, 1, 1),
+        new GuardedMonitoringPolicy(new GuardedPolicyOptions
+        {
+            RequiredStableFrames = 1,
+            RequiredConsistentRecognitions = 1,
+            DecisionTimeout = TimeSpan.FromMilliseconds(500),
+        }));
+
+    await paused.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    Assert(monitor.GuardedState == GuardedSessionState.PausedUncertain,
+        "Fixture did not enter the yellow review state.");
+
+    // Reproduce the old overlay-release window: the native one-shot click completes while the
+    // application callback has not yet moved the monitor out of PausedUncertain.
+    Assert(monitor.NotifyGuardedCausativeClickStarted(),
+        "A fast Down at the Continue handoff was dropped while paused.");
+    recognizer.AdvanceFingerprintAndMatch();
+    Assert(monitor.NotifyGuardedCausativeClickCompleted(),
+        "A fast Up at the Continue handoff was dropped while paused.");
+    Assert(monitor.ContinueGuarded(),
+        "Continue did not resume after the handoff click was buffered.");
+
+    await detected.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    Assert(monitor.State == MonitorState.MatchFound && passCycleCount == 2,
+        "The buffered Continue-handoff click did not drive the next guarded decision.");
+}
+
+static CompiledRuleSet GuardedLifeRules() => RuleCompiler.Compile(new RuleSetDefinition(
+    "guarded life",
+    [new AcceptableResultGroup(
+        "target",
+        ResultGroupMode.Any,
+        [new AffixCondition("life", "+# to maximum Life")])]));
+
 static void InputPairsDrainWithoutReplay()
 {
     var buttons = new[]
@@ -391,9 +592,9 @@ static void OneCausativeClickPassesThenGuards()
             $"Button bit {button} did not enter the one-shot pass-through state.");
 
         var allowedDown = state.ProcessButton(button, isDown: true);
-        Assert(!allowedDown.Suppress &&
+        Assert(!allowedDown.Suppress && allowedDown.CausativeClickStarted &&
                state.Mode == PoeAlarm.App.Alerts.MouseInputGuardMode.WaitingForExistingRelease,
-            $"The one allowed Down for bit {button} was suppressed.");
+            $"The one allowed Down for bit {button} was suppressed or not reported.");
         var allowedUp = state.ProcessButton(button, isDown: false);
         Assert(!allowedUp.Suppress && allowedUp.CausativeClickCompleted &&
                state.Mode == PoeAlarm.App.Alerts.MouseInputGuardMode.Guarding,
@@ -496,9 +697,32 @@ static void InitialHeldInputDoesNotCompleteCycle()
 
 static (GuardedPolicyStateMachine Machine, DateTimeOffset Now) Machine(
     int stableFrames,
-    int recognitions) =>
-    (new GuardedPolicyStateMachine(Options(stableFrames, recognitions)),
-        DateTimeOffset.UnixEpoch);
+    int recognitions)
+{
+    var machine = new GuardedPolicyStateMachine(Options(stableFrames, recognitions));
+    var now = DateTimeOffset.UnixEpoch;
+    EstablishBaseline(machine, now, fingerprint: 9, stableFrames);
+    Assert(machine.NotifyCausativeClickCompleted(now.AddTicks(1)),
+        "Fixture did not enter a causative decision after establishing its baseline.");
+    return (machine, now);
+}
+
+static void EstablishBaseline(
+    GuardedPolicyStateMachine machine,
+    DateTimeOffset now,
+    ulong fingerprint,
+    int stableFrames = 1)
+{
+    GuardedFrameTransition transition = default;
+    for (var index = 0; index < stableFrames; index++)
+    {
+        transition = machine.ObserveFrame(fingerprint, now.AddTicks(index));
+    }
+
+    Assert(machine.State == GuardedSessionState.WaitingForChange &&
+           transition.AwaitNextCausativeClick,
+        "Fixture could not establish the Guarded startup baseline.");
+}
 
 static GuardedPolicyOptions Options(int stableFrames, int recognitions) => new()
 {
@@ -542,12 +766,41 @@ sealed class GuardedMatchCapture : IScreenCapture
     }
 }
 
+sealed class GuardedInjectingCapture : IScreenCapture
+{
+    private static readonly CapturedFrame Frame = new(
+        1,
+        1,
+        4,
+        [0, 0, 0, 255],
+        DateTimeOffset.UnixEpoch);
+    private Action? _nextCapture;
+
+    public void InjectOnNextCapture(Action action) =>
+        Interlocked.Exchange(ref _nextCapture, action);
+
+    public CapturedFrame Capture(ScreenRegion region)
+    {
+        Interlocked.Exchange(ref _nextCapture, null)?.Invoke();
+        return Frame;
+    }
+
+    public void Dispose()
+    {
+    }
+}
+
 sealed class GuardedMatchRecognizer : IOcrRecognizer, IFrameFingerprintProvider
 {
+    private long _fingerprint = 0xA11CE;
+
     public StructuredRuleOcrSupport StructuredRuleSupport =>
         StructuredRuleOcrSupport.StrictBatch;
 
-    public ulong ComputeFrameFingerprint(CapturedFrame frame) => 0xA11CEUL;
+    public ulong ComputeFrameFingerprint(CapturedFrame frame) =>
+        unchecked((ulong)Interlocked.Read(ref _fingerprint));
+
+    public void AdvanceFingerprint() => Interlocked.Increment(ref _fingerprint);
 
     public Task<OcrRecognitionResult> RecognizeAsync(
         CapturedFrame frame,
@@ -562,6 +815,64 @@ sealed class GuardedMatchRecognizer : IOcrRecognizer, IFrameFingerprintProvider
             ["+70 to maximum Life"],
             TimeSpan.Zero,
             TimeSpan.Zero));
+
+    public void Dispose()
+    {
+    }
+}
+
+sealed class GuardedPauseThenMatchRecognizer : IOcrRecognizer, IFrameFingerprintProvider
+{
+    private long _fingerprint = 0xBEE;
+    private int _returnMatch;
+
+    public StructuredRuleOcrSupport StructuredRuleSupport =>
+        StructuredRuleOcrSupport.StrictBatch;
+
+    public ulong ComputeFrameFingerprint(CapturedFrame frame) =>
+        unchecked((ulong)Interlocked.Read(ref _fingerprint));
+
+    public void AdvanceFingerprint() => Interlocked.Increment(ref _fingerprint);
+
+    public void AdvanceFingerprintAndMatch()
+    {
+        Interlocked.Exchange(ref _returnMatch, 1);
+        AdvanceFingerprint();
+    }
+
+    public Task<OcrRecognitionResult> RecognizeAsync(
+        CapturedFrame frame,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("Guarded fixture expected batch recognition.");
+
+    public Task<OcrRecognitionResult> RecognizeAsync(
+        CapturedFrame frame,
+        IReadOnlyList<FullLineAffixMatcher> targets,
+        CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _returnMatch) != 0)
+        {
+            return Task.FromResult(new OcrRecognitionResult(
+                ["+70 to maximum Life"],
+                TimeSpan.Zero,
+                TimeSpan.Zero));
+        }
+
+        return Task.FromResult(new OcrRecognitionResult(
+            ["unrelated"],
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            CandidateEvidence:
+            [
+                new OcrCandidateEvidence(
+                    "life-row",
+                    "+? to maximum Life",
+                    targets[0].Template.Text,
+                    OcrCandidateEvidenceKind.LocalizedLexicalCandidate,
+                    0,
+                    1),
+            ]));
+    }
 
     public void Dispose()
     {

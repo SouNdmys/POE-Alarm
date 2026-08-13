@@ -49,6 +49,7 @@ public sealed class LatchedAlertService : IAlertService
         ArgumentNullException.ThrowIfNull(dispatcher);
         this.dispatcher = dispatcher;
         pendingMouseInputGuard.CausativeClickCompleted += OnCausativeClickCompleted;
+        pendingMouseInputGuard.CausativeClickStarted += OnCausativeClickStarted;
     }
 
     public bool IsActive
@@ -91,6 +92,10 @@ public sealed class LatchedAlertService : IAlertService
     public event EventHandler? GuardedStopRequested;
 
     public event EventHandler<GuardedAlertFailOpenEventArgs>? GuardedFailOpen;
+
+    public event EventHandler? GuardedCausativeClickCompleted;
+
+    public event EventHandler? GuardedCausativeClickStarted;
 
     public void Configure(string? customWavePath, bool excludeOverlayFromCapture)
     {
@@ -411,9 +416,19 @@ public sealed class LatchedAlertService : IAlertService
         int failureGeneration = 0;
         lock (stateGate)
         {
-            if (isDisposed || isActive || !isGuardedAlertActive || isGuardedFailurePending)
+            if (isDisposed || isActive || isGuardedFailurePending)
             {
                 return false;
+            }
+
+            if (!isGuardedAlertActive)
+            {
+                // Initial baseline establishment has no pending decision to arm. Enter the same
+                // unbounded one-shot phase used after a conclusive miss without inventing a
+                // startup timeout or briefly blocking the user's mouse.
+                isGuardedAlertActive = true;
+                isGuardedOverlayPresented = false;
+                isGuardedRedHandoff = false;
             }
 
             if (guardedPassCycleAcknowledgementPending)
@@ -626,6 +641,7 @@ public sealed class LatchedAlertService : IAlertService
             guardedPassCycleAcknowledgementPending = false;
             generation++;
             pendingMouseInputGuard.CausativeClickCompleted -= OnCausativeClickCompleted;
+            pendingMouseInputGuard.CausativeClickStarted -= OnCausativeClickStarted;
             sound.Stop();
             sound.Dispose();
             pendingMouseInputGuard.Dispose();
@@ -1083,6 +1099,47 @@ public sealed class LatchedAlertService : IAlertService
         }
 
         _ = FailOpenGuardedInputGuardAsync(watchdogGeneration, watchdogTimeout);
+        RaiseGuardedCausativeClickCompletedSafely();
+    }
+
+    private void OnCausativeClickStarted(object? sender, EventArgs e)
+    {
+        lock (stateGate)
+        {
+            if (isDisposed || isActive || !isGuardedAlertActive || isGuardedOverlayPresented ||
+                isGuardedFailurePending || !guardedPassCycleReady)
+            {
+                return;
+            }
+        }
+
+        RaiseGuardedCausativeClickEventSafely(GuardedCausativeClickStarted);
+    }
+
+    private void RaiseGuardedCausativeClickCompletedSafely()
+    {
+        RaiseGuardedCausativeClickEventSafely(GuardedCausativeClickCompleted);
+    }
+
+    private void RaiseGuardedCausativeClickEventSafely(EventHandler? handlers)
+    {
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, EventArgs.Empty);
+            }
+            catch
+            {
+                // Never unwind application code through WH_MOUSE_LL. The already-running
+                // watchdog remains the fail-open owner when a subscriber cannot accept notice.
+            }
+        }
     }
 
     private void OnOverlayGuardedActionRequested(
@@ -1134,16 +1191,29 @@ public sealed class LatchedAlertService : IAlertService
             }
         }
 
-        // The replacement native owner is now active (Continue), or terminal input release has
-        // begun (Stop). It is safe to remove the yellow HWND before invoking application code.
-        overlay?.ReleaseForReuse();
         if (failure is not null)
         {
+            overlay?.ReleaseForReuse();
             RaiseGuardedFailOpenSafely(failure);
             CompleteGuardedFailOpen(failureGeneration);
             return;
         }
 
+        if (e.Action == GuardedOverlayAction.ContinueMonitoring)
+        {
+            // The one-shot hook is installed, but keep the yellow HWND blocking until the monitor
+            // has synchronously left PausedUncertain. Otherwise an extremely fast complete click
+            // can land after the overlay disappears while the monitor still rejects its native
+            // started/completed notifications. The monitor's duplicate Await request is consumed
+            // as the acknowledgement prepared above.
+            callback?.Invoke(this, EventArgs.Empty);
+            overlay?.ReleaseForReuse();
+            return;
+        }
+
+        // Stop has already begun terminal native release; no monitoring state needs to accept a
+        // future click before the overlay can leave.
+        overlay?.ReleaseForReuse();
         callback?.Invoke(this, EventArgs.Empty);
     }
 

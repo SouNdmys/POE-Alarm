@@ -27,6 +27,7 @@ public partial class MainWindow : Window
 {
     private readonly SettingsStore _settingsStore;
     private readonly IAlertService _alertService;
+    private readonly SemaphoreSlim _settingsSaveGate = new(1, 1);
     private AffixMonitor? _monitor;
     private MonitoringHudWindow? _monitoringHud;
     private GlobalHotKeyRegistration? _acknowledgementHotKey;
@@ -51,8 +52,11 @@ public partial class MainWindow : Window
     private bool _isSelectingRegion;
     private bool _isStartingMonitoring;
     private bool _guardedInputProtectionFailed;
+    private bool _isAnalyzingScreenshot;
     private bool _isClosing;
     private bool _closeReady;
+    private CancellationTokenSource? _screenshotAnalysisCancellation;
+    private Task? _screenshotAnalysisTask;
     private long _lastUiUpdateTimestamp;
     private long _nextMonitoringSession;
     private long _activeMonitoringSession;
@@ -71,6 +75,8 @@ public partial class MainWindow : Window
         _alertService.GuardedContinueRequested += OnGuardedContinueRequested;
         _alertService.GuardedStopRequested += OnGuardedStopRequested;
         _alertService.GuardedFailOpen += OnGuardedFailOpen;
+        _alertService.GuardedCausativeClickCompleted += OnGuardedCausativeClickCompleted;
+        _alertService.GuardedCausativeClickStarted += OnGuardedCausativeClickStarted;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -235,7 +241,8 @@ public partial class MainWindow : Window
         object sender,
         System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (!_isLoaded || _isApplyingProfileSettings || MonitoringPolicyComboBox is null)
+        if (!_isLoaded || _isClosing || _isApplyingProfileSettings ||
+            MonitoringPolicyComboBox is null)
         {
             return;
         }
@@ -367,7 +374,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog
         {
             Title = UiText.Current.ChooseWave,
-            Filter = "WAV (*.wav)|*.wav|All files (*.*)|*.*",
+            Filter = UiText.Current.WaveDialogFilter,
             CheckFileExists = true,
         };
         if (dialog.ShowDialog(this) != true)
@@ -375,9 +382,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!LoopingAlertSound.TryValidateCustomWaveFile(dialog.FileName, out var error))
+        if (!LoopingAlertSound.TryValidateCustomWaveFile(dialog.FileName, out _))
         {
-            ShowValidationMessage($"{UiText.Current.InvalidWave} {error}");
+            ShowValidationMessage(UiText.Current.InvalidWave);
             return;
         }
 
@@ -636,33 +643,90 @@ public partial class MainWindow : Window
 
     private async void OnAnalyzeScreenshot(object sender, RoutedEventArgs e)
     {
-        await StopMonitorAsync(showIdleStatus: false);
-        var dialog = new OpenFileDialog
+        if (_isClosing || _isAnalyzingScreenshot)
         {
-            Title = UiText.Current.ScreenshotDialogTitle,
-            Filter = UiText.Current.ScreenshotDialogFilter,
-            CheckFileExists = true,
-        };
-
-        if (dialog.ShowDialog(this) != true)
-        {
-            SetStatus(UiText.Current.ScreenshotCancelled, UiStatusKind.Neutral);
             return;
         }
 
-        SetStatus(UiText.Current.ScreenshotAnalyzing, UiStatusKind.Neutral);
-        await Task.Yield();
-
+        _isAnalyzingScreenshot = true;
+        AnalyzeScreenshotButton.IsEnabled = false;
+        CancellationTokenSource? cancellation = null;
+        Task? analysisTask = null;
         try
         {
+            await StopMonitorAsync(showIdleStatus: false);
+            if (_isClosing)
+            {
+                return;
+            }
+
+            var dialog = new OpenFileDialog
+            {
+                Title = UiText.Current.ScreenshotDialogTitle,
+                Filter = UiText.Current.ScreenshotDialogFilter,
+                CheckFileExists = true,
+            };
+
+            if (dialog.ShowDialog(this) != true)
+            {
+                SetStatus(UiText.Current.ScreenshotCancelled, UiStatusKind.Neutral);
+                return;
+            }
+
+            if (_isClosing)
+            {
+                return;
+            }
+
+            SetStatus(UiText.Current.ScreenshotAnalyzing, UiStatusKind.Neutral);
+            await Task.Yield();
+            if (_isClosing)
+            {
+                return;
+            }
+
+            cancellation = new CancellationTokenSource();
+            _screenshotAnalysisCancellation = cancellation;
             // The replay loader is kept separate from live capture so the exact same OCR
             // and matcher can be regression-tested against recorded screenshots.
-            await AnalyzeScreenshotAsync(dialog.FileName);
+            analysisTask = AnalyzeScreenshotAsync(dialog.FileName, cancellation.Token);
+            _screenshotAnalysisTask = analysisTask;
+            await analysisTask;
+        }
+        catch (OperationCanceledException) when (
+            cancellation?.IsCancellationRequested == true || _isClosing)
+        {
+            // Closing owns cancellation. A replay that finishes after shutdown begins must not
+            // update controls or create a late alert overlay.
         }
         catch (Exception exception)
         {
+            if (_isClosing)
+            {
+                return;
+            }
+
             SystemSounds.Exclamation.Play();
             SetStatus(UiText.Current.ScreenshotFailed(exception.Message), UiStatusKind.Warning);
+        }
+        finally
+        {
+            if (ReferenceEquals(_screenshotAnalysisTask, analysisTask))
+            {
+                _screenshotAnalysisTask = null;
+            }
+
+            if (ReferenceEquals(_screenshotAnalysisCancellation, cancellation))
+            {
+                _screenshotAnalysisCancellation = null;
+            }
+
+            cancellation?.Dispose();
+            _isAnalyzingScreenshot = false;
+            if (!_isClosing)
+            {
+                AnalyzeScreenshotButton.IsEnabled = true;
+            }
         }
     }
 
@@ -917,6 +981,22 @@ public partial class MainWindow : Window
                 _captureRegion))
         {
             _guardedInputProtectionFailed = true;
+        }
+    }
+
+    private void OnGuardedCausativeClickCompleted(object? sender, EventArgs e)
+    {
+        if (!_isClosing && Interlocked.Read(ref _activeMonitoringSession) != 0)
+        {
+            _monitor?.NotifyGuardedCausativeClickCompleted();
+        }
+    }
+
+    private void OnGuardedCausativeClickStarted(object? sender, EventArgs e)
+    {
+        if (!_isClosing && Interlocked.Read(ref _activeMonitoringSession) != 0)
+        {
+            _monitor?.NotifyGuardedCausativeClickStarted();
         }
     }
 
@@ -1198,9 +1278,7 @@ public partial class MainWindow : Window
         StartHotKeyLabelText.Text = text.StartHotKeyLabel;
         SimplifiedChineseUiOption.Content = text.UiLanguageChinese;
         EnglishUiOption.Content = text.UiLanguageEnglish;
-        MonitoringHudLabelText.Text = text.LanguageCode == "en"
-            ? "Status HUD"
-            : "状态浮窗";
+        MonitoringHudLabelText.Text = text.MonitoringHudLabel;
         KeepHudVisibleCheckBox.Content = text.KeepHudVisible;
         MonitoringHudDescriptionText.Text = text.HudPreferenceDescription;
         PositionHudButton.Content = _isHudPlacementMode
@@ -1584,11 +1662,13 @@ public partial class MainWindow : Window
         SystemSounds.Exclamation.Play();
     }
 
-    private async Task AnalyzeScreenshotAsync(string path)
+    private async Task AnalyzeScreenshotAsync(
+        string path,
+        CancellationToken cancellationToken)
     {
         if (_ruleEditorMode == RuleEditorMode.Structured)
         {
-            await AnalyzeStructuredScreenshotAsync(path);
+            await AnalyzeStructuredScreenshotAsync(path, cancellationToken);
             return;
         }
 
@@ -1608,9 +1688,11 @@ public partial class MainWindow : Window
                 path,
                 template,
                 _captureRegion,
-                maximumLineSpan);
+                maximumLineSpan,
+                cancellationToken);
         }
-        catch (ArgumentOutOfRangeException) when (_captureRegion is not null)
+        catch (ArgumentOutOfRangeException) when (
+            _captureRegion is not null && !cancellationToken.IsCancellationRequested)
         {
             // A crop selected on a different monitor layout may not fit an archived image.
             // Falling back keeps screenshot replay useful; the OCR output makes misses visible.
@@ -1618,7 +1700,14 @@ public partial class MainWindow : Window
                 path,
                 template,
                 cropRegion: null,
-                maximumLineSpan);
+                maximumLineSpan,
+                cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_isClosing)
+        {
+            return;
         }
 
         OcrOutputTextBox.Text = analysis.Lines.Count == 0
@@ -1644,7 +1733,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task AnalyzeStructuredScreenshotAsync(string path)
+    private async Task AnalyzeStructuredScreenshotAsync(
+        string path,
+        CancellationToken cancellationToken)
     {
         if (_structuredRuleSet is null)
         {
@@ -1662,11 +1753,26 @@ public partial class MainWindow : Window
         ScreenshotRuleAnalysis analysis;
         try
         {
-            analysis = await analyzer.AnalyzeRulesAsync(path, rules, _captureRegion);
+            analysis = await analyzer.AnalyzeRulesAsync(
+                path,
+                rules,
+                _captureRegion,
+                cancellationToken);
         }
-        catch (ArgumentOutOfRangeException) when (_captureRegion is not null)
+        catch (ArgumentOutOfRangeException) when (
+            _captureRegion is not null && !cancellationToken.IsCancellationRequested)
         {
-            analysis = await analyzer.AnalyzeRulesAsync(path, rules, cropRegion: null);
+            analysis = await analyzer.AnalyzeRulesAsync(
+                path,
+                rules,
+                cropRegion: null,
+                cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_isClosing)
+        {
+            return;
         }
 
         OcrOutputTextBox.Text = analysis.Lines.Count == 0
@@ -1718,24 +1824,38 @@ public partial class MainWindow : Window
             return;
         }
 
+        var settingsSnapshot = CreateSettingsSnapshot();
+        _settings = settingsSnapshot;
+        await SaveSettingsSnapshotAsync(settingsSnapshot, expectedMonitoringSession);
+    }
+
+    private AppSettings CreateSettingsSnapshot()
+    {
+        CaptureCurrentProfileSettings();
+        return _settings with
+        {
+            SelectedGameProfile = _selectedGameProfile,
+            UiLanguage = _uiLanguage,
+            KeepHudVisible = _keepHudVisible,
+            HudPlacement = _hudPlacement.Sanitize(),
+            AllowOverlayCapture = _allowOverlayCapture,
+            CustomAlertSoundPath = _customAlertSoundPath,
+            StartMonitoringHotKey = _startMonitoringHotKey.SettingValue,
+        };
+    }
+
+    private async Task SaveSettingsSnapshotAsync(
+        AppSettings settingsSnapshot,
+        long? expectedMonitoringSession = null)
+    {
+        await _settingsSaveGate.WaitAsync();
         try
         {
-            CaptureCurrentProfileSettings();
-            _settings = _settings with
-            {
-                SelectedGameProfile = _selectedGameProfile,
-                UiLanguage = _uiLanguage,
-                KeepHudVisible = _keepHudVisible,
-                HudPlacement = _hudPlacement.Sanitize(),
-                AllowOverlayCapture = _allowOverlayCapture,
-                CustomAlertSoundPath = _customAlertSoundPath,
-                StartMonitoringHotKey = _startMonitoringHotKey.SettingValue,
-            };
-            await _settingsStore.SaveAsync(_settings);
+            await _settingsStore.SaveAsync(settingsSnapshot);
         }
         catch (SettingsSchemaTooNewException exception)
         {
-            SetStatus(
+            ReportSettingsStatus(
                 UiText.Current.FutureSettingsReadOnly(exception.DetectedSchemaVersion),
                 UiStatusKind.Warning);
         }
@@ -1748,8 +1868,36 @@ public partial class MainWindow : Window
                 return;
             }
 
-            SetStatus(UiText.Current.SettingsSaveFailed(exception.Message), UiStatusKind.Warning);
+            ReportSettingsStatus(
+                UiText.Current.SettingsSaveFailed(exception.Message),
+                UiStatusKind.Warning);
         }
+        finally
+        {
+            _settingsSaveGate.Release();
+        }
+    }
+
+    private void ReportSettingsStatus(string message, UiStatusKind kind)
+    {
+        if (_isClosing || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            SetStatus(message, kind);
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!_isClosing)
+            {
+                SetStatus(message, kind);
+            }
+        }));
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)
@@ -1767,12 +1915,20 @@ public partial class MainWindow : Window
 
         _isClosing = true;
         IsEnabled = false;
+        var closingSettingsSnapshot = _isLoaded ? CreateSettingsSnapshot() : null;
+        // Screenshot replay owns a separate recognizer and can still be inside native OCR after
+        // it stopped live monitoring. Cancel it before disposing alert/UI resources, then await
+        // its completion below so no late result can race the final Close.
+        _screenshotAnalysisCancellation?.Cancel();
+        var screenshotAnalysisTask = _screenshotAnalysisTask;
         // Fail open first: a blocking alert must disappear before its fallback hotkey is
         // unregistered or any asynchronous shutdown work begins.
         _alertService.Acknowledged -= OnAlertAcknowledged;
         _alertService.GuardedContinueRequested -= OnGuardedContinueRequested;
         _alertService.GuardedStopRequested -= OnGuardedStopRequested;
         _alertService.GuardedFailOpen -= OnGuardedFailOpen;
+        _alertService.GuardedCausativeClickCompleted -= OnGuardedCausativeClickCompleted;
+        _alertService.GuardedCausativeClickStarted -= OnGuardedCausativeClickStarted;
         _alertService.Dispose();
         if (_monitoringHud is not null)
         {
@@ -1788,20 +1944,45 @@ public partial class MainWindow : Window
         _startMonitoringHotKeyRegistration = null;
         try
         {
-            await SaveSettingsAsync();
             await ReleaseMonitorAsync();
         }
         catch (Exception exception)
         {
-            Debug.WriteLine($"POE Alarm shutdown cleanup failed: {exception}");
+            Debug.WriteLine($"POE Alarm monitor shutdown failed: {exception}");
         }
-        finally
+
+        if (screenshotAnalysisTask is not null)
         {
-            _closeReady = true;
-            // Always leave the current WPF Closing call stack before issuing the one real close.
-            // File/monitor cleanup can occasionally complete synchronously; calling Close again
-            // in that case is a forbidden re-entrant close and can surface as CLR 0xe0434352.
-            _ = Dispatcher.BeginInvoke(Close, DispatcherPriority.Normal);
+            try
+            {
+                await screenshotAnalysisTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the user closes while screenshot OCR is in flight.
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine($"POE Alarm screenshot shutdown failed: {exception}");
+            }
         }
+
+        try
+        {
+            if (closingSettingsSnapshot is not null)
+            {
+                await SaveSettingsSnapshotAsync(closingSettingsSnapshot);
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine($"POE Alarm settings shutdown failed: {exception}");
+        }
+
+        _closeReady = true;
+        // Always leave the current WPF Closing call stack before issuing the one real close.
+        // File/monitor cleanup can occasionally complete synchronously; calling Close again
+        // in that case is a forbidden re-entrant close and can surface as CLR 0xe0434352.
+        _ = Dispatcher.BeginInvoke(Close, DispatcherPriority.Normal);
     }
 }

@@ -110,7 +110,7 @@ public static class AffixCanonicalizer
 
     private static string NormalizePresentation(string value)
     {
-        var source = value.Normalize(NormalizationForm.FormKC);
+        var source = OcrNumericPresentationNormalizer.Normalize(value);
         var builder = new StringBuilder(source.Length);
 
         for (var index = 0; index < source.Length; index++)

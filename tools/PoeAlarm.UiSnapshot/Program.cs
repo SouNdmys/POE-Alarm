@@ -12,6 +12,7 @@ using PoeAlarm.App;
 using PoeAlarm.App.Alerts;
 using PoeAlarm.App.Capture;
 using PoeAlarm.App.Configuration;
+using PoeAlarm.App.Localization;
 using PoeAlarm.App.Monitoring;
 using PoeAlarm.App.Monitoring.Policies;
 using PoeAlarm.App.Recognition;
@@ -49,6 +50,9 @@ internal static class Program
         var assertBatchOcrContract = args.Contains("--assert-batch-ocr-contract", StringComparer.OrdinalIgnoreCase);
         var assertBatchOcrSynthetic = args.Contains("--assert-batch-ocr-synthetic", StringComparer.OrdinalIgnoreCase);
         var assertConcurrentDispose = args.Contains("--assert-concurrent-dispose", StringComparer.OrdinalIgnoreCase);
+        var assertCloseDuringStop = args.Contains(
+            "--assert-close-during-stop",
+            StringComparer.OrdinalIgnoreCase);
         var assertInputGuard = args.Contains("--assert-input-guard", StringComparer.OrdinalIgnoreCase);
         var assertGuardedAlert = args.Contains("--assert-guarded-alert", StringComparer.OrdinalIgnoreCase);
         var assertSettingsProfiles = args.Contains(
@@ -56,6 +60,9 @@ internal static class Program
             StringComparer.OrdinalIgnoreCase);
         var assertStartHotKey = args.Contains(
             "--assert-start-hotkey",
+            StringComparer.OrdinalIgnoreCase);
+        var assertPlainLanguageCopy = args.Contains(
+            "--assert-plain-language-copy",
             StringComparer.OrdinalIgnoreCase);
         var hudMode = args.Contains("--hud", StringComparer.OrdinalIgnoreCase);
         var assertHud = args.Contains("--assert-hud", StringComparer.OrdinalIgnoreCase);
@@ -99,6 +106,10 @@ internal static class Program
             if (assertSettingsProfiles)
             {
                 SettingsProfileAssertions.RunAsync().GetAwaiter().GetResult();
+            }
+            if (assertPlainLanguageCopy)
+            {
+                AssertPlainLanguageCopy();
             }
             if (assertMonitorWait)
             {
@@ -150,6 +161,11 @@ internal static class Program
                 AssertConcurrentDisposeAsync().GetAwaiter().GetResult();
             }
 
+            if (assertCloseDuringStop)
+            {
+                AssertCloseDuringAnalyzeStop();
+            }
+
             if (assertInputGuard)
             {
                 AssertPendingMouseInputGuardStateMachine();
@@ -183,7 +199,7 @@ internal static class Program
             }
             else if (guardedAlertMode)
             {
-                RenderGuardedAlert(outputPath);
+                RenderGuardedAlert(outputPath, englishMode);
             }
             else if (alertMode)
             {
@@ -672,6 +688,44 @@ internal static class Program
             "A validated target-assisted result must lock monitoring in MatchFound.");
     }
 
+    private static void AssertPlainLanguageCopy()
+    {
+        var chinese = UiText.For("zh-CN");
+        var english = UiText.For("en");
+        var playerFacingProperties = typeof(UiStrings)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Where(property => property.PropertyType == typeof(string))
+            .ToArray();
+
+        foreach (var property in playerFacingProperties)
+        {
+            var chineseValue = (string?)property.GetValue(chinese) ?? string.Empty;
+            if (property.Name is not nameof(UiStrings.HelpOcrInstallCommand) and
+                not nameof(UiStrings.HelpOcrVerifyCommand))
+            {
+                Assert(!ContainsAny(chineseValue,
+                        "0.6.1", "Mirror Tier", "Catalyst", "tooltip", "数值槽", "发布门禁", "指纹"),
+                    $"Chinese player-facing copy exposes technical wording in {property.Name}: {chineseValue}");
+            }
+
+            if (property.Name == nameof(UiStrings.UiLanguageChinese))
+            {
+                continue;
+            }
+
+            var englishValue = (string?)property.GetValue(english) ?? string.Empty;
+            Assert(!englishValue.Any(character => character is >= '\u3400' and <= '\u9FFF'),
+                $"English player-facing copy contains Chinese characters in {property.Name}: {englishValue}");
+        }
+
+        Assert(!chinese.MonitoringPolicyToolTip.Contains("原有", StringComparison.Ordinal) &&
+               !chinese.FastMonitoringPolicy.Contains("行为", StringComparison.Ordinal),
+            "Click-protection copy describes implementation history instead of player behavior.");
+
+        static bool ContainsAny(string value, params string[] terms) =>
+            terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static void AssertBatchOcrContract()
     {
         AssertStructuredFallbackSelection();
@@ -878,6 +932,14 @@ internal static class Program
             {
                 paused.TrySetResult(decision);
             }
+        };
+        monitor.GuardedPassCycleRequested += (_, _) =>
+        {
+            recognizer.AdvanceFingerprint();
+            Assert(monitor.NotifyGuardedCausativeClickStarted(),
+                "Guarded candidate fixture did not accept the simulated causative Down.");
+            Assert(monitor.NotifyGuardedCausativeClickCompleted(),
+                "Guarded candidate fixture did not accept the simulated causative Up.");
         };
         var rules = RuleCompiler.Compile(new RuleSetDefinition(
             "guarded unresolved candidate",
@@ -1422,7 +1484,7 @@ internal static class Program
                     System.Windows.Controls.ComboBox
                     ?? throw new InvalidOperationException(
                         "Main window game-profile selector was not found.");
-                gameProfile.SelectedValue = "Poe2";
+                SetSnapshotSelection(window, gameProfile, "Poe2");
             }
 
             if (structuredMode)
@@ -1436,7 +1498,19 @@ internal static class Program
                     System.Windows.Controls.ComboBox
                     ?? throw new InvalidOperationException(
                         "Main window monitoring-policy selector was not found.");
-                policy.SelectedValue = "Guarded";
+                SetSnapshotSelection(window, policy, "Guarded");
+                var policyField = typeof(MainWindow).GetField(
+                                      "_monitoringPolicy",
+                                      BindingFlags.Instance | BindingFlags.NonPublic)
+                                  ?? throw new InvalidOperationException(
+                                      "Main window monitoring-policy field was not found.");
+                policyField.SetValue(window, MonitoringPolicyId.Guarded);
+                var updatePolicyMethod = typeof(MainWindow).GetMethod(
+                                             "UpdateMonitoringPolicyUi",
+                                             BindingFlags.Instance | BindingFlags.NonPublic)
+                                         ?? throw new InvalidOperationException(
+                                             "Main window monitoring-policy refresh method was not found.");
+                updatePolicyMethod.Invoke(window, null);
             }
 
             if (bottomMode)
@@ -2002,6 +2076,116 @@ internal static class Program
         public NativeInputUnion Data;
     }
 
+    private static void SetSnapshotSelection(
+        MainWindow window,
+        System.Windows.Controls.ComboBox comboBox,
+        object selectedValue)
+    {
+        var isLoadedField = typeof(MainWindow).GetField(
+                                "_isLoaded",
+                                BindingFlags.Instance | BindingFlags.NonPublic)
+                            ?? throw new InvalidOperationException(
+                                "Main window loaded-state field was not found.");
+        var wasLoaded = (bool)(isLoadedField.GetValue(window) ?? false);
+        isLoadedField.SetValue(window, false);
+        try
+        {
+            comboBox.SelectedValue = selectedValue;
+        }
+        finally
+        {
+            isLoadedField.SetValue(window, wasLoaded);
+        }
+    }
+
+    private static void AssertCloseDuringAnalyzeStop()
+    {
+        var closed = false;
+        var snapshotDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "PoeAlarm.UiSnapshot.CloseDuringStop",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(snapshotDirectory);
+        var window = new MainWindow(
+            new SettingsStore(Path.Combine(snapshotDirectory, "settings.json")))
+        {
+            Left = -10_000,
+            Top = -10_000,
+            ShowActivated = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+        };
+        window.Closed += (_, _) => closed = true;
+
+        var recognizer = new ControlledOcrRecognizer();
+        var monitor = new AffixMonitor(new EmptyCapture(), recognizer);
+        var lateDetectionRaised = false;
+        monitor.AffixDetected += (_, _) => lateDetectionRaised = true;
+        try
+        {
+            window.Show();
+            window.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
+            monitor.Start("increased Attack Speed", new ScreenRegion(0, 0, 1, 1));
+            recognizer.Started.Task.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+
+            var monitorField = typeof(MainWindow).GetField(
+                                   "_monitor",
+                                   BindingFlags.Instance | BindingFlags.NonPublic)
+                               ?? throw new InvalidOperationException(
+                                   "Main-window monitor field was not found.");
+            monitorField.SetValue(window, monitor);
+
+            var analyzeHandler = typeof(MainWindow).GetMethod(
+                                     "OnAnalyzeScreenshot",
+                                     BindingFlags.Instance | BindingFlags.NonPublic)
+                                 ?? throw new InvalidOperationException(
+                                     "Screenshot analyze handler was not found.");
+            analyzeHandler.Invoke(window, [window, new RoutedEventArgs()]);
+
+            var analyzingField = typeof(MainWindow).GetField(
+                                     "_isAnalyzingScreenshot",
+                                     BindingFlags.Instance | BindingFlags.NonPublic)
+                                 ?? throw new InvalidOperationException(
+                                     "Screenshot lifecycle field was not found.");
+            Assert((bool)(analyzingField.GetValue(window) ?? false),
+                "Screenshot analysis did not wait for the in-flight monitor stop.");
+
+            // Reproduce the reported sequence: screenshot analysis has requested Stop, native
+            // OCR is still returning, and the user closes the application. The late completion
+            // must not open a file dialog or alert, and both Stop callers must converge on one
+            // clean window shutdown.
+            BeginMainWindowShutdown(window);
+            recognizer.Complete("increased Attack Speed");
+            PumpDispatcherUntil(
+                () => closed,
+                TimeSpan.FromSeconds(5),
+                "Closing while screenshot analysis waited for monitor Stop deadlocked.");
+
+            Assert(!(bool)(analyzingField.GetValue(window) ?? true),
+                "The cancelled screenshot operation remained active after window shutdown.");
+            Assert(!lateDetectionRaised,
+                "A recognition completed after screenshot Stop/Close raised a late match.");
+            Assert(recognizer.DisposeCount == 1,
+                "Close/Stop concurrency did not dispose the live recognizer exactly once.");
+            Console.WriteLine(
+                "Close-during-stop assertion passed: no late dialog/alert and no shutdown deadlock.");
+        }
+        finally
+        {
+            if (!closed)
+            {
+                recognizer.Complete(string.Empty);
+                BeginMainWindowShutdown(window);
+                PumpDispatcherUntil(
+                    () => closed,
+                    TimeSpan.FromSeconds(5),
+                    "Close-during-stop fixture did not clean up its main window.");
+            }
+
+            Directory.Delete(snapshotDirectory, recursive: true);
+        }
+    }
+
     [StructLayout(LayoutKind.Explicit)]
     private struct NativeInputUnion
     {
@@ -2150,17 +2334,18 @@ internal static class Program
         }
     }
 
-    private static void RenderGuardedAlert(string outputPath)
+    private static void RenderGuardedAlert(string outputPath, bool englishMode)
     {
         var width = Math.Max(1280, (int)Math.Ceiling(SystemParameters.VirtualScreenWidth));
         var height = Math.Max(720, (int)Math.Ceiling(SystemParameters.VirtualScreenHeight));
+        var text = UiText.Use(englishMode ? "en" : "zh-CN");
         var overlay = new AffixHitOverlayWindow();
         overlay.ArmGuarded(
-            "Uncertain Mirror result",
-            "The target affix was found, but its numeric value was missing or conflicted between reads.",
-            "Inspect the item in game, then choose whether monitoring may continue.",
-            "Continue monitoring",
-            "Stop monitoring",
+            text.GuardedUncertainTitle,
+            text.GuardedNumericValueMissing,
+            text.GuardedUncertainInstruction,
+            text.GuardedContinue,
+            text.GuardedStop,
             generation: 999,
             region: null);
 
@@ -2243,6 +2428,11 @@ internal static class Program
         service.GuardedContinueRequested += (_, _) =>
         {
             continueRaised = true;
+            Assert(overlay.IsVisible && overlay.IsHitTestVisible,
+                "Guarded Continue must migrate monitoring state before releasing the yellow overlay.");
+            // This duplicate request is what AffixMonitor.ContinueGuarded synchronously raises.
+            // It must finish while the yellow HWND still prevents a physical click.
+            duplicateAwaitAccepted = service.AwaitNextGuardedClick(TimeSpan.FromSeconds(3));
             Assert(!pendingState.ProcessButton(MouseButtonBits.Left, isDown: true).Suppress,
                 "Continue's deliberately allowed click Down was unexpectedly consumed.");
             var completed = pendingState.ProcessButton(MouseButtonBits.Left, isDown: false);
@@ -2250,9 +2440,8 @@ internal static class Program
                 "Continue's deliberately allowed click did not complete its one-shot cycle.");
             completionMethod.Invoke(service, [pendingGuard, EventArgs.Empty]);
 
-            // This is the exact production ordering when a very fast complete click lands after
-            // the overlay is hidden but before ContinueGuarded raises its duplicate pass request.
-            duplicateAwaitAccepted = service.AwaitNextGuardedClick(TimeSpan.FromSeconds(3));
+            // A direct native-state cycle now models the fastest possible click immediately after
+            // the callback returns and the yellow HWND releases its input shield.
         };
         var continueButton = (System.Windows.Controls.Button)(typeof(AffixHitOverlayWindow).GetField(
             "acknowledgementButton",
@@ -2605,7 +2794,19 @@ internal static class Program
             System.Windows.Controls.ComboBox
             ?? throw new InvalidOperationException(
                 "Main window target-mode selector was not found.");
-        modeCombo.SelectedValue = "Structured";
+        SetSnapshotSelection(window, modeCombo, "Structured");
+        var updateMethod = typeof(MainWindow).GetMethod(
+                               "UpdateRuleEditorUi",
+                               BindingFlags.Instance | BindingFlags.NonPublic)
+                           ?? throw new InvalidOperationException(
+                               "Main window rule-mode refresh method was not found.");
+        var modeField = typeof(MainWindow).GetField(
+                            "_ruleEditorMode",
+                            BindingFlags.Instance | BindingFlags.NonPublic)
+                        ?? throw new InvalidOperationException(
+                            "Main window rule-mode field was not found.");
+        modeField.SetValue(window, RuleEditorMode.Structured);
+        updateMethod.Invoke(window, null);
         window.Dispatcher.Invoke(static () => { }, DispatcherPriority.ApplicationIdle);
     }
 
@@ -2669,7 +2870,12 @@ internal static class Program
         public StructuredRuleOcrSupport StructuredRuleSupport =>
             StructuredRuleOcrSupport.StrictBatch;
 
-        public ulong ComputeFrameFingerprint(CapturedFrame frame) => 0xCA11D1D8UL;
+        private long fingerprint = 0xCA11D1D8L;
+
+        public ulong ComputeFrameFingerprint(CapturedFrame frame) =>
+            unchecked((ulong)Interlocked.Read(ref fingerprint));
+
+        public void AdvanceFingerprint() => Interlocked.Increment(ref fingerprint);
 
         public Task<OcrRecognitionResult> RecognizeAsync(
             CapturedFrame frame,

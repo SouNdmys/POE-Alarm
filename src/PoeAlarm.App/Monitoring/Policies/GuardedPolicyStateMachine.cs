@@ -16,13 +16,15 @@ internal sealed class GuardedPolicyStateMachine
     private bool _previousHadTargetCandidate;
     private int _consistentRecognitionCount;
     private DateTimeOffset? _decisionStartedAt;
+    private bool _causativeClickCompleted;
+    private bool _causativeClickStarted;
 
     public GuardedPolicyStateMachine(GuardedPolicyOptions options)
     {
         _options = options.Validate();
     }
 
-    public GuardedSessionState State { get; private set; } = GuardedSessionState.WaitingForChange;
+    public GuardedSessionState State { get; private set; } = GuardedSessionState.EstablishingBaseline;
 
     public bool IsInputGuardHeld { get; private set; }
 
@@ -38,11 +40,55 @@ internal sealed class GuardedPolicyStateMachine
             return GuardedFrameTransition.None(State);
         }
 
+        if (State == GuardedSessionState.EstablishingBaseline)
+        {
+            if (_candidateFingerprint != fingerprint)
+            {
+                _candidateFingerprint = fingerprint;
+                _stableFrameCount = 1;
+            }
+            else
+            {
+                _stableFrameCount++;
+            }
+
+            if (_stableFrameCount < _options.RequiredStableFrames)
+            {
+                return GuardedFrameTransition.None(State);
+            }
+
+            // Startup is observation-only. The item already under the cursor is the safe
+            // baseline; it must never be treated as the result of a crafting click.
+            _acceptedFingerprint = fingerprint;
+            ResetDecision();
+            State = GuardedSessionState.WaitingForChange;
+            return new GuardedFrameTransition(
+                State,
+                RequestInputGuard: false,
+                ReleaseInputGuard: false,
+                ShouldRecognize: false,
+                Decision: null,
+                AwaitNextCausativeClick: true);
+        }
+
         if (HasTimedOut(now))
         {
             return Fault(
                 "Guarded decision watchdog expired.",
                 GuardedFaultReason.DecisionTimedOut);
+        }
+
+        if (State == GuardedSessionState.WaitingForChange && !_causativeClickCompleted)
+        {
+            // Window/overlay/background changes are irrelevant until the native one-shot gate
+            // confirms that a complete user crafting click reached the game. Keep following the
+            // idle tooltip so an overlay disappearing or the hover settling becomes the new
+            // pre-click baseline instead of looking like the next crafted roll.
+            if (!_causativeClickStarted)
+            {
+                _acceptedFingerprint = fingerprint;
+            }
+            return GuardedFrameTransition.None(State);
         }
 
         if (!IsInputGuardHeld)
@@ -104,6 +150,31 @@ internal sealed class GuardedPolicyStateMachine
             ReleaseInputGuard: false,
             ShouldRecognize: State == GuardedSessionState.Evaluating,
             Decision: null);
+    }
+
+    public bool NotifyCausativeClickCompleted(DateTimeOffset now)
+    {
+        if (State != GuardedSessionState.WaitingForChange || _causativeClickCompleted)
+        {
+            return false;
+        }
+
+        _causativeClickCompleted = true;
+        // Waiting for the user is deliberately unbounded. The decision deadline starts only
+        // after the native hook has passed that click's final button-up to the game.
+        _decisionStartedAt = now;
+        return true;
+    }
+
+    public bool NotifyCausativeClickStarted()
+    {
+        if (State != GuardedSessionState.WaitingForChange || _causativeClickCompleted)
+        {
+            return false;
+        }
+
+        _causativeClickStarted = true;
+        return true;
     }
 
     public GuardedFrameTransition ObserveRecognition(GuardedRuleEvidence evidence)
@@ -294,7 +365,7 @@ internal sealed class GuardedPolicyStateMachine
         _previousEvidenceSignature = null;
         _previousHadTargetCandidate = false;
         _consistentRecognitionCount = 0;
-        _decisionStartedAt = now;
+        _decisionStartedAt ??= now;
         IsInputGuardHeld = true;
         State = _stableFrameCount >= _options.RequiredStableFrames
             ? GuardedSessionState.Evaluating
@@ -315,7 +386,7 @@ internal sealed class GuardedPolicyStateMachine
     }
 
     private bool HasTimedOut(DateTimeOffset now) =>
-        IsInputGuardHeld &&
+        (IsInputGuardHeld || _causativeClickCompleted) &&
         _decisionStartedAt is not null &&
         now - _decisionStartedAt.Value >= _options.DecisionTimeout;
 
@@ -329,6 +400,8 @@ internal sealed class GuardedPolicyStateMachine
         _previousHadTargetCandidate = false;
         _consistentRecognitionCount = 0;
         _decisionStartedAt = null;
+        _causativeClickCompleted = false;
+        _causativeClickStarted = false;
         IsInputGuardHeld = false;
     }
 }

@@ -9,6 +9,7 @@ var tests = new (string Name, Action Run)[]
     ("At-least boundary is inclusive", AtLeastBoundaryIsInclusive),
     ("At-most boundary is inclusive", AtMostBoundaryIsInclusive),
     ("Exact decimal and signed values match", ExactDecimalAndSignedValuesMatch),
+    ("Traditional Chinese OCR decimal glyph keeps one numeric slot", TraditionalChineseOcrDecimalGlyphKeepsOneNumericSlot),
     ("Every numeric slot has its own constraint", EveryNumericSlotHasItsOwnConstraint),
     ("Missing and extra numeric slots are rejected", MissingAndExtraNumericSlotsAreRejected),
     ("Displayed roll range uses the rolled value", DisplayedRollRangeUsesRolledValue),
@@ -114,6 +115,26 @@ static void ExactDecimalAndSignedValuesMatch()
         NumericConstraint.Exactly(-12m));
     True(signedRules.Evaluate(["-12% to Fire Resistance"]).IsMatch);
     False(signedRules.Evaluate(["-11% to Fire Resistance"]).IsMatch);
+}
+
+static void TraditionalChineseOcrDecimalGlyphKeepsOneNumericSlot()
+{
+    var rules = OneCondition(
+        "+(3.11—3.8)%暴擊率",
+        NumericConstraint.AtLeast(3.1m));
+
+    var hit = rules.Evaluate(["+ 3 · 73 % 暴 擊 率"]);
+    True(hit.IsMatch);
+    Equal(3.73m, hit.Groups.Single().Conditions.Single().ActualValues.Single());
+
+    False(rules.Evaluate(["+ 3 ∙ 09 % 暴 擊 率"]).IsMatch);
+    True(rules.Evaluate(["+3⋅73%暴擊率"]).IsMatch);
+
+    var twoValues = OneCondition(
+        "增加 (3—4) 點力量和 (73—74) 點敏捷",
+        NumericConstraint.AtLeast(3m),
+        NumericConstraint.AtLeast(73m));
+    False(twoValues.Evaluate(["增加 3・73 點力量和敏捷"]).IsMatch);
 }
 
 static void EveryNumericSlotHasItsOwnConstraint()

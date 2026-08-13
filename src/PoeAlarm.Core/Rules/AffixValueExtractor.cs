@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using PoeAlarm.Core.Matching;
 
 namespace PoeAlarm.Core.Rules;
 
@@ -92,7 +93,7 @@ public static partial class AffixValueExtractor
 
     private static string NormalizePresentation(string value)
     {
-        var source = value.Normalize(NormalizationForm.FormKC);
+        var source = OcrNumericPresentationNormalizer.Normalize(value);
         var builder = new StringBuilder(source.Length);
         foreach (var character in source)
         {

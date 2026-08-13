@@ -5,6 +5,7 @@ namespace PoeAlarm.App.Monitoring.Policies;
 public enum GuardedSessionState
 {
     Stopped,
+    EstablishingBaseline,
     WaitingForChange,
     WaitingForStableFrame,
     Evaluating,

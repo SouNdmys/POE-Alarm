@@ -130,10 +130,13 @@ internal sealed class AffixHitOverlayWindow : Window
             Foreground = Brushes.White,
             FontFamily = new FontFamily("Segoe UI"),
             FontSize = 14,
+            LineHeight = 20,
             Margin = new Thickness(0, 8, 0, 0),
+            MaxWidth = 430,
             Opacity = 0.92,
             Text = UiText.Current.AlertBlockingMessage,
             TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
         };
 
         acknowledgementButton = new Button
