@@ -4179,6 +4179,13 @@ dependencies = [
  "anyhow",
  "gpui",
  "gpui-component",
+ "poe-alarm-alert-win",
+ "poe-alarm-app-win",
+ "poe-alarm-core",
+ "poe-alarm-platform-win",
+ "poe-alarm-runtime",
+ "poe-alarm-settings",
+ "windows 0.61.3",
 ]
 
 [[package]]

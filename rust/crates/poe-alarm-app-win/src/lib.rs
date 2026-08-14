@@ -16,6 +16,7 @@ mod non_windows;
 #[cfg(windows)]
 mod win32;
 
+pub use alert_cue::built_in_alert_wave;
 pub use localization::{TextCatalog, UiText};
 pub use model::{
     AppState, BackgroundCommand, BackgroundCompletion, ConditionEdit, EditorError, EditorForm,
