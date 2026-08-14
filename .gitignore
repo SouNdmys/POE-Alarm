@@ -24,3 +24,4 @@ tests/screenshots/**/*.jpeg
 *.msixbundle
 rust/vendor/
 rust/.cargo-vendor-config.toml
+_to_delete/
