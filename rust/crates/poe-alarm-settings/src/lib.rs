@@ -1,6 +1,6 @@
 //! Settings compatibility boundary for the Rust POE Alarm preview.
 //!
-//! The public model represents normalized schema 3 settings. Loading accepts the released
+//! The public model represents normalized schema 4 settings. Loading accepts the released
 //! profile-aware schemas, the old flat POE1 layout, and the retired `MonitoringPolicy` field.
 //! A settings file from a future schema is never normalized or overwritten.
 
@@ -19,7 +19,7 @@ use serde::de::{Error as DeError, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 const RULE_SET_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_UI_LANGUAGE: &str = "zh-CN";
 pub const DEFAULT_OCR_LANGUAGE: &str = "en";
@@ -197,10 +197,8 @@ impl HudPlacement {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub struct GameProfileSettings {
+pub struct RuleProfileSettings {
     pub target_affix: String,
-    pub capture_region: Option<ScreenRegion>,
-    pub ocr_language: String,
     pub rule_editor_mode: RuleEditorMode,
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -209,23 +207,19 @@ pub struct GameProfileSettings {
     pub structured_rule_set: Option<RuleSetDefinition>,
 }
 
-impl Default for GameProfileSettings {
+impl Default for RuleProfileSettings {
     fn default() -> Self {
         Self {
             target_affix: String::new(),
-            capture_region: None,
-            ocr_language: DEFAULT_OCR_LANGUAGE.to_owned(),
             rule_editor_mode: RuleEditorMode::Quick,
             structured_rule_set: None,
         }
     }
 }
 
-impl GameProfileSettings {
+impl RuleProfileSettings {
     pub fn normalize(mut self) -> Self {
         self.target_affix = self.target_affix.trim().to_owned();
-        self.capture_region = self.capture_region.filter(|region| region.is_valid());
-        self.ocr_language = normalize_ocr_language(&self.ocr_language).to_owned();
         self
     }
 
@@ -236,11 +230,141 @@ impl GameProfileSettings {
 
         Self {
             target_affix: json_string(member_ci(object, "TargetAffix")).unwrap_or_default(),
-            capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
-            ocr_language: json_string(member_ci(object, "OcrLanguage"))
-                .unwrap_or_else(|| DEFAULT_OCR_LANGUAGE.to_owned()),
             rule_editor_mode: RuleEditorMode::parse(member_ci(object, "RuleEditorMode")),
             structured_rule_set: member_ci(object, "StructuredRuleSet").and_then(parse_rule_set),
+        }
+        .normalize()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RuleProfileSettingsSet {
+    pub english: RuleProfileSettings,
+    pub traditional_chinese: RuleProfileSettings,
+}
+
+impl RuleProfileSettingsSet {
+    /// Returns the rules for a persisted OCR language code. Unsupported values follow the
+    /// settings normalization contract and select English.
+    pub fn get(&self, ocr_language: &str) -> &RuleProfileSettings {
+        if is_traditional_chinese_ocr_language(ocr_language) {
+            &self.traditional_chinese
+        } else {
+            &self.english
+        }
+    }
+
+    /// Returns mutable rules for a persisted OCR language code. Unsupported values follow the
+    /// settings normalization contract and select English.
+    pub fn get_mut(&mut self, ocr_language: &str) -> &mut RuleProfileSettings {
+        if is_traditional_chinese_ocr_language(ocr_language) {
+            &mut self.traditional_chinese
+        } else {
+            &mut self.english
+        }
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.english = self.english.normalize();
+        self.traditional_chinese = self.traditional_chinese.normalize();
+        self
+    }
+
+    fn parse(value: &Value) -> Self {
+        let Some(object) = value.as_object() else {
+            return Self::default();
+        };
+
+        Self {
+            english: RuleProfileSettings::parse(member_ci(object, "English")),
+            traditional_chinese: RuleProfileSettings::parse(member_ci(
+                object,
+                "TraditionalChinese",
+            )),
+        }
+        .normalize()
+    }
+
+    fn from_legacy(ocr_language: &str, rules: RuleProfileSettings) -> Self {
+        let mut profiles = Self::default();
+        *profiles.get_mut(ocr_language) = rules.normalize();
+        profiles
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct GameProfileSettings {
+    pub capture_region: Option<ScreenRegion>,
+    pub ocr_language: String,
+    pub rule_profiles: RuleProfileSettingsSet,
+}
+
+impl Default for GameProfileSettings {
+    fn default() -> Self {
+        Self {
+            capture_region: None,
+            ocr_language: DEFAULT_OCR_LANGUAGE.to_owned(),
+            rule_profiles: RuleProfileSettingsSet::default(),
+        }
+    }
+}
+
+impl GameProfileSettings {
+    /// Returns the rule profile selected by this game's current OCR language.
+    pub fn selected_rules(&self) -> &RuleProfileSettings {
+        self.rule_profiles.get(&self.ocr_language)
+    }
+
+    /// Returns mutable rules selected by this game's current OCR language.
+    pub fn selected_rules_mut(&mut self) -> &mut RuleProfileSettings {
+        self.rule_profiles.get_mut(&self.ocr_language)
+    }
+
+    pub fn rules_for(&self, ocr_language: &str) -> &RuleProfileSettings {
+        self.rule_profiles.get(ocr_language)
+    }
+
+    pub fn rules_for_mut(&mut self, ocr_language: &str) -> &mut RuleProfileSettings {
+        self.rule_profiles.get_mut(ocr_language)
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.capture_region = self.capture_region.filter(|region| region.is_valid());
+        self.ocr_language = normalize_ocr_language(&self.ocr_language).to_owned();
+        self.rule_profiles = self.rule_profiles.normalize();
+        self
+    }
+
+    fn parse(value: Option<&Value>) -> Self {
+        let Some(value) = value else {
+            return Self::default();
+        };
+        let Some(object) = value.as_object() else {
+            return Self::default();
+        };
+
+        let ocr_language = normalize_ocr_language(
+            json_string(member_ci(object, "OcrLanguage"))
+                .as_deref()
+                .unwrap_or(DEFAULT_OCR_LANGUAGE),
+        )
+        .to_owned();
+        let rule_profiles = match member_ci(object, "RuleProfiles") {
+            Some(rule_profiles) if rule_profiles.is_object() => {
+                RuleProfileSettingsSet::parse(rule_profiles)
+            }
+            _ => RuleProfileSettingsSet::from_legacy(
+                &ocr_language,
+                RuleProfileSettings::parse(Some(value)),
+            ),
+        };
+
+        Self {
+            capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
+            ocr_language,
+            rule_profiles,
         }
         .normalize()
     }
@@ -322,6 +446,18 @@ impl AppSettings {
         self.profiles.get(self.selected_game_profile)
     }
 
+    pub fn selected_profile_mut(&mut self) -> &mut GameProfileSettings {
+        self.profiles.get_mut(self.selected_game_profile)
+    }
+
+    pub fn selected_rules(&self) -> &RuleProfileSettings {
+        self.selected_profile().selected_rules()
+    }
+
+    pub fn selected_rules_mut(&mut self) -> &mut RuleProfileSettings {
+        self.selected_profile_mut().selected_rules_mut()
+    }
+
     pub fn normalize(mut self) -> Self {
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.profiles = self.profiles.normalize();
@@ -363,13 +499,24 @@ impl AppSettings {
     }
 
     fn migrate_flat_profile(object: &Map<String, Value>) -> GameProfileSettingsSet {
+        let ocr_language = normalize_ocr_language(
+            json_string(member_ci(object, "OcrLanguage"))
+                .as_deref()
+                .unwrap_or(DEFAULT_OCR_LANGUAGE),
+        )
+        .to_owned();
+        let legacy_rules = RuleProfileSettings {
+            target_affix: json_string(member_ci(object, "TargetAffix")).unwrap_or_default(),
+            ..RuleProfileSettings::default()
+        };
         GameProfileSettingsSet {
             poe1: GameProfileSettings {
-                target_affix: json_string(member_ci(object, "TargetAffix")).unwrap_or_default(),
                 capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
-                ocr_language: json_string(member_ci(object, "OcrLanguage"))
-                    .unwrap_or_else(|| DEFAULT_OCR_LANGUAGE.to_owned()),
-                ..GameProfileSettings::default()
+                rule_profiles: RuleProfileSettingsSet::from_legacy(
+                    &ocr_language,
+                    legacy_rules,
+                ),
+                ocr_language,
             }
             .normalize(),
             poe2: GameProfileSettings::default(),
@@ -396,14 +543,17 @@ pub fn normalize_ui_language(language: &str) -> &'static str {
 }
 
 pub fn normalize_ocr_language(language: &str) -> &'static str {
-    if language
-        .trim()
-        .eq_ignore_ascii_case(TRADITIONAL_CHINESE_OCR_LANGUAGE)
-    {
+    if is_traditional_chinese_ocr_language(language) {
         TRADITIONAL_CHINESE_OCR_LANGUAGE
     } else {
         DEFAULT_OCR_LANGUAGE
     }
+}
+
+fn is_traditional_chinese_ocr_language(language: &str) -> bool {
+    language
+        .trim()
+        .eq_ignore_ascii_case(TRADITIONAL_CHINESE_OCR_LANGUAGE)
 }
 
 pub fn normalize_start_monitoring_hot_key(hotkey: &str) -> &'static str {
@@ -424,7 +574,7 @@ pub enum SettingsStoreCompatibility {
     FutureSchemaReadOnly,
 }
 
-/// File-backed schema 3 store. `load` follows the released recovery contract and returns safe
+/// File-backed schema 4 store. `load` follows the released recovery contract and returns safe
 /// defaults for missing, malformed, or unreadable files. `save` remains fallible so callers can
 /// surface persistence failures to the user.
 #[derive(Debug)]
@@ -1043,6 +1193,34 @@ mod tests {
     }
 
     #[test]
+    fn selected_rule_accessors_isolate_ocr_languages() {
+        let mut profile = GameProfileSettings::default();
+        profile.rules_for_mut("en").target_affix = "english target".to_owned();
+        profile.rules_for_mut("zh-TW").target_affix = "繁中目標".to_owned();
+
+        assert_eq!(profile.selected_rules().target_affix, "english target");
+        profile.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
+        assert_eq!(
+            profile.rules_for("en").rule_editor_mode,
+            RuleEditorMode::Structured
+        );
+        assert_eq!(
+            profile.rules_for("zh-TW").rule_editor_mode,
+            RuleEditorMode::Quick
+        );
+
+        profile.ocr_language = "ZH-tw".to_owned();
+        assert_eq!(profile.selected_rules().target_affix, "繁中目標");
+        profile.selected_rules_mut().target_affix = "繁中更新".to_owned();
+        assert_eq!(profile.rules_for("zh-TW").target_affix, "繁中更新");
+        assert_eq!(profile.rules_for("en").target_affix, "english target");
+        assert_eq!(
+            profile.rules_for("unsupported"),
+            profile.rules_for("en")
+        );
+    }
+
+    #[test]
     fn schema_one_loads_both_profiles_and_normalizes_defaults() {
         let directory = TestDirectory::new();
         let path = directory.settings_path();
@@ -1072,14 +1250,28 @@ mod tests {
         let settings = store.load();
         assert_eq!(settings.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(settings.selected_game_profile, GameProfile::Poe2);
-        assert_eq!(settings.profiles.poe1.target_affix, "poe1 target");
+        assert_eq!(
+            settings.profiles.poe1.selected_rules().target_affix,
+            "poe1 target"
+        );
         assert_eq!(
             settings.profiles.poe1.capture_region,
             Some(ScreenRegion::new(12, 34, 560, 420))
         );
         assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
-        assert_eq!(settings.profiles.poe2.target_affix, "poe2 target");
+        assert_eq!(
+            settings.profiles.poe2.selected_rules().target_affix,
+            "poe2 target"
+        );
         assert_eq!(settings.profiles.poe2.ocr_language, "en");
+        assert_eq!(
+            settings.profiles.poe1.rules_for("en"),
+            &RuleProfileSettings::default()
+        );
+        assert_eq!(
+            settings.profiles.poe2.rules_for("zh-TW"),
+            &RuleProfileSettings::default()
+        );
         assert_eq!(settings.ui_language, "en");
         assert_eq!(settings.start_monitoring_hot_key, "Ctrl+Alt+F10");
         assert_eq!(
@@ -1128,8 +1320,8 @@ mod tests {
 
         let mut store = SettingsStore::new(&path);
         let settings = store.load();
-        let poe1 = &settings.profiles.poe1;
-        let poe2 = &settings.profiles.poe2;
+        let poe1 = settings.profiles.poe1.selected_rules();
+        let poe2 = settings.profiles.poe2.selected_rules();
         assert_eq!(poe1.rule_editor_mode, RuleEditorMode::Quick);
         assert_eq!(poe1.structured_rule_set.as_ref().unwrap().name, "backup");
         assert_eq!(poe2.rule_editor_mode, RuleEditorMode::Structured);
@@ -1140,6 +1332,14 @@ mod tests {
         assert_eq!(
             rules.groups[0].conditions[0].numeric_constraints[0].minimum,
             Some("3.1".parse().unwrap())
+        );
+        assert_eq!(
+            settings.profiles.poe1.rules_for("zh-TW"),
+            &RuleProfileSettings::default()
+        );
+        assert_eq!(
+            settings.profiles.poe2.rules_for("zh-TW"),
+            &RuleProfileSettings::default()
         );
     }
 
@@ -1176,21 +1376,33 @@ mod tests {
 
         let mut store = SettingsStore::new(&path);
         let settings = store.load();
-        assert_eq!(settings.profiles.poe1.target_affix, "legacy guarded poe1");
+        assert_eq!(
+            settings.profiles.poe1.selected_rules().target_affix,
+            "legacy guarded poe1"
+        );
         assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
         assert_eq!(
-            settings.profiles.poe2.rule_editor_mode,
+            settings.profiles.poe2.selected_rules().rule_editor_mode,
             RuleEditorMode::Structured
         );
         assert_eq!(
             settings
                 .profiles
                 .poe2
+                .selected_rules()
                 .structured_rule_set
                 .as_ref()
                 .unwrap()
                 .name,
             "kept rules"
+        );
+        assert_eq!(
+            settings.profiles.poe1.rules_for("en"),
+            &RuleProfileSettings::default()
+        );
+        assert_eq!(
+            settings.profiles.poe2.rules_for("zh-TW"),
+            &RuleProfileSettings::default()
         );
 
         store.save(&settings).unwrap();
@@ -1221,17 +1433,31 @@ mod tests {
         let mut store = SettingsStore::new(&path);
         let settings = store.load();
         assert_eq!(settings.selected_game_profile, GameProfile::Poe1);
-        assert_eq!(settings.profiles.poe1.target_affix, "legacy poe1 target");
+        assert_eq!(
+            settings.profiles.poe1.selected_rules().target_affix,
+            "legacy poe1 target"
+        );
         assert_eq!(
             settings.profiles.poe1.capture_region,
             Some(ScreenRegion::new(12, 34, 560, 420))
         );
         assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
         assert_eq!(
-            settings.profiles.poe1.rule_editor_mode,
+            settings.profiles.poe1.selected_rules().rule_editor_mode,
             RuleEditorMode::Quick
         );
-        assert!(settings.profiles.poe1.structured_rule_set.is_none());
+        assert!(
+            settings
+                .profiles
+                .poe1
+                .selected_rules()
+                .structured_rule_set
+                .is_none()
+        );
+        assert_eq!(
+            settings.profiles.poe1.rules_for("en"),
+            &RuleProfileSettings::default()
+        );
         assert_eq!(settings.profiles.poe2, GameProfileSettings::default());
         assert!(!settings.keep_hud_visible);
 
@@ -1279,12 +1505,12 @@ mod tests {
         assert_eq!(settings.ui_language, "zh-CN");
         assert_eq!(settings.start_monitoring_hot_key, "Ctrl+Shift+F10");
         assert_eq!(settings.hud_placement, HudPlacement::default());
-        assert_eq!(settings.profiles.poe1.target_affix, "one");
-        assert_eq!(settings.profiles.poe2.target_affix, "two");
+        assert_eq!(settings.profiles.poe1.selected_rules().target_affix, "one");
+        assert_eq!(settings.profiles.poe2.selected_rules().target_affix, "two");
         assert!(settings.profiles.poe1.capture_region.is_none());
         assert_eq!(settings.profiles.poe1.ocr_language, "en");
         assert_eq!(
-            settings.profiles.poe1.rule_editor_mode,
+            settings.profiles.poe1.selected_rules().rule_editor_mode,
             RuleEditorMode::Quick
         );
     }
@@ -1337,7 +1563,7 @@ mod tests {
     }
 
     #[test]
-    fn atomic_save_round_trips_dual_profiles_and_pascal_case_rules() {
+    fn atomic_save_round_trips_game_and_language_profiles_with_pascal_case_rules() {
         let directory = TestDirectory::new();
         let path = directory.settings_path();
         fs::write(&path, br#"{ "SchemaVersion": 3, "Profiles": {} }"#).unwrap();
@@ -1349,29 +1575,46 @@ mod tests {
             start_monitoring_hot_key: "Alt+F10".to_owned(),
             ..AppSettings::default()
         };
-        settings.profiles.poe1.target_affix = "poe1 target".to_owned();
         settings.profiles.poe1.ocr_language = "zh-TW".to_owned();
+        settings
+            .profiles
+            .poe1
+            .rules_for_mut("en")
+            .target_affix = "poe1 english target".to_owned();
+        settings
+            .profiles
+            .poe1
+            .rules_for_mut("zh-TW")
+            .target_affix = "poe1 traditional target".to_owned();
         settings.profiles.poe2 = GameProfileSettings {
-            target_affix: "poe2 target".to_owned(),
             capture_region: Some(ScreenRegion::new(700, 80, 640, 920)),
-            rule_editor_mode: RuleEditorMode::Structured,
-            structured_rule_set: Some(RuleSetDefinition {
-                schema_version: RULE_SET_SCHEMA_VERSION,
-                name: "crafting rules".to_owned(),
-                groups: vec![AcceptableResultGroup {
-                    name: "critical result".to_owned(),
-                    mode: ResultGroupMode::AtLeast,
-                    required_count: 1,
-                    conditions: vec![AffixCondition {
-                        name: "critical chance".to_owned(),
-                        template: "+#% to Critical Hit Chance".to_owned(),
-                        numeric_constraints: vec![NumericConstraint::at_least(
-                            "3.1000000000000000000001".parse::<Decimal>().unwrap(),
-                        )],
-                    }],
-                }],
-            }),
-            ..GameProfileSettings::default()
+            ocr_language: "en".to_owned(),
+            rule_profiles: RuleProfileSettingsSet {
+                english: RuleProfileSettings {
+                    target_affix: "poe2 english target".to_owned(),
+                    rule_editor_mode: RuleEditorMode::Structured,
+                    structured_rule_set: Some(RuleSetDefinition {
+                        schema_version: RULE_SET_SCHEMA_VERSION,
+                        name: "crafting rules".to_owned(),
+                        groups: vec![AcceptableResultGroup {
+                            name: "critical result".to_owned(),
+                            mode: ResultGroupMode::AtLeast,
+                            required_count: 1,
+                            conditions: vec![AffixCondition {
+                                name: "critical chance".to_owned(),
+                                template: "+#% to Critical Hit Chance".to_owned(),
+                                numeric_constraints: vec![NumericConstraint::at_least(
+                                    "3.1000000000000000000001".parse::<Decimal>().unwrap(),
+                                )],
+                            }],
+                        }],
+                    }),
+                },
+                traditional_chinese: RuleProfileSettings {
+                    target_affix: "poe2 traditional target".to_owned(),
+                    ..RuleProfileSettings::default()
+                },
+            },
         };
 
         let mut store = SettingsStore::new(&path);
@@ -1383,18 +1626,59 @@ mod tests {
         assert!(saved_text.contains("\"RequiredCount\""));
         assert!(saved_text.contains("\"NumericConstraints\""));
         assert!(saved_text.contains("3.1000000000000000000001"));
+        assert!(saved_text.contains("\"RuleProfiles\""));
+        assert!(saved_text.contains("\"English\""));
+        assert!(saved_text.contains("\"TraditionalChinese\""));
         assert!(!saved_text.contains("\"structuredRuleSet\""));
+        let saved_json: Value = serde_json::from_str(&saved_text).unwrap();
+        assert_eq!(
+            saved_json.get("SchemaVersion").and_then(Value::as_u64),
+            Some(u64::from(CURRENT_SCHEMA_VERSION))
+        );
+        let saved_poe1 = saved_json
+            .get("Profiles")
+            .and_then(|profiles| profiles.get("Poe1"))
+            .and_then(Value::as_object)
+            .unwrap();
+        assert!(saved_poe1.get("RuleProfiles").is_some());
+        assert!(saved_poe1.get("TargetAffix").is_none());
+        assert!(saved_poe1.get("RuleEditorMode").is_none());
+        assert!(saved_poe1.get("StructuredRuleSet").is_none());
 
         let reloaded = store.load();
         assert_eq!(reloaded.selected_game_profile, GameProfile::Poe2);
-        assert_eq!(reloaded.profiles.poe1.target_affix, "poe1 target");
+        assert_eq!(
+            reloaded.profiles.poe1.rules_for("en").target_affix,
+            "poe1 english target"
+        );
+        assert_eq!(
+            reloaded.profiles.poe1.rules_for("zh-TW").target_affix,
+            "poe1 traditional target"
+        );
         assert_eq!(reloaded.profiles.poe1.ocr_language, "zh-TW");
-        assert_eq!(reloaded.profiles.poe2.target_affix, "poe2 target");
+        assert_eq!(
+            reloaded.profiles.poe2.rules_for("en").target_affix,
+            "poe2 english target"
+        );
+        assert_eq!(
+            reloaded
+                .profiles
+                .poe2
+                .rules_for("zh-TW")
+                .target_affix,
+            "poe2 traditional target"
+        );
         assert_eq!(
             reloaded.profiles.poe2.capture_region,
             Some(ScreenRegion::new(700, 80, 640, 920))
         );
-        let rules = reloaded.profiles.poe2.structured_rule_set.unwrap();
+        let rules = reloaded
+            .profiles
+            .poe2
+            .rules_for("en")
+            .structured_rule_set
+            .as_ref()
+            .unwrap();
         assert_eq!(rules.groups[0].required_count, 1);
         assert_eq!(
             rules.groups[0].conditions[0].numeric_constraints[0].minimum,

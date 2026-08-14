@@ -55,18 +55,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_OWNERDRAW, CB_ADDSTRING,
     CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CBN_SELCHANGE, CBS_DROPDOWNLIST,
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
-    DispatchMessageW, EC_LEFTMARGIN, EC_RIGHTMARGIN, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE,
-    ES_READONLY, ES_WANTRETURN, GWLP_USERDATA, GetClientRect, GetCursorPos, GetMessageW,
-    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HMENU, HTCAPTION,
-    IDC_ARROW, IDYES, IsWindowVisible, KillTimer, LoadCursorW, LoadIconW, MB_ICONINFORMATION,
-    MB_YESNO, MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassExW,
-    SW_HIDE, SW_MINIMIZE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-    WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
-    WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY,
-    WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX,
-    WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    DispatchMessageW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EN_KILLFOCUS, ES_AUTOHSCROLL, ES_AUTOVSCROLL,
+    ES_MULTILINE, ES_READONLY, ES_WANTRETURN, GWLP_USERDATA, GetClientRect, GetCursorPos,
+    GetMessageW, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HMENU,
+    HTCAPTION, IDC_ARROW, IDYES, IsWindowVisible, KillTimer, LoadCursorW, LoadIconW,
+    MB_ICONINFORMATION, MB_YESNO, MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage,
+    RegisterClassExW, SW_HIDE, SW_MINIMIZE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW,
+    SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle, WM_APP, WM_CLOSE,
+    WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CHILD,
+    WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -129,6 +129,10 @@ const fn ui_geometry(mode: RuleMode) -> UiGeometry {
         results_top: results_label_y + 22,
         action_top: results_label_y,
     }
+}
+
+const fn shows_match_option_layer(group_count: usize) -> bool {
+    group_count > 1
 }
 
 const ID_GAME: u16 = 101;
@@ -408,7 +412,7 @@ struct WindowState {
     theme_brushes: ThemeBrushes,
     fonts: Fonts,
     dpi: u32,
-    layout_key: Option<(u32, RuleMode)>,
+    layout_key: Option<(u32, RuleMode, bool)>,
     save_worker: Option<mpsc::Sender<SaveRequest>>,
     runtime: Box<dyn RuntimeClient>,
     runtime_alert_key: (Option<String>, bool),
@@ -607,9 +611,12 @@ fn resolve_alert_wave(settings: &AppSettings) -> Result<(ValidatedWave, bool), S
 
 fn active_rule_summary(settings: &AppSettings, language: UiLanguage) -> String {
     let profile = settings.selected_profile();
-    let summary = match profile.rule_editor_mode {
-        poe_alarm_settings::RuleEditorMode::Quick => profile.target_affix.trim().to_owned(),
-        poe_alarm_settings::RuleEditorMode::Structured => profile
+    let rules_profile = profile.selected_rules();
+    let summary = match rules_profile.rule_editor_mode {
+        poe_alarm_settings::RuleEditorMode::Quick => {
+            rules_profile.target_affix.trim().to_owned()
+        }
+        poe_alarm_settings::RuleEditorMode::Structured => rules_profile
             .structured_rule_set
             .as_ref()
             .map(|rules| {
@@ -1948,7 +1955,8 @@ impl WindowState {
             if self.fonts.language != self.model.language() {
                 self.recreate_fonts();
             }
-            if self.layout_key != Some((self.dpi, self.model.rule_mode())) {
+            let option_layer = self.shows_match_option_layer();
+            if self.layout_key != Some((self.dpi, self.model.rule_mode(), option_layer)) {
                 self.layout();
             }
             self.refresh_localized_controls();
@@ -1959,6 +1967,14 @@ impl WindowState {
             self.refresh_hud();
             let _ = InvalidateRect(Some(self.hwnd), None, false);
         }
+    }
+
+    fn shows_match_option_layer(&self) -> bool {
+        shows_match_option_layer(
+            self.model
+                .current_rule_set()
+                .map_or(0, |rules| rules.groups.len()),
+        )
     }
 
     unsafe fn refresh_hud(&mut self) {
@@ -2150,8 +2166,9 @@ impl WindowState {
 
     unsafe fn refresh_editor_fields(&self) {
         let profile = self.model.current_profile();
+        let rules_profile = profile.selected_rules();
         unsafe {
-            set_text(self.controls.quick_template, &profile.target_affix);
+            set_text(self.controls.quick_template, &rules_profile.target_affix);
             set_region_fields(&self.controls, profile.capture_region);
             set_check(
                 self.controls.keep_hud,
@@ -2220,6 +2237,35 @@ impl WindowState {
             unsafe {
                 let _ = ShowWindow(control, if quick { SW_HIDE } else { SW_SHOW });
             }
+        }
+        let show_option_layer = !quick && self.shows_match_option_layer();
+        for control in [
+            self.controls.results,
+            self.controls.delete_result,
+            self.controls.group_name,
+        ] {
+            unsafe {
+                let _ = ShowWindow(control, if show_option_layer { SW_SHOW } else { SW_HIDE });
+            }
+        }
+        // Numeric slots are derived from the affix template. The selector exposes every slot the
+        // model generated; manual add/remove buttons only create a second, error-prone workflow.
+        for control in [self.controls.add_numeric, self.controls.delete_numeric] {
+            unsafe {
+                let _ = ShowWindow(control, SW_HIDE);
+            }
+        }
+        let show_required_count = !quick
+            && unsafe { combo_selection(self.controls.group_mode) }.is_some_and(|index| index == 2);
+        unsafe {
+            let _ = ShowWindow(
+                self.controls.required_count,
+                if show_required_count {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
         }
     }
 
@@ -2305,6 +2351,7 @@ impl WindowState {
     unsafe fn layout(&mut self) {
         let s = |value| scale(value, self.dpi);
         let geometry = ui_geometry(self.model.rule_mode());
+        let show_option_layer = self.shows_match_option_layer();
         macro_rules! place {
             ($control:expr, $x:expr, $y:expr, $width:expr, $height:expr) => {
                 unsafe {
@@ -2331,21 +2378,25 @@ impl WindowState {
         place!(self.controls.save, 870, 114, 180, 36);
         place_edit!(self.controls.quick_template, 30, 220, 1020, 58);
 
-        place!(self.controls.results, 30, 218, 330, 250);
-        place!(self.controls.add_result, 370, 217, 130, 34);
-        place!(self.controls.delete_result, 510, 217, 130, 34);
-        place_edit!(self.controls.group_name, 660, 218, 180, 34);
-        place!(self.controls.group_mode, 850, 218, 170, 220);
-        place_edit!(self.controls.required_count, 930, 268, 90, 32);
+        if show_option_layer {
+            place!(self.controls.results, 30, 218, 300, 250);
+            place!(self.controls.add_result, 340, 217, 230, 34);
+            place!(self.controls.delete_result, 580, 217, 120, 34);
+            place_edit!(self.controls.group_name, 710, 218, 130, 34);
+            place!(self.controls.group_mode, 850, 218, 170, 220);
+            place_edit!(self.controls.required_count, 930, 268, 90, 32);
+        } else {
+            place!(self.controls.group_mode, 30, 218, 330, 220);
+            place_edit!(self.controls.required_count, 370, 218, 120, 34);
+            place!(self.controls.add_result, 660, 217, 360, 34);
+        }
 
         place!(self.controls.conditions, 30, 326, 330, 250);
         place!(self.controls.add_condition, 370, 325, 130, 34);
         place!(self.controls.delete_condition, 510, 325, 130, 34);
         place_edit!(self.controls.condition_name, 660, 326, 360, 34);
         place_edit!(self.controls.condition_template, 30, 400, 610, 50);
-        place!(self.controls.numeric_rules, 660, 400, 150, 220);
-        place!(self.controls.add_numeric, 820, 399, 100, 34);
-        place!(self.controls.delete_numeric, 930, 399, 100, 34);
+        place!(self.controls.numeric_rules, 660, 400, 370, 220);
         place!(self.controls.numeric_mode, 660, 462, 160, 220);
         place_edit!(self.controls.numeric_first, 830, 462, 100, 32);
         place_edit!(self.controls.numeric_second, 940, 462, 90, 32);
@@ -2394,7 +2445,11 @@ impl WindowState {
             310,
             34
         );
-        self.layout_key = Some((self.dpi, self.model.rule_mode()));
+        self.layout_key = Some((
+            self.dpi,
+            self.model.rule_mode(),
+            self.shows_match_option_layer(),
+        ));
     }
 
     unsafe fn on_command(&mut self, wparam: WPARAM) {
@@ -2421,6 +2476,17 @@ impl WindowState {
                         _ => UiLanguage::SimplifiedChinese,
                     };
                     unsafe { self.apply_action(UiAction::SelectLanguage(language)) };
+                } else {
+                    unsafe { self.restore_primary_selections() };
+                }
+            }
+            (ID_OCR_LANGUAGE, CBN_SELCHANGE) => {
+                if unsafe { self.commit_visible_form() } {
+                    let language = match unsafe { combo_selection(self.controls.ocr_language) } {
+                        Some(1) => OcrLanguage::TraditionalChinese,
+                        _ => OcrLanguage::English,
+                    };
+                    unsafe { self.apply_action(UiAction::SelectOcrLanguage(language)) };
                 } else {
                     unsafe { self.restore_primary_selections() };
                 }
@@ -2466,7 +2532,13 @@ impl WindowState {
                     unsafe { self.restore_editor_selections() };
                 }
             }
+            (ID_CONDITION_TEMPLATE, EN_KILLFOCUS) => {
+                if unsafe { self.commit_visible_form() } {
+                    unsafe { self.refresh_all() };
+                }
+            }
             (ID_GROUP_MODE | ID_NUMERIC_MODE, CBN_SELCHANGE) => unsafe {
+                self.refresh_visibility();
                 self.refresh_enabled_state();
                 let _ = InvalidateRect(Some(self.hwnd), None, false);
             },
@@ -2674,6 +2746,15 @@ impl WindowState {
                 Some(WPARAM(match self.model.rule_mode() {
                     RuleMode::Quick => 0,
                     RuleMode::MultipleAffixes => 1,
+                })),
+                None,
+            );
+            SendMessageW(
+                self.controls.ocr_language,
+                CB_SETCURSEL,
+                Some(WPARAM(match self.model.ocr_language() {
+                    OcrLanguage::English => 0,
+                    OcrLanguage::TraditionalChinese => 1,
                 })),
                 None,
             );
@@ -3013,46 +3094,69 @@ impl WindowState {
                     s(300),
                 );
             } else {
+                let show_option_layer = self.shows_match_option_layer();
                 draw_help(
                     dc,
                     self.fonts.body,
-                    text.structured_help,
+                    if show_option_layer {
+                        text.structured_help
+                    } else {
+                        text.structured_single_help
+                    },
                     s(30),
                     s(168),
                     s(1020),
                 );
-                draw_label(
-                    dc,
-                    self.fonts.label,
-                    text.results_label,
-                    s(30),
-                    s(194),
-                    s(300),
-                );
-                draw_label(
-                    dc,
-                    self.fonts.label,
-                    text.result_name,
-                    s(660),
-                    s(194),
-                    s(180),
-                );
-                draw_label(
-                    dc,
-                    self.fonts.label,
-                    text.group_rule,
-                    s(850),
-                    s(194),
-                    s(190),
-                );
-                draw_label(
-                    dc,
-                    self.fonts.label,
-                    text.required_count,
-                    s(850),
-                    s(268),
-                    s(75),
-                );
+                let show_required_count = unsafe { combo_selection(self.controls.group_mode) }
+                    .is_some_and(|index| index == 2);
+                if show_option_layer {
+                    draw_label(
+                        dc,
+                        self.fonts.label,
+                        text.results_label,
+                        s(30),
+                        s(194),
+                        s(300),
+                    );
+                    draw_label(
+                        dc,
+                        self.fonts.label,
+                        text.result_name,
+                        s(710),
+                        s(194),
+                        s(130),
+                    );
+                    draw_label(
+                        dc,
+                        self.fonts.label,
+                        text.group_rule,
+                        s(850),
+                        s(194),
+                        s(190),
+                    );
+                    if show_required_count {
+                        draw_label(
+                            dc,
+                            self.fonts.label,
+                            text.required_count,
+                            s(850),
+                            s(268),
+                            s(75),
+                        );
+                    }
+                } else {
+                    draw_label(dc, self.fonts.label, text.group_rule, s(30), s(194), s(330));
+                    if show_required_count {
+                        draw_label(
+                            dc,
+                            self.fonts.label,
+                            text.required_count,
+                            s(370),
+                            s(194),
+                            s(120),
+                        );
+                    }
+                }
                 draw_label(
                     dc,
                     self.fonts.label,
@@ -4587,6 +4691,14 @@ mod tests {
     }
 
     #[test]
+    fn match_option_layer_appears_only_for_real_alternatives() {
+        assert!(!shows_match_option_layer(0));
+        assert!(!shows_match_option_layer(1));
+        assert!(shows_match_option_layer(2));
+        assert!(shows_match_option_layer(8));
+    }
+
+    #[test]
     fn configuration_window_fits_common_dpi_and_work_areas() {
         for physical_dpi in [96, 120, 144] {
             for (work_width, work_height) in [(1024, 768), (1920, 1080)] {
@@ -4665,7 +4777,11 @@ mod tests {
     #[test]
     fn hud_summary_and_timer_are_compact_and_stable() {
         let mut settings = AppSettings::default();
-        settings.profiles.poe1.target_affix = "  +#% to\r\nCritical Hit Chance  ".to_owned();
+        settings
+            .profiles
+            .poe1
+            .selected_rules_mut()
+            .target_affix = "  +#% to\r\nCritical Hit Chance  ".to_owned();
         assert_eq!(
             active_rule_summary(&settings, UiLanguage::English),
             "+#% to Critical Hit Chance"
@@ -4730,12 +4846,21 @@ mod tests {
         ));
         let path = directory.join("settings.json");
         let mut settings = AppSettings::default();
-        settings.profiles.poe1.target_affix = "#% increased Attack Speed".into();
+        settings
+            .profiles
+            .poe1
+            .selected_rules_mut()
+            .target_affix = "#% increased Attack Speed".into();
         let outcome = save_settings(&path, &settings);
         assert_eq!(outcome, WorkOutcome::Succeeded, "{outcome:?}");
         let mut store = SettingsStore::new(&path);
         assert_eq!(
-            store.load().profiles.poe1.target_affix,
+            store
+                .load()
+                .profiles
+                .poe1
+                .selected_rules()
+                .target_affix,
             "#% increased Attack Speed"
         );
         let _ = std::fs::remove_file(&path);
@@ -4760,9 +4885,17 @@ mod tests {
         let source = directory.join("release.json");
         let destination = directory.join("preview").join("settings.json");
         let mut settings = AppSettings::default();
-        settings.profiles.poe1.target_affix = "poe1 target".to_owned();
+        settings
+            .profiles
+            .poe1
+            .selected_rules_mut()
+            .target_affix = "poe1 target".to_owned();
         settings.profiles.poe1.capture_region = Some(ScreenRegion::new(10, 20, 300, 400));
-        settings.profiles.poe2.target_affix = "poe2 target".to_owned();
+        settings
+            .profiles
+            .poe2
+            .selected_rules_mut()
+            .target_affix = "poe2 target".to_owned();
         settings.profiles.poe2.capture_region = Some(ScreenRegion::new(-12, 8, 500, 700));
         settings.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
         let mut source_store = SettingsStore::new(&source);

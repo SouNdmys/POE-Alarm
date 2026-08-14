@@ -197,6 +197,7 @@ impl BackgroundCompletion {
 pub enum UiAction {
     SelectGame(Game),
     SelectLanguage(UiLanguage),
+    SelectOcrLanguage(OcrLanguage),
     SelectRuleMode(RuleMode),
     StartMonitoring,
     StopMonitoring,
@@ -329,15 +330,21 @@ impl Default for AppState {
 
 impl AppState {
     pub fn from_settings(settings: AppSettings, future_schema: Option<u32>) -> Self {
-        let settings = settings.normalize();
+        let mut settings = settings.normalize();
+        synchronize_settings_numeric_slots(&mut settings);
         let game = Game::from_profile(settings.selected_game_profile);
         let language = if settings.ui_language.eq_ignore_ascii_case("en") {
             UiLanguage::English
         } else {
             UiLanguage::SimplifiedChinese
         };
-        let rule_mode =
-            RuleMode::from_setting(settings.profiles.get(game.profile()).rule_editor_mode);
+        let rule_mode = RuleMode::from_setting(
+            settings
+                .profiles
+                .get(game.profile())
+                .selected_rules()
+                .rule_editor_mode,
+        );
         let mut state = Self {
             settings,
             game,
@@ -425,7 +432,10 @@ impl AppState {
     }
 
     pub fn current_rule_set(&self) -> Option<&RuleSetDefinition> {
-        self.current_profile().structured_rule_set.as_ref()
+        self.current_profile()
+            .selected_rules()
+            .structured_rule_set
+            .as_ref()
     }
 
     pub fn current_group(&self) -> Option<&AcceptableResultGroup> {
@@ -468,9 +478,8 @@ impl AppState {
         let mut next = self.settings.clone();
         let profile = next.profiles.get_mut(self.game.profile());
         if let Some(template) = form.quick_template {
-            profile.target_affix = template.trim().to_owned();
+            profile.selected_rules_mut().target_affix = template.trim().to_owned();
         }
-        profile.ocr_language = form.ocr_language.setting_value().to_owned();
         profile.capture_region = parse_region(&form.region)?;
 
         next.keep_hud_visible = form.global.keep_hud_visible;
@@ -481,7 +490,13 @@ impl AppState {
             normalize_start_monitoring_hot_key(&form.global.start_monitoring_hot_key).to_owned();
 
         if self.rule_mode == RuleMode::MultipleAffixes {
+            let parsed_numeric_constraint = form
+                .numeric_constraint
+                .as_ref()
+                .map(parse_numeric_constraint)
+                .transpose()?;
             let rules = profile
+                .selected_rules_mut()
                 .structured_rule_set
                 .as_mut()
                 .ok_or(EditorError::EmptyResult)?;
@@ -502,19 +517,33 @@ impl AppState {
                 .conditions
                 .get_mut(self.selected_condition)
                 .ok_or(EditorError::LastConditionRequired)?;
+            let apply_numeric_after_sync = if let Some(constraint) = &parsed_numeric_constraint {
+                if let Some(current) = condition
+                    .numeric_constraints
+                    .get_mut(self.selected_numeric_constraint)
+                {
+                    *current = constraint.clone();
+                    false
+                } else {
+                    true
+                }
+            } else {
+                false
+            };
             if let Some(edit) = form.condition {
                 condition.name = edit.name.trim().to_owned();
                 condition.template = edit.template.trim().to_owned();
             }
-            if let Some(edit) = form.numeric_constraint {
+            synchronize_condition_numeric_slots(condition);
+            if apply_numeric_after_sync {
                 let constraint = condition
                     .numeric_constraints
                     .get_mut(self.selected_numeric_constraint)
                     .ok_or(EditorError::NoNumericSlots)?;
-                *constraint = parse_numeric_constraint(&edit)?;
+                *constraint =
+                    parsed_numeric_constraint.expect("a deferred numeric edit was already parsed");
             }
         }
-
         next.selected_game_profile = self.game.profile();
         next.ui_language = match self.language {
             UiLanguage::SimplifiedChinese => "zh-CN",
@@ -699,16 +728,18 @@ impl AppState {
         self.require_writable()?;
         match self.rule_mode {
             RuleMode::Quick => {
-                if self.current_profile().target_affix.trim().is_empty() {
+                let target_affix = &self.current_profile().selected_rules().target_affix;
+                if target_affix.trim().is_empty() {
                     Err(EditorError::EmptyQuickTemplate)
                 } else {
-                    FullLineAffixMatcher::new(&self.current_profile().target_affix)
+                    FullLineAffixMatcher::new(target_affix)
                         .map(|_| ())
                         .map_err(|_| EditorError::InvalidTemplate)
                 }
             }
             RuleMode::MultipleAffixes => validate_rule_set(
                 self.current_profile()
+                    .selected_rules()
                     .structured_rule_set
                     .as_ref()
                     .ok_or(EditorError::EmptyResult)?,
@@ -756,7 +787,24 @@ impl AppState {
             UiAction::SelectGame(game) if self.availability().selectors_enabled => {
                 self.game = game;
                 self.settings.selected_game_profile = game.profile();
-                self.rule_mode = RuleMode::from_setting(self.current_profile().rule_editor_mode);
+                self.rule_mode = RuleMode::from_setting(
+                    self.current_profile().selected_rules().rule_editor_mode,
+                );
+                self.selected_group = 0;
+                self.selected_condition = 0;
+                self.selected_numeric_constraint = 0;
+                self.clamp_editor_selection();
+                self.mark_edited();
+                None
+            }
+            UiAction::SelectOcrLanguage(language) if self.availability().selectors_enabled => {
+                self.current_profile_mut().ocr_language = language.setting_value().to_owned();
+                self.rule_mode = RuleMode::from_setting(
+                    self.current_profile().selected_rules().rule_editor_mode,
+                );
+                if self.rule_mode == RuleMode::MultipleAffixes {
+                    self.ensure_structured_rules();
+                }
                 self.selected_group = 0;
                 self.selected_condition = 0;
                 self.selected_numeric_constraint = 0;
@@ -766,7 +814,9 @@ impl AppState {
             }
             UiAction::SelectRuleMode(mode) if self.availability().selectors_enabled => {
                 self.rule_mode = mode;
-                self.current_profile_mut().rule_editor_mode = mode.setting_value();
+                self.current_profile_mut()
+                    .selected_rules_mut()
+                    .rule_editor_mode = mode.setting_value();
                 if mode == RuleMode::MultipleAffixes {
                     self.ensure_structured_rules();
                 }
@@ -944,7 +994,10 @@ impl AppState {
     }
 
     fn current_rule_set_mut(&mut self) -> Option<&mut RuleSetDefinition> {
-        self.current_profile_mut().structured_rule_set.as_mut()
+        self.current_profile_mut()
+            .selected_rules_mut()
+            .structured_rule_set
+            .as_mut()
     }
 
     fn current_group_mut(&mut self) -> Option<&mut AcceptableResultGroup> {
@@ -960,6 +1013,7 @@ impl AppState {
     fn ensure_structured_rules(&mut self) {
         let profile = self.current_profile_mut();
         let rules = profile
+            .selected_rules_mut()
             .structured_rule_set
             .get_or_insert_with(default_rule_set);
         if rules.groups.is_empty() {
@@ -1021,6 +1075,52 @@ fn default_group() -> AcceptableResultGroup {
         required_count: 1,
         conditions: vec![AffixCondition::default()],
     }
+}
+
+/// Keeps the editable numeric rules aligned with the numeric slots parsed by the core matcher.
+/// Invalid or temporarily empty templates deliberately leave the previous vector untouched so a
+/// user can restore the template without losing numeric edits.
+fn synchronize_condition_numeric_slots(condition: &mut AffixCondition) -> bool {
+    let Ok(matcher) = FullLineAffixMatcher::new(&condition.template) else {
+        return false;
+    };
+    let slot_count = matcher
+        .template()
+        .tokens
+        .iter()
+        .filter(|token| !token.kind.is_word())
+        .count();
+    let changed = condition.numeric_constraints.len() != slot_count;
+    condition
+        .numeric_constraints
+        .resize_with(slot_count, NumericConstraint::ignored);
+    changed
+}
+
+fn synchronize_rule_set_numeric_slots(rule_set: Option<&mut RuleSetDefinition>) {
+    let Some(rule_set) = rule_set else {
+        return;
+    };
+    for group in &mut rule_set.groups {
+        for condition in &mut group.conditions {
+            synchronize_condition_numeric_slots(condition);
+        }
+    }
+}
+
+fn synchronize_game_profile_numeric_slots(profile: &mut poe_alarm_settings::GameProfileSettings) {
+    synchronize_rule_set_numeric_slots(profile.rules_for_mut("en").structured_rule_set.as_mut());
+    synchronize_rule_set_numeric_slots(
+        profile
+            .rules_for_mut(TRADITIONAL_CHINESE_OCR_LANGUAGE)
+            .structured_rule_set
+            .as_mut(),
+    );
+}
+
+fn synchronize_settings_numeric_slots(settings: &mut AppSettings) {
+    synchronize_game_profile_numeric_slots(&mut settings.profiles.poe1);
+    synchronize_game_profile_numeric_slots(&mut settings.profiles.poe2);
 }
 
 fn parse_region(edit: &RegionEdit) -> Result<Option<ScreenRegion>, EditorError> {
@@ -1194,7 +1294,7 @@ mod tests {
     fn valid_quick_form(template: &str) -> EditorForm {
         EditorForm {
             quick_template: Some(template.to_owned()),
-            ocr_language: OcrLanguage::TraditionalChinese,
+            ocr_language: OcrLanguage::English,
             region: RegionEdit {
                 x: "10".into(),
                 y: "20".into(),
@@ -1220,7 +1320,7 @@ mod tests {
         second: &str,
     ) -> EditorForm {
         EditorForm {
-            ocr_language: OcrLanguage::TraditionalChinese,
+            ocr_language: OcrLanguage::English,
             global: GlobalEdit {
                 keep_hud_visible: true,
                 allow_overlay_capture: true,
@@ -1245,6 +1345,40 @@ mod tests {
         }
     }
 
+    fn structured_form_without_numeric(template: &str) -> EditorForm {
+        let mut form = structured_form(template, NumericConstraintMode::Ignore, "", "");
+        form.numeric_constraint = None;
+        form
+    }
+
+    fn structured_settings(
+        template: &str,
+        numeric_constraints: Vec<NumericConstraint>,
+    ) -> AppSettings {
+        let mut settings = AppSettings::default();
+        let profile = &mut settings.profiles.poe1;
+        let rules = profile.selected_rules_mut();
+        rules.rule_editor_mode = RuleEditorMode::Structured;
+        rules.structured_rule_set = Some(RuleSetDefinition {
+            schema_version: RULE_SCHEMA_VERSION,
+            name: "damage".into(),
+            groups: vec![AcceptableResultGroup {
+                name: "result".into(),
+                mode: ResultGroupMode::All,
+                required_count: 1,
+                conditions: vec![AffixCondition::new("damage", template, numeric_constraints)],
+            }],
+        });
+        settings
+    }
+
+    fn evaluate_current_rules(state: &AppState, candidate: &str) -> bool {
+        CompiledRuleSet::compile(state.current_rule_set().unwrap().clone())
+            .unwrap()
+            .evaluate(&[candidate.into()])
+            .is_match
+    }
+
     #[test]
     fn game_profiles_remain_isolated() {
         let mut state = AppState::default();
@@ -1256,11 +1390,51 @@ mod tests {
         state.commit_form(valid_quick_form("+#%暴擊率")).unwrap();
 
         assert_eq!(
-            state.settings.profiles.poe1.target_affix,
+            state.settings.profiles.poe1.rules_for("en").target_affix,
             "#% increased Attack Speed"
         );
-        assert_eq!(state.settings.profiles.poe2.target_affix, "+#%暴擊率");
+        assert_eq!(
+            state.settings.profiles.poe2.rules_for("en").target_affix,
+            "+#%暴擊率"
+        );
         assert_eq!(state.settings.selected_game_profile, GameProfile::Poe2);
+    }
+
+    #[test]
+    fn ocr_languages_remember_quick_and_structured_rules_independently() {
+        let mut state = AppState::default();
+        state
+            .commit_form(valid_quick_form("#% increased Attack Speed"))
+            .unwrap();
+
+        state.apply(UiAction::SelectOcrLanguage(
+            OcrLanguage::TraditionalChinese,
+        ));
+        assert_eq!(state.rule_mode(), RuleMode::Quick);
+        assert!(state.current_profile().selected_rules().target_affix.is_empty());
+        state.commit_form(valid_quick_form("+#%暴擊率")).unwrap();
+        state.apply(UiAction::SelectRuleMode(RuleMode::MultipleAffixes));
+        state
+            .commit_form(structured_form_without_numeric("+#%暴擊率"))
+            .unwrap();
+
+        state.apply(UiAction::SelectOcrLanguage(OcrLanguage::English));
+        assert_eq!(state.rule_mode(), RuleMode::Quick);
+        assert_eq!(
+            state.current_profile().selected_rules().target_affix,
+            "#% increased Attack Speed"
+        );
+        assert!(state.current_rule_set().is_none());
+
+        state.apply(UiAction::SelectOcrLanguage(
+            OcrLanguage::TraditionalChinese,
+        ));
+        assert_eq!(state.rule_mode(), RuleMode::MultipleAffixes);
+        assert_eq!(state.current_profile().selected_rules().target_affix, "+#%暴擊率");
+        assert_eq!(
+            state.current_condition().map(|condition| condition.template.as_str()),
+            Some("+#%暴擊率")
+        );
     }
 
     #[test]
@@ -1299,6 +1473,112 @@ mod tests {
             "3.1000000000000000000001"
         );
         assert!(state.validate_for_save().is_ok());
+    }
+
+    #[test]
+    fn valid_template_changes_resize_numeric_slots_by_position() {
+        let mut state = AppState::from_settings(
+            structured_settings("+#%暴擊率", vec![NumericConstraint::at_least(3)]),
+            None,
+        );
+        assert_eq!(
+            state.current_condition().unwrap().numeric_constraints,
+            vec![NumericConstraint::at_least(3)]
+        );
+
+        state
+            .commit_form(structured_form_without_numeric(
+                "匕首攻擊附加 (7—8) 至 (9—10) 物理傷害",
+            ))
+            .unwrap();
+        assert_eq!(
+            state.current_condition().unwrap().numeric_constraints,
+            vec![NumericConstraint::at_least(3), NumericConstraint::ignored(),]
+        );
+
+        state
+            .commit_form(structured_form_without_numeric("+#%暴擊率"))
+            .unwrap();
+        assert_eq!(
+            state.current_condition().unwrap().numeric_constraints,
+            vec![NumericConstraint::at_least(3)]
+        );
+    }
+
+    #[test]
+    fn two_slot_damage_preserves_zero_one_and_two_constraint_semantics() {
+        const TEMPLATE: &str = "匕首攻擊附加 (7—8) 至 (9—10) 物理傷害";
+
+        let zero = AppState::from_settings(structured_settings(TEMPLATE, vec![]), None);
+        assert_eq!(
+            zero.current_condition().unwrap().numeric_constraints,
+            vec![NumericConstraint::ignored(), NumericConstraint::ignored()]
+        );
+        assert!(evaluate_current_rules(
+            &zero,
+            "匕首攻擊附加 1 至 999 物理傷害"
+        ));
+
+        let one = AppState::from_settings(
+            structured_settings(TEMPLATE, vec![NumericConstraint::at_least(8)]),
+            None,
+        );
+        assert_eq!(
+            one.current_condition().unwrap().numeric_constraints,
+            vec![NumericConstraint::at_least(8), NumericConstraint::ignored(),]
+        );
+        assert!(!evaluate_current_rules(
+            &one,
+            "匕首攻擊附加 7 至 999 物理傷害"
+        ));
+        assert!(evaluate_current_rules(&one, "匕首攻擊附加 8 至 1 物理傷害"));
+
+        let two = AppState::from_settings(
+            structured_settings(
+                TEMPLATE,
+                vec![
+                    NumericConstraint::at_least(8),
+                    NumericConstraint::at_least(10),
+                ],
+            ),
+            None,
+        );
+        assert!(!evaluate_current_rules(
+            &two,
+            "匕首攻擊附加 8 至 9 物理傷害"
+        ));
+        assert!(evaluate_current_rules(
+            &two,
+            "匕首攻擊附加 8(7-8) 至 10(9-10) 物理傷害"
+        ));
+    }
+
+    #[test]
+    fn temporary_empty_template_keeps_numeric_constraints_for_restore() {
+        const TEMPLATE: &str = "匕首攻擊附加 (7—8) 至 (9—10) 物理傷害";
+        let expected = vec![
+            NumericConstraint::at_least(7),
+            NumericConstraint::exactly(10),
+        ];
+        let mut state =
+            AppState::from_settings(structured_settings(TEMPLATE, expected.clone()), None);
+
+        state
+            .commit_form(structured_form_without_numeric(""))
+            .unwrap();
+        assert!(state.current_condition().unwrap().template.is_empty());
+        assert_eq!(
+            state.current_condition().unwrap().numeric_constraints,
+            expected
+        );
+
+        state
+            .commit_form(structured_form_without_numeric(TEMPLATE))
+            .unwrap();
+        assert_eq!(
+            state.current_condition().unwrap().numeric_constraints,
+            expected
+        );
     }
 
     #[test]
@@ -1388,7 +1668,10 @@ mod tests {
             panic!("expected a start-monitoring command");
         };
         assert_eq!(snapshot.game, Game::Poe1);
-        assert_eq!(snapshot.settings.profiles.poe1.target_affix, "+#%暴擊率");
+        assert_eq!(
+            snapshot.settings.profiles.poe1.rules_for("en").target_affix,
+            "+#%暴擊率"
+        );
         state.apply(UiAction::BackgroundCompleted(
             BackgroundCompletion::succeeded(Operation::StartMonitoring),
         ));

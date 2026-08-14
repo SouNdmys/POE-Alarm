@@ -436,10 +436,11 @@ fn frame(seed: u8, width: u32, height: u32) -> CapturedFrame {
 fn quick_settings() -> AppSettings {
     let mut settings = AppSettings::default();
     settings.profiles.poe1 = GameProfileSettings {
-        target_affix: "+#% to Critical Hit Chance".to_owned(),
         capture_region: Some(ScreenRegion::new(0, 0, 64, 64)),
         ..GameProfileSettings::default()
     };
+    settings.profiles.poe1.selected_rules_mut().target_affix =
+        "+#% to Critical Hit Chance".to_owned();
     settings
 }
 
@@ -452,8 +453,16 @@ fn poe2_quick_settings() -> AppSettings {
 
 fn structured_settings() -> AppSettings {
     let mut settings = quick_settings();
-    settings.profiles.poe1.rule_editor_mode = RuleEditorMode::Structured;
-    settings.profiles.poe1.structured_rule_set = Some(RuleSetDefinition {
+    settings
+        .profiles
+        .poe1
+        .selected_rules_mut()
+        .rule_editor_mode = RuleEditorMode::Structured;
+    settings
+        .profiles
+        .poe1
+        .selected_rules_mut()
+        .structured_rule_set = Some(RuleSetDefinition {
         schema_version: 1,
         name: "results".to_owned(),
         groups: vec![AcceptableResultGroup {
@@ -471,8 +480,16 @@ fn structured_settings() -> AppSettings {
 
 fn at_least_two_settings() -> AppSettings {
     let mut settings = quick_settings();
-    settings.profiles.poe1.rule_editor_mode = RuleEditorMode::Structured;
-    settings.profiles.poe1.structured_rule_set = Some(RuleSetDefinition {
+    settings
+        .profiles
+        .poe1
+        .selected_rules_mut()
+        .rule_editor_mode = RuleEditorMode::Structured;
+    settings
+        .profiles
+        .poe1
+        .selected_rules_mut()
+        .structured_rule_set = Some(RuleSetDefinition {
         schema_version: 1,
         name: "results".to_owned(),
         groups: vec![AcceptableResultGroup {
@@ -827,7 +844,11 @@ fn screenshot_rule_changes_reuse_profile_but_profile_switch_rebuilds_once() {
     let handle = runtime(&factory, &protection);
 
     let mut same_profile_new_rule = quick_settings();
-    same_profile_new_rule.profiles.poe1.target_affix = "+# to Strength".to_owned();
+    same_profile_new_rule
+        .profiles
+        .poe1
+        .selected_rules_mut()
+        .target_affix = "+# to Strength".to_owned();
     let mut poe2 = quick_settings();
     poe2.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
     poe2.profiles.poe2 = poe2.profiles.poe1.clone();

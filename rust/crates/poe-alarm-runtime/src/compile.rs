@@ -73,6 +73,7 @@ pub fn compile_settings(
     }
 
     let selected = settings.selected_profile();
+    let selected_rules = selected.selected_rules();
     let screen_region = selected.capture_region.ok_or_else(|| {
         SettingsValidationError::one("capture_region", "select an item tooltip region first")
     })?;
@@ -111,13 +112,16 @@ pub fn compile_settings(
         GameVersion::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
     };
 
-    let plan = match selected.rule_editor_mode {
+    let plan = match selected_rules.rule_editor_mode {
         RuleEditorMode::Quick => MonitorPlan::Quick(
-            FullLineAffixMatcher::with_maximum_line_span(&selected.target_affix, maximum_line_span)
-                .map_err(|error| SettingsValidationError::one("target_affix", error.to_string()))?,
+            FullLineAffixMatcher::with_maximum_line_span(
+                &selected_rules.target_affix,
+                maximum_line_span,
+            )
+            .map_err(|error| SettingsValidationError::one("target_affix", error.to_string()))?,
         ),
         RuleEditorMode::Structured => {
-            let definition = selected.structured_rule_set.clone().ok_or_else(|| {
+            let definition = selected_rules.structured_rule_set.clone().ok_or_else(|| {
                 SettingsValidationError::one(
                     "structured_rule_set",
                     "add at least one acceptable result before monitoring",
@@ -152,10 +156,11 @@ mod tests {
     fn valid_settings() -> AppSettings {
         let mut settings = AppSettings::default();
         settings.profiles.poe1 = GameProfileSettings {
-            target_affix: "+#% to Critical Hit Chance".to_owned(),
             capture_region: Some(ScreenRegion::new(12, 20, 600, 800)),
             ..GameProfileSettings::default()
         };
+        settings.profiles.poe1.selected_rules_mut().target_affix =
+            "+#% to Critical Hit Chance".to_owned();
         settings
     }
 
@@ -199,8 +204,16 @@ mod tests {
             MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN
         );
 
-        settings.profiles.poe2.rule_editor_mode = RuleEditorMode::Structured;
-        settings.profiles.poe2.structured_rule_set = Some(RuleSetDefinition {
+        settings
+            .profiles
+            .poe2
+            .selected_rules_mut()
+            .rule_editor_mode = RuleEditorMode::Structured;
+        settings
+            .profiles
+            .poe2
+            .selected_rules_mut()
+            .structured_rule_set = Some(RuleSetDefinition {
             schema_version: 1,
             name: "results".to_owned(),
             groups: vec![AcceptableResultGroup {
@@ -226,8 +239,16 @@ mod tests {
     #[test]
     fn structured_rules_are_compiled_once() {
         let mut settings = valid_settings();
-        settings.profiles.poe1.rule_editor_mode = RuleEditorMode::Structured;
-        settings.profiles.poe1.structured_rule_set = Some(RuleSetDefinition {
+        settings
+            .profiles
+            .poe1
+            .selected_rules_mut()
+            .rule_editor_mode = RuleEditorMode::Structured;
+        settings
+            .profiles
+            .poe1
+            .selected_rules_mut()
+            .structured_rule_set = Some(RuleSetDefinition {
             schema_version: 1,
             name: "results".to_owned(),
             groups: vec![AcceptableResultGroup {
