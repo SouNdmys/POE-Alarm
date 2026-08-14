@@ -5,7 +5,6 @@ use std::time::Instant;
 use windows::Globalization::Language;
 use windows::Graphics::Imaging::{BitmapBufferAccessMode, BitmapPixelFormat, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
-use windows::Storage::Streams::Buffer;
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
@@ -70,8 +69,6 @@ struct DirectOcrEngine {
     maximum_image_dimension: u32,
     bitmap: Option<SoftwareBitmap>,
     bitmap_dimensions: (usize, usize),
-    gray_buffer: Option<Buffer>,
-    gray_capacity: usize,
     _thread_affinity: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
@@ -100,8 +97,6 @@ impl DirectOcrEngine {
             maximum_image_dimension: capabilities.maximum_image_dimension,
             bitmap: None,
             bitmap_dimensions: (0, 0),
-            gray_buffer: None,
-            gray_capacity: 0,
             _thread_affinity: std::marker::PhantomData,
         })
     }
@@ -204,70 +199,17 @@ impl DirectOcrEngine {
     fn prepare_gray_bitmap(&mut self, image: &OwnedBgraImage) -> Result<(), OcrError> {
         let width = image.width();
         let height = image.height();
-        if self.bitmap_dimensions != (width, height) {
-            if let Some(previous) = self.bitmap.take() {
-                let _ = previous.Close();
-            }
-            self.bitmap = Some(
+        let previous = replace_sized_resource(
+            &mut self.bitmap,
+            &mut self.bitmap_dimensions,
+            (width, height),
+            || {
                 SoftwareBitmap::Create(BitmapPixelFormat::Gray8, width as i32, height as i32)
-                    .map_err(|error| winrt_error("create reusable Gray8 SoftwareBitmap", error))?,
-            );
-            self.bitmap_dimensions = (width, height);
-        }
-
-        let pixel_count = width
-            .checked_mul(height)
-            .ok_or(OcrError::DimensionsTooLarge)?;
-        if self.gray_capacity < pixel_count {
-            self.gray_buffer = Some(
-                Buffer::Create(
-                    u32::try_from(pixel_count).map_err(|_| OcrError::DimensionsTooLarge)?,
-                )
-                .map_err(|error| winrt_error("create reusable Gray8 input buffer", error))?,
-            );
-            self.gray_capacity = pixel_count;
-        }
-        let gray_buffer = self
-            .gray_buffer
-            .as_ref()
-            .expect("Gray8 input buffer was initialized above");
-        gray_buffer
-            .SetLength(u32::try_from(pixel_count).map_err(|_| OcrError::DimensionsTooLarge)?)
-            .map_err(|error| winrt_error("size reusable Gray8 input buffer", error))?;
-        let gray_access: windows::Win32::System::WinRT::IBufferByteAccess = gray_buffer
-            .cast()
-            .map_err(|error| winrt_error("access reusable Gray8 input buffer", error))?;
-        // SAFETY: the WinRT buffer stays alive for this copy and was allocated with at least
-        // `pixel_count` bytes. Rows are written to a validated packed Gray8 layout.
-        let gray_destination = unsafe {
-            gray_access
-                .Buffer()
-                .map_err(|error| winrt_error("get reusable Gray8 input memory", error))?
-        };
-        if gray_destination.is_null() {
-            return Err(OcrError::WinRt {
-                operation: "validate reusable Gray8 input memory",
-                hresult: 0,
-                message: "Windows returned a null input buffer".to_owned(),
-            });
-        }
-        for row in 0..height {
-            let source_start = row * image.stride();
-            // SAFETY: row offsets stay inside `pixel_count`; each destination has `width` bytes.
-            let destination_row =
-                unsafe { std::slice::from_raw_parts_mut(gray_destination.add(row * width), width) };
-            match image.format() {
-                OcrPixelFormat::Gray8 => {
-                    destination_row
-                        .copy_from_slice(&image.pixels()[source_start..source_start + width]);
-                }
-                OcrPixelFormat::Bgra8 => {
-                    let source = &image.pixels()[source_start..source_start + width * 4];
-                    for (pixel, intensity) in source.chunks_exact(4).zip(destination_row) {
-                        *intensity = pixel[0];
-                    }
-                }
-            }
+                    .map_err(|error| winrt_error("create reusable Gray8 SoftwareBitmap", error))
+            },
+        )?;
+        if let Some(previous) = previous {
+            let _ = previous.Close();
         }
 
         let bitmap = self
@@ -297,6 +239,7 @@ impl DirectOcrEngine {
         }
         if destination.is_null()
             || plane.StartIndex < 0
+            || plane.Width < width as i32
             || plane.Stride < width as i32
             || plane.Height < height as i32
         {
@@ -308,9 +251,12 @@ impl DirectOcrEngine {
         }
         let start = plane.StartIndex as usize;
         let destination_stride = plane.Stride as usize;
-        let required = start
-            .checked_add(destination_stride.saturating_mul(height.saturating_sub(1)))
+        let plane_length = destination_stride
+            .checked_mul(height.saturating_sub(1))
             .and_then(|offset| offset.checked_add(width))
+            .ok_or(OcrError::DimensionsTooLarge)?;
+        let required = start
+            .checked_add(plane_length)
             .ok_or(OcrError::DimensionsTooLarge)?;
         if required > capacity as usize {
             return Err(OcrError::WinRt {
@@ -322,26 +268,86 @@ impl DirectOcrEngine {
             });
         }
 
-        if destination_stride == width {
-            // SAFETY: both buffers have at least `pixel_count` readable/writable bytes and are
-            // distinct WinRT allocations kept alive for the copy.
-            unsafe {
-                ptr::copy_nonoverlapping(gray_destination, destination.add(start), pixel_count);
-            }
-        } else {
+        // SAFETY: the bitmap, lock, reference, and access objects remain alive through the copy;
+        // the native capacity and plane bounds above prove this slice is wholly writable.
+        let destination =
+            unsafe { std::slice::from_raw_parts_mut(destination.add(start), plane_length) };
+        copy_image_to_gray_plane(image, destination, destination_stride)?;
+        Ok(())
+    }
+}
+
+/// Replaces a dimension-bound resource transactionally: a failed allocation leaves both the
+/// previous resource and its dimensions intact. This keeps the bitmap cache usable if a resize
+/// fails and the next frame returns to the previous size.
+fn replace_sized_resource<T, E>(
+    resource: &mut Option<T>,
+    dimensions: &mut (usize, usize),
+    requested_dimensions: (usize, usize),
+    create: impl FnOnce() -> Result<T, E>,
+) -> Result<Option<T>, E> {
+    if resource.is_some() && *dimensions == requested_dimensions {
+        return Ok(None);
+    }
+
+    let replacement = create()?;
+    let previous = resource.replace(replacement);
+    *dimensions = requested_dimensions;
+    Ok(previous)
+}
+
+fn copy_image_to_gray_plane(
+    image: &OwnedBgraImage,
+    destination: &mut [u8],
+    destination_stride: usize,
+) -> Result<(), OcrError> {
+    let width = image.width();
+    let height = image.height();
+    if destination_stride < width {
+        return Err(OcrError::WinRt {
+            operation: "validate Gray8 bitmap memory",
+            hresult: 0,
+            message: "Windows returned a bitmap stride smaller than its width".to_owned(),
+        });
+    }
+    let required = destination_stride
+        .checked_mul(height.saturating_sub(1))
+        .and_then(|offset| offset.checked_add(width))
+        .ok_or(OcrError::DimensionsTooLarge)?;
+    if destination.len() < required {
+        return Err(OcrError::WinRt {
+            operation: "validate Gray8 bitmap capacity",
+            hresult: 0,
+            message: format!(
+                "Windows exposed {} bytes for a bitmap plane requiring {required}",
+                destination.len()
+            ),
+        });
+    }
+
+    match image.format() {
+        OcrPixelFormat::Gray8 => {
             for row in 0..height {
-                // SAFETY: source and destination row bounds were validated above.
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        gray_destination.add(row * width),
-                        destination.add(start + row * destination_stride),
-                        width,
-                    );
+                let source_start = row * image.stride();
+                let destination_start = row * destination_stride;
+                destination[destination_start..destination_start + width]
+                    .copy_from_slice(&image.pixels()[source_start..source_start + width]);
+            }
+        }
+        OcrPixelFormat::Bgra8 => {
+            for row in 0..height {
+                let source_start = row * image.stride();
+                let destination_start = row * destination_stride;
+                let source = &image.pixels()[source_start..source_start + width * 4];
+                let destination_row =
+                    &mut destination[destination_start..destination_start + width];
+                for (pixel, intensity) in source.chunks_exact(4).zip(destination_row) {
+                    *intensity = pixel[0];
                 }
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 fn query_capabilities() -> Result<OcrCapabilities, OcrError> {
@@ -473,6 +479,95 @@ fn winrt_error(operation: &'static str, error: windows::core::Error) -> OcrError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_gray_plane_copy_preserves_bgra_and_native_strides() {
+        let image = OwnedBgraImage::new(
+            3,
+            2,
+            16,
+            vec![
+                10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 201, 202, 203, 204, 40, 41, 42, 43,
+                50, 51, 52, 53, 60, 61, 62, 63, 211, 212, 213, 214,
+            ],
+        )
+        .unwrap();
+        let mut destination = vec![0xEE; 8];
+
+        copy_image_to_gray_plane(&image, &mut destination, 5).unwrap();
+
+        assert_eq!(destination, [10, 20, 30, 0xEE, 0xEE, 40, 50, 60]);
+    }
+
+    #[test]
+    fn direct_gray_plane_copy_preserves_gray8_and_native_strides() {
+        let image = OwnedBgraImage::gray8(3, 2, 4, vec![1, 2, 3, 201, 4, 5, 6, 202]).unwrap();
+        let mut destination = vec![0xEE; 9];
+
+        copy_image_to_gray_plane(&image, &mut destination, 6).unwrap();
+
+        assert_eq!(destination, [1, 2, 3, 0xEE, 0xEE, 0xEE, 4, 5, 6]);
+    }
+
+    #[test]
+    fn direct_gray_plane_copy_rejects_invalid_destination_layouts() {
+        let image = OwnedBgraImage::gray8(3, 2, 3, vec![1, 2, 3, 4, 5, 6]).unwrap();
+
+        assert!(matches!(
+            copy_image_to_gray_plane(&image, &mut [0; 6], 2),
+            Err(OcrError::WinRt {
+                operation: "validate Gray8 bitmap memory",
+                ..
+            })
+        ));
+        assert!(matches!(
+            copy_image_to_gray_plane(&image, &mut [0; 6], 4),
+            Err(OcrError::WinRt {
+                operation: "validate Gray8 bitmap capacity",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn failed_resource_resize_preserves_resource_and_dimension_cache() {
+        let mut resource = Some("old bitmap");
+        let mut dimensions = (320, 96);
+
+        let resize: Result<Option<&str>, &str> =
+            replace_sized_resource(&mut resource, &mut dimensions, (640, 192), || {
+                Err("allocation failed")
+            });
+
+        assert_eq!(resize, Err("allocation failed"));
+        assert_eq!(resource, Some("old bitmap"));
+        assert_eq!(dimensions, (320, 96));
+
+        let mut create_called = false;
+        let reuse = replace_sized_resource(&mut resource, &mut dimensions, (320, 96), || {
+            create_called = true;
+            Ok::<_, &str>("unexpected bitmap")
+        })
+        .unwrap();
+        assert_eq!(reuse, None);
+        assert!(!create_called);
+        assert_eq!(resource, Some("old bitmap"));
+    }
+
+    #[test]
+    fn missing_resource_is_rebuilt_even_when_dimension_cache_matches() {
+        let mut resource = None;
+        let mut dimensions = (320, 96);
+
+        let previous = replace_sized_resource(&mut resource, &mut dimensions, (320, 96), || {
+            Ok::<_, ()>("replacement bitmap")
+        })
+        .unwrap();
+
+        assert_eq!(previous, None);
+        assert_eq!(resource, Some("replacement bitmap"));
+        assert_eq!(dimensions, (320, 96));
+    }
 
     #[test]
     fn language_scoring_prefers_expected_regional_recognizers() {
