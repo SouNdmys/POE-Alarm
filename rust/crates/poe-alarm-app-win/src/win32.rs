@@ -23,22 +23,26 @@ use poe_alarm_settings::{
 };
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND, DwmSetWindowAttribute,
+    DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE, DWMSBT_MAINWINDOW,
+    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
-    DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK,
-    DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect, GetMonitorInfoW, HBRUSH,
-    HDC, HFONT, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SelectObject, SetBkColor, SetBkMode, SetTextColor,
-    TRANSPARENT, UpdateWindow,
+    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn,
+    CreateSolidBrush, DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+    DT_VCENTER, DT_WORDBREAK, DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect,
+    FillRgn, GetMonitorInfoW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
+    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
-use windows::Win32::UI::Controls::{EM_SETSEL, SetWindowTheme};
+use windows::Win32::UI::Controls::{
+    DRAWITEMSTRUCT, EM_SETSEL, MARGINS, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_SELECTED,
+    ODT_BUTTON, SetWindowTheme,
+};
 use windows::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
     GetDpiForWindow, SetProcessDpiAwarenessContext,
@@ -47,7 +51,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, IsWindowEnabled, VK_A, VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_PUSHBUTTON, CB_ADDSTRING,
+    BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_OWNERDRAW, CB_ADDSTRING,
     CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CREATESTRUCTW,
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, ES_WANTRETURN, GWLP_USERDATA,
@@ -58,13 +62,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle,
     WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER, WS_CAPTION,
-    WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_HOTKEY,
+    WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER,
+    WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    WS_VSCROLL,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
-use crate::theme::{DARK_PALETTE, Rgb, StatusTone};
+use crate::theme::{ControlRole, ControlState, Rgb, SEA_GLASS_PALETTE, StatusTone};
 use crate::{
     AppState, BackgroundCommand, BackgroundCompletion, ConditionEdit, EditorError, EditorForm,
     Game, GlobalEdit, GroupEdit, MonitorStatus, NumericConstraintEdit, OcrLanguage, Operation,
@@ -643,8 +648,9 @@ fn close_needs_save(
 }
 
 const HUD_CONTENT_CLASS: PCWSTR = w!("PoeAlarmAppStatusHudContent");
-const HUD_WIDTH: i32 = 330;
-const HUD_HEIGHT: i32 = 78;
+const HUD_WIDTH: i32 = 300;
+const HUD_HEIGHT: i32 = 62;
+const HUD_FONT_SIZE: i32 = 15;
 
 struct HudPaintState {
     text: String,
@@ -692,7 +698,7 @@ impl StatusHud {
         let mut paint = Box::new(HudPaintState {
             text: String::new(),
             color: rgb(94, 105, 112),
-            font: unsafe { create_font(dpi, 20, FW_SEMIBOLD.0 as i32) },
+            font: unsafe { create_font(dpi, HUD_FONT_SIZE, FW_SEMIBOLD.0 as i32) },
             placement: false,
         });
         let child = unsafe {
@@ -729,7 +735,7 @@ impl StatusHud {
         let dpi = dpi.max(96);
         let dpi_changed = self.dpi != dpi;
         if dpi_changed {
-            let font = unsafe { create_font(dpi, 20, FW_SEMIBOLD.0 as i32) };
+            let font = unsafe { create_font(dpi, HUD_FONT_SIZE, FW_SEMIBOLD.0 as i32) };
             let old_font = std::mem::replace(&mut self.paint.font, font);
             if !old_font.0.is_null() {
                 unsafe {
@@ -997,23 +1003,24 @@ unsafe extern "system" fn hud_content_proc(
                 FillRect(dc, &client, brush.0);
                 if state.placement {
                     let mut placement_bounds = client;
-                    placement_bounds.left += 8;
-                    placement_bounds.top += (client.bottom - client.top) / 6;
-                    placement_bounds.right -= 8;
+                    placement_bounds.left += scale(10, GetDpiForWindow(hwnd).max(96));
+                    placement_bounds.top += scale(5, GetDpiForWindow(hwnd).max(96));
+                    placement_bounds.right -= scale(10, GetDpiForWindow(hwnd).max(96));
+                    placement_bounds.bottom -= scale(5, GetDpiForWindow(hwnd).max(96));
                     draw_text(
                         dc,
                         state.font,
                         rgb(255, 255, 255),
                         &state.text,
                         placement_bounds,
-                        DT_CENTER | DT_WORDBREAK,
+                        DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS,
                     );
                 } else {
                     let mut content_bounds = client;
                     content_bounds.left += scale(10, GetDpiForWindow(hwnd).max(96));
-                    content_bounds.top += scale(6, GetDpiForWindow(hwnd).max(96));
+                    content_bounds.top += scale(5, GetDpiForWindow(hwnd).max(96));
                     content_bounds.right -= scale(10, GetDpiForWindow(hwnd).max(96));
-                    content_bounds.bottom -= scale(6, GetDpiForWindow(hwnd).max(96));
+                    content_bounds.bottom -= scale(5, GetDpiForWindow(hwnd).max(96));
                     draw_text(
                         dc,
                         state.font,
@@ -2530,19 +2537,116 @@ impl WindowState {
         let control = HWND(lparam.0 as *mut c_void);
         let disabled = !unsafe { IsWindowEnabled(control) }.as_bool();
         let foreground = if disabled {
-            DARK_PALETTE.text_disabled
+            SEA_GLASS_PALETTE.text_disabled
         } else {
-            DARK_PALETTE.text_primary
+            SEA_GLASS_PALETTE.text_primary
         };
         let (background, brush) = match message {
-            WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (DARK_PALETTE.input, &self.theme_brushes.input),
-            _ => (DARK_PALETTE.card, &self.theme_brushes.card),
+            WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
+                (SEA_GLASS_PALETTE.input, &self.theme_brushes.input)
+            }
+            _ => (SEA_GLASS_PALETTE.card, &self.theme_brushes.card),
         };
         unsafe {
             SetTextColor(dc, theme_color(foreground));
             SetBkColor(dc, theme_color(background));
         }
         LRESULT(brush.0.0 as isize)
+    }
+
+    unsafe fn draw_button(&self, lparam: LPARAM) -> LRESULT {
+        if lparam.0 == 0 {
+            return LRESULT(0);
+        }
+        let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+        if item.CtlType != ODT_BUTTON {
+            return LRESULT(0);
+        }
+        let id = item.CtlID as u16;
+        let role = match id {
+            ID_SAVE | ID_START => ControlRole::Primary,
+            ID_DELETE_RESULT | ID_DELETE_CONDITION | ID_DELETE_NUMERIC | ID_STOP => {
+                ControlRole::Destructive
+            }
+            _ => ControlRole::Secondary,
+        };
+        let focused = item.itemState.0 & ODS_FOCUS.0 != 0;
+        let state = if item.itemState.0 & ODS_DISABLED.0 != 0 {
+            ControlState::Disabled
+        } else if item.itemState.0 & ODS_SELECTED.0 != 0 {
+            ControlState::Pressed
+        } else if item.itemState.0 & ODS_HOTLIGHT.0 != 0 {
+            ControlState::Hovered
+        } else if focused {
+            ControlState::Focused
+        } else {
+            ControlState::Normal
+        };
+        let colors = SEA_GLASS_PALETTE.control_colors(role, state);
+        let parent_background = if matches!(id, ID_SAVE | ID_START | ID_STOP | ID_SCREENSHOT) {
+            SEA_GLASS_PALETTE.canvas
+        } else {
+            SEA_GLASS_PALETTE.card
+        };
+        let parent_brush = Brush::new(theme_color(parent_background));
+        let fill = Brush::new(theme_color(colors.background));
+        let border_color = if focused && !matches!(state, ControlState::Disabled) {
+            SEA_GLASS_PALETTE.focus
+        } else {
+            colors.focus_ring.unwrap_or(colors.border)
+        };
+        let border = Brush::new(theme_color(border_color));
+        let shadow = Brush::new(theme_color(SEA_GLASS_PALETTE.shadow));
+        let dpi = unsafe { GetDpiForWindow(item.hwndItem) }.max(96);
+        let inset = scale(1, dpi).max(1);
+        let radius = scale(7, dpi).max(3);
+        let shadow_offset = scale(1, dpi).max(1);
+        let button_bounds = RECT {
+            left: item.rcItem.left,
+            top: item.rcItem.top,
+            right: item.rcItem.right,
+            bottom: item.rcItem.bottom - shadow_offset,
+        };
+        unsafe {
+            FillRect(item.hDC, &item.rcItem, parent_brush.0);
+            draw_rounded_surface(
+                item.hDC,
+                RECT {
+                    left: button_bounds.left,
+                    top: button_bounds.top + shadow_offset,
+                    right: button_bounds.right,
+                    bottom: button_bounds.bottom + shadow_offset,
+                },
+                shadow.0,
+                radius,
+            );
+            draw_rounded_surface(item.hDC, button_bounds, border.0, radius);
+            draw_rounded_surface(
+                item.hDC,
+                RECT {
+                    left: button_bounds.left + inset,
+                    top: button_bounds.top + inset,
+                    right: button_bounds.right - inset,
+                    bottom: button_bounds.bottom - inset,
+                },
+                fill.0,
+                (radius - inset).max(2),
+            );
+            let mut text_bounds = button_bounds;
+            if matches!(state, ControlState::Pressed) {
+                text_bounds.top += inset;
+                text_bounds.bottom += inset;
+            }
+            draw_text(
+                item.hDC,
+                self.fonts.body,
+                theme_color(colors.foreground),
+                &get_text(item.hwndItem),
+                text_bounds,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+        }
+        LRESULT(1)
     }
 
     unsafe fn paint(&self) {
@@ -2555,12 +2659,13 @@ impl WindowState {
             }
             return;
         }
-        let background = Brush::new(theme_color(DARK_PALETTE.canvas));
-        let header = Brush::new(theme_color(DARK_PALETTE.header));
-        let section = Brush::new(theme_color(DARK_PALETTE.card));
-        let raised_section = Brush::new(theme_color(DARK_PALETTE.card_raised));
-        let section_border = Brush::new(theme_color(DARK_PALETTE.divider));
-        let gold = Brush::new(theme_color(DARK_PALETTE.accent));
+        let background = Brush::new(theme_color(SEA_GLASS_PALETTE.canvas));
+        let header = Brush::new(theme_color(SEA_GLASS_PALETTE.header));
+        let section = Brush::new(theme_color(SEA_GLASS_PALETTE.card));
+        let raised_section = Brush::new(theme_color(SEA_GLASS_PALETTE.card_raised));
+        let section_border = Brush::new(theme_color(SEA_GLASS_PALETTE.border));
+        let shadow = Brush::new(theme_color(SEA_GLASS_PALETTE.shadow));
+        let accent_rule = Brush::new(theme_color(SEA_GLASS_PALETTE.accent));
         let accent = Brush::new(self.status_color());
         unsafe {
             FillRect(dc, &client, background.0);
@@ -2585,78 +2690,67 @@ impl WindowState {
                     right: client.right,
                     bottom: s(82),
                 },
-                gold.0,
+                accent_rule.0,
             );
-            let border = s(1).max(1);
-            FillRect(
+            draw_glass_card(
                 dc,
-                &RECT {
+                RECT {
                     left: s(18),
                     top: s(160),
                     right: s(1062),
                     bottom: s(535),
                 },
-                section_border.0,
-            );
-            FillRect(
-                dc,
-                &RECT {
-                    left: s(18) + border,
-                    top: s(160) + border,
-                    right: s(1062) - border,
-                    bottom: s(535) - border,
-                },
+                self.dpi,
                 section.0,
+                section_border.0,
+                shadow.0,
             );
-            FillRect(
+            draw_glass_card(
                 dc,
-                &RECT {
+                RECT {
                     left: s(18),
                     top: s(542),
                     right: s(1062),
                     bottom: s(704),
                 },
-                section_border.0,
-            );
-            FillRect(
-                dc,
-                &RECT {
-                    left: s(18) + border,
-                    top: s(542) + border,
-                    right: s(1062) - border,
-                    bottom: s(704) - border,
-                },
+                self.dpi,
                 section.0,
+                section_border.0,
+                shadow.0,
             );
-            FillRect(
+            draw_rounded_surface(
                 dc,
-                &RECT {
+                RECT {
                     left: s(18),
                     top: s(710),
                     right: s(1062),
                     bottom: s(742),
                 },
                 section_border.0,
+                s(10),
             );
-            FillRect(
+            let status_inset = s(1).max(1);
+            draw_rounded_surface(
                 dc,
-                &RECT {
-                    left: s(18) + border,
-                    top: s(710) + border,
-                    right: s(1062) - border,
-                    bottom: s(742) - border,
+                RECT {
+                    left: s(18) + status_inset,
+                    top: s(710) + status_inset,
+                    right: s(1062) - status_inset,
+                    bottom: s(742) - status_inset,
                 },
                 raised_section.0,
+                (s(10) - status_inset).max(2),
             );
-            FillRect(
+            draw_rounded_surface(
                 dc,
-                &RECT {
-                    left: s(18),
-                    top: s(710),
-                    right: s(24),
-                    bottom: s(742),
+                RECT {
+                    left: s(24),
+                    top: s(718),
+                    right: s(28),
+                    bottom: s(734),
                 },
                 accent.0,
+                s(2).max(1),
             );
             SetBkMode(dc, TRANSPARENT);
         }
@@ -2665,7 +2759,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.title,
-                theme_color(DARK_PALETTE.text_primary),
+                theme_color(SEA_GLASS_PALETTE.text_primary),
                 text.heading,
                 rect(s(30), s(16), s(650), s(48)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2673,7 +2767,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.subtitle,
-                theme_color(DARK_PALETTE.text_muted),
+                theme_color(SEA_GLASS_PALETTE.text_muted),
                 text.subtitle,
                 rect(s(30), s(49), s(1020), s(76)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -2875,7 +2969,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.label,
-                theme_color(DARK_PALETTE.text_muted),
+                theme_color(SEA_GLASS_PALETTE.text_muted),
                 text.status_label,
                 rect(s(36), s(711), s(160), s(740)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2920,7 +3014,7 @@ impl WindowState {
             | MonitorStatus::SavingSettings => StatusTone::Warning,
             _ => StatusTone::Info,
         };
-        theme_color(DARK_PALETTE.status_color(tone))
+        theme_color(SEA_GLASS_PALETTE.status_color(tone))
     }
 
     unsafe fn begin_self_test(&mut self) {
@@ -3116,11 +3210,11 @@ impl Controls {
 
     unsafe fn apply_visual_theme(&self) {
         // Windows owns the keyboard, focus, IME and accessibility behaviour of these
-        // controls. Asking its native theme renderer for the dark variant gives us the
-        // desired states without replacing that mature interaction layer.
+        // controls. Keep the documented light Explorer rendering instead of replacing
+        // that mature interaction layer.
         for control in self.all() {
             unsafe {
-                let _ = SetWindowTheme(control, w!("DarkMode_Explorer"), PCWSTR::null());
+                let _ = SetWindowTheme(control, w!("Explorer"), PCWSTR::null());
             }
         }
     }
@@ -3303,8 +3397,8 @@ struct ThemeBrushes {
 impl ThemeBrushes {
     fn new() -> Self {
         Self {
-            card: Brush::new(theme_color(DARK_PALETTE.card)),
-            input: Brush::new(theme_color(DARK_PALETTE.input)),
+            card: Brush::new(theme_color(SEA_GLASS_PALETTE.card)),
+            input: Brush::new(theme_color(SEA_GLASS_PALETTE.input)),
         }
     }
 }
@@ -3355,6 +3449,7 @@ unsafe extern "system" fn window_proc(
         WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => unsafe {
             state.paint_control_background(message, wparam, lparam)
         },
+        WM_DRAWITEM => unsafe { state.draw_button(lparam) },
         WM_APP_WORK_COMPLETED => {
             if lparam.0 != 0 {
                 let completion = unsafe { Box::from_raw(lparam.0 as *mut BackgroundCompletion) };
@@ -3636,7 +3731,7 @@ unsafe fn create_button(parent: HWND, id: u16) -> Result<HWND, String> {
         create_control(
             parent,
             w!("BUTTON"),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WinWindowStyle(BS_PUSHBUTTON as u32),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WinWindowStyle(BS_OWNERDRAW as u32),
             id,
         )
     }
@@ -3923,7 +4018,7 @@ unsafe fn draw_label(
         draw_text(
             dc,
             font,
-            theme_color(DARK_PALETTE.text_secondary),
+            theme_color(SEA_GLASS_PALETTE.text_secondary),
             text,
             rect(x, y, x + width, y + 24),
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -3943,7 +4038,7 @@ unsafe fn draw_small_label(
         draw_text(
             dc,
             font,
-            theme_color(DARK_PALETTE.text_muted),
+            theme_color(SEA_GLASS_PALETTE.text_muted),
             text,
             rect(x, y, x + width, y + 20),
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -3963,7 +4058,7 @@ unsafe fn draw_help(
         draw_text(
             dc,
             font,
-            theme_color(DARK_PALETTE.text_muted),
+            theme_color(SEA_GLASS_PALETTE.text_muted),
             text,
             rect(x, y, x + width, y + 42),
             DT_LEFT | DT_WORDBREAK,
@@ -4010,6 +4105,61 @@ fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
     }
 }
 
+unsafe fn draw_rounded_surface(dc: HDC, bounds: RECT, brush: HBRUSH, corner_radius: i32) {
+    let diameter = corner_radius.max(1) * 2;
+    let region = unsafe {
+        CreateRoundRectRgn(
+            bounds.left,
+            bounds.top,
+            bounds.right,
+            bounds.bottom,
+            diameter,
+            diameter,
+        )
+    };
+    if region.0.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = FillRgn(dc, region, brush);
+        let _ = DeleteObject(HGDIOBJ(region.0));
+    }
+}
+
+unsafe fn draw_glass_card(
+    dc: HDC,
+    bounds: RECT,
+    dpi: u32,
+    fill: HBRUSH,
+    border: HBRUSH,
+    shadow: HBRUSH,
+) {
+    let one = scale(1, dpi).max(1);
+    let shadow_offset = scale(2, dpi).max(1);
+    let radius = scale(13, dpi).max(3);
+    let shadow_bounds = RECT {
+        left: bounds.left,
+        top: bounds.top + shadow_offset,
+        right: bounds.right,
+        bottom: bounds.bottom + shadow_offset,
+    };
+    unsafe {
+        draw_rounded_surface(dc, shadow_bounds, shadow, radius);
+        draw_rounded_surface(dc, bounds, border, radius);
+        draw_rounded_surface(
+            dc,
+            RECT {
+                left: bounds.left + one,
+                top: bounds.top + one,
+                right: bounds.right - one,
+                bottom: bounds.bottom - one,
+            },
+            fill,
+            (radius - one).max(2),
+        );
+    }
+}
+
 fn scale(value: i32, dpi: u32) -> i32 {
     ((i64::from(value) * i64::from(dpi) + 48) / 96) as i32
 }
@@ -4019,7 +4169,7 @@ fn wide(value: &str) -> Vec<u16> {
 }
 
 unsafe fn apply_native_window_theme(window: HWND) {
-    let dark_mode = 1_i32;
+    let dark_mode = 0_i32;
     unsafe {
         let _ = DwmSetWindowAttribute(
             window,
@@ -4034,6 +4184,26 @@ unsafe fn apply_native_window_theme(window: HWND) {
             (&corner_preference as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
             size_of_val(&corner_preference) as u32,
         );
+        let backdrop: DWM_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW;
+        let backdrop_enabled = DwmSetWindowAttribute(
+            window,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            (&backdrop as *const DWM_SYSTEMBACKDROP_TYPE).cast(),
+            size_of_val(&backdrop) as u32,
+        )
+        .is_ok();
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        if backdrop_enabled {
+            // Painting still starts with an opaque fog-white fallback. On Windows 11 the
+            // backdrop remains available to the non-client frame; older systems simply
+            // ignore the request without risking an unpainted black client area.
+            let _ = DwmExtendFrameIntoClientArea(window, &margins);
+        }
     }
 }
 
