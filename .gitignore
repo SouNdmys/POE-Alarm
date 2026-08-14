@@ -22,3 +22,5 @@ tests/screenshots/**/*.jpeg
 *.nupkg
 *.msix
 *.msixbundle
+rust/vendor/
+rust/.cargo-vendor-config.toml

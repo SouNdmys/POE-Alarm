@@ -1,0 +1,16 @@
+[package]
+name = "poe-alarm-app"
+description = "POE Alarm GPUI frontend (Ledger design)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "poe-alarm-gpui-spike"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+gpui = "0.2"
+gpui-component = "0.5"
