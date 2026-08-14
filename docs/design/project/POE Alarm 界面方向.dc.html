@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #08090A; }
+  a { color: #8FA0FF; text-decoration: none; }
+  a:hover { color: #BAC3FF; }
+</style>
+</helmet>
+
+<section id="turn2" style="display:flex;flex-direction:column;gap:52px;padding:56px 60px 40px;background:#08090A;font-family:'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Segoe UI Variable Text','Segoe UI',sans-serif;color:#E6E9EE;">
+
+  <div style="width:1640px;border:1px solid #1E2126;background:#0D0E11;">
+    <div style="display:flex;align-items:baseline;gap:14px;padding:22px 26px 18px;border-bottom:1px solid #1E2126;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.14em;color:#7B8492;">02 · 判断</span>
+      <span style="font-size:17px;font-weight:600;">三个形态是同一个产品的三档密度，不是三个窗口</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;">
+      <div style="border-right:1px solid #1E2126;padding:22px 26px 24px;">
+        <div style="font-size:12.5px;line-height:1.8;color:#C9CFD8;">Workbench 与 Instrument 不该是两套布局。<span style="color:#E6E9EE;font-weight:600;">Instrument 就是 Workbench 折起「规则树 + 条件编辑器」后的运行视图；Dock 是 Instrument 再折起配置摘要后的停靠视图。</span>同一个窗口、同一套坐标系、同一张 token 表，三档密度用 <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#8FA0FF;">Ctrl⇧1 / 2 / 3</span> 直达，<span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#8FA0FF;">Ctrl\</span> 循环。</div>
+        <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.6;color:#C9CFD8;">
+          <div style="display:flex;gap:10px;"><span style="color:#5BA8A0;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">01</span><span><span style="color:#E6E9EE;">空间稳定</span>：状态、目标、延迟三块在三档里坐标不变，眼睛不需要重新找。</span></div>
+          <div style="display:flex;gap:10px;"><span style="color:#5BA8A0;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">02</span><span><span style="color:#E6E9EE;">只有一套导航和一套快捷键</span>，不需要记三个窗口的操作模型。</span></div>
+          <div style="display:flex;gap:10px;"><span style="color:#5BA8A0;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">03</span><span><span style="color:#E6E9EE;">折叠只做减法</span>：每降一档只是隐藏一层，不重排剩下的内容 —— 这正是「不再操作界面」的前提。</span></div>
+        </div>
+        <div style="margin-top:18px;border:1px solid #1E2126;">
+          <div style="display:grid;grid-template-columns:120px 62px 1fr 1fr;background:#101215;border-bottom:1px solid #1E2126;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.12em;color:#7B8492;">
+            <div style="padding:6px 10px;">模式</div><div style="padding:6px 10px;">宽度</div><div style="padding:6px 10px;">保留</div><div style="padding:6px 10px;">折起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:120px 62px 1fr 1fr;border-bottom:1px solid #16181C;font-size:11.5px;color:#C9CFD8;">
+            <div style="padding:7px 10px;color:#E6E9EE;">Workbench</div><div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;">1180</div><div style="padding:7px 10px;">树 · 编辑器 · 运行 · 状态栏</div><div style="padding:7px 10px;color:#8A929E;">—</div>
+          </div>
+          <div style="display:grid;grid-template-columns:120px 62px 1fr 1fr;border-bottom:1px solid #16181C;font-size:11.5px;color:#C9CFD8;">
+            <div style="padding:7px 10px;color:#E6E9EE;">Instrument</div><div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;">720</div><div style="padding:7px 10px;">目标 · 识别摘要 · 运行 · 状态栏</div><div style="padding:7px 10px;color:#8A929E;">规则树 · 数值表</div>
+          </div>
+          <div style="display:grid;grid-template-columns:120px 62px 1fr 1fr;font-size:11.5px;color:#C9CFD8;">
+            <div style="padding:7px 10px;color:#E6E9EE;">Dock</div><div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;">400</div><div style="padding:7px 10px;">状态 · 目标 · 摘要行 · 主按钮</div><div style="padding:7px 10px;color:#8A929E;">编辑器 · 日志（留 3 条）</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:22px 26px 24px;">
+        <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.14em;color:#7B8492;margin-bottom:12px;">三档折叠 · 同一坐标系</div>
+        <div style="display:flex;gap:14px;align-items:flex-start;">
+          <div style="width:212px;">
+            <div style="height:88px;border:1px solid #2A2F37;display:flex;">
+              <div style="width:38px;border-right:1px solid #2A2F37;background:#14181C;"></div>
+              <div style="flex:1;border-right:1px solid #2A2F37;"></div>
+              <div style="width:58px;background:#12161A;"></div>
+            </div>
+            <div style="height:10px;border:1px solid #2A2F37;border-top:0;background:#101215;"></div>
+            <div style="margin-top:7px;font-size:11.5px;color:#E6E9EE;">Workbench</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#7B8492;">Ctrl⇧1</div>
+          </div>
+          <div style="width:140px;">
+            <div style="height:88px;border:1px solid #2A2F37;display:flex;">
+              <div style="flex:1;border-right:1px solid #2A2F37;"></div>
+              <div style="width:58px;background:#12161A;"></div>
+            </div>
+            <div style="height:10px;border:1px solid #2A2F37;border-top:0;background:#101215;"></div>
+            <div style="margin-top:7px;font-size:11.5px;color:#E6E9EE;">Instrument</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#7B8492;">Ctrl⇧2</div>
+          </div>
+          <div style="width:76px;">
+            <div style="height:88px;border:1px solid #2A2F37;background:#12161A;"></div>
+            <div style="height:10px;border:1px solid #2A2F37;border-top:0;background:#101215;"></div>
+            <div style="margin-top:7px;font-size:11.5px;color:#E6E9EE;">Dock</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#7B8492;">Ctrl⇧3</div>
+          </div>
+        </div>
+        <div style="margin-top:20px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.14em;color:#7B8492;margin-bottom:10px;">共用 token（浅色 / 深色只换表面与状态色）</div>
+        <div style="display:grid;grid-template-columns:92px 1fr;gap:7px 14px;font-size:11.5px;line-height:1.55;color:#C9CFD8;">
+          <div style="color:#7B8492;">表面</div><div>canvas · panel · well（三层，靠 1px 边框区分，不用阴影不用圆角以上 2px）</div>
+          <div style="color:#7B8492;">分隔线</div><div>hairline-soft（行）· hairline（区块）两级</div>
+          <div style="color:#7B8492;">文字</div><div>主 / 次 / 元数据 / 禁用 四级，前三级 ≥ 4.5:1</div>
+          <div style="color:#7B8492;">状态</div><div>待机中性 · 监控 accent · 命中警示红 · 提示琥珀</div>
+          <div style="color:#7B8492;">节奏</div><div>行高 24 / 26 / 30 · label 列 96px · 数据一律等宽字</div>
+          <div style="color:#7B8492;">accent</div><div>只给「值 · 活动项 · 命中」，永不做装饰</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="2a" style="display:flex;flex-direction:column;gap:14px;width:1640px;">
+    <div style="display:flex;align-items:baseline;gap:12px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#7ED0C6;border:1px solid #2C4A4B;background:#0F1618;padding:3px 8px;">2a</span>
+      <span style="font-size:15px;font-weight:600;">Paper · 冷中性灰白 + 墨青</span>
+      <span style="font-size:12px;color:#8A929E;">canvas #F3F4F6 · 最克制的一版：只有 1px 线与字重在做层级</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0;border:1px solid #1E2126;background:#0D0E11;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7B8492;">
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>表面</span><span style="width:22px;height:14px;background:#F3F4F6;"></span><span style="width:22px;height:14px;background:#FAFBFC;"></span><span style="width:22px;height:14px;background:#FFFFFF;border:1px solid #2A2F37;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>线</span><span style="width:22px;height:14px;background:#E6E8EB;"></span><span style="width:22px;height:14px;background:#D3D7DC;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;border-right:1px solid #1E2126;"><span>文字</span><span style="color:#15181D;background:#FAFBFC;padding:1px 5px;">主 12.1:1</span><span style="color:#4B535C;background:#FAFBFC;padding:1px 5px;">次 6.9:1</span><span style="color:#626B76;background:#FAFBFC;padding:1px 5px;">元 4.6:1</span><span style="color:#A3AAB3;background:#FAFBFC;padding:1px 5px;">禁用</span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;"><span>状态</span><span style="color:#0B7A73;background:#E4F1EF;padding:1px 5px;">监控</span><span style="color:#BC2E22;background:#FCEBE8;padding:1px 5px;">命中</span><span style="color:#8C5A00;background:#FBF2E0;padding:1px 5px;">提示</span></div>
+    </div>
+
+    <div style="display:flex;gap:20px;align-items:flex-start;">
+      <div style="width:1180px;height:620px;background:#F3F4F6;border:1px solid #C7CCD2;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:30px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;background:#EFF1F3;border-bottom:1px solid #D3D7DC;">
+          <div style="width:9px;height:9px;background:#0B7A73;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#4B535C;">POE2</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A3AAB3;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#4B535C;">多词缀组合</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A3AAB3;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#4B535C;">可接受结果 1</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A3AAB3;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#15181D;">法术暴击率</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+            <div style="height:22px;padding:0 10px;background:#E4F1EF;border:1px solid #A9D3CE;display:flex;align-items:center;gap:7px;"><span style="color:#0B7A73;font-size:9px;">▶</span><span style="font-size:11.5px;color:#0B5F59;">开始监控</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#0B5F59;">F10</span></div>
+            <div style="height:22px;padding:0 10px;border:1px solid #D3D7DC;background:#FAFBFC;display:flex;align-items:center;gap:7px;"><span style="color:#A3AAB3;font-size:9px;">■</span><span style="font-size:11.5px;color:#626B76;">停止</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#A3AAB3;">F12</span></div>
+            <div style="display:flex;align-items:center;gap:2px;color:#626B76;margin-left:6px;">
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">—</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;">◻</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">✕</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0;">
+          <div style="width:218px;flex:none;border-right:1px solid #D3D7DC;background:#EFF1F3;display:flex;flex-direction:column;">
+            <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #E6E8EB;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#626B76;">规则</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">2/8 · 3/32</span>
+            </div>
+            <div style="padding:6px 0;display:flex;flex-direction:column;">
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;background:#FAFBFC;border-left:2px solid #0B7A73;">
+                <span style="font-size:8px;color:#626B76;">▾</span><span style="font-size:12px;font-weight:600;color:#15181D;">流放之路二</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#0B7A73;">活动</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#626B76;">▾</span><span style="font-size:12px;color:#4B535C;">可接受结果 1</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">≥2/2</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;background:#FAFBFC;">
+                <div style="width:4px;height:4px;background:#0B7A73;"></div><span style="font-size:12px;color:#15181D;">法术暴击率</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;">
+                <div style="width:4px;height:4px;background:#A3AAB3;"></div><span style="font-size:12px;color:#4B535C;">暴击伤害加成</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#626B76;">▸</span><span style="font-size:12px;color:#4B535C;">可接受结果 2</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">任意</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;margin-top:4px;">
+                <span style="font-size:8px;color:#626B76;">▸</span><span style="font-size:12px;color:#4B535C;">流放之路一</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">1/8</span>
+              </div>
+            </div>
+            <div style="margin-top:auto;border-top:1px solid #E6E8EB;display:flex;">
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#4B535C;border-right:1px solid #E6E8EB;"><span style="color:#0B7A73;">+</span>方案</div>
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#4B535C;"><span style="color:#0B7A73;">+</span>词缀</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#FAFBFC;">
+            <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid #D3D7DC;background:#EFF1F3;">
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#15181D;border-bottom:2px solid #0B7A73;background:#FAFBFC;">词缀条件</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#626B76;">识别区域</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#626B76;">提醒与显示</div>
+              <div style="margin-left:auto;padding:0 12px;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;"><span>settings.json</span><span style="color:#0B7A73;">已保存</span></div>
+            </div>
+            <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:10px;height:28px;">
+                <span style="width:96px;font-size:11.5px;color:#626B76;">条件名称</span>
+                <div style="width:280px;height:26px;border:1px solid #D3D7DC;background:#FFFFFF;display:flex;align-items:center;padding:0 9px;font-size:12px;color:#15181D;">法术暴击率</div>
+                <span style="margin-left:16px;font-size:11.5px;color:#626B76;">什么时候提醒</span>
+                <div style="display:flex;border:1px solid #D3D7DC;">
+                  <div style="padding:3px 9px;font-size:11.5px;color:#4B535C;background:#FAFBFC;">任意</div>
+                  <div style="padding:3px 9px;font-size:11.5px;color:#4B535C;border-left:1px solid #D3D7DC;background:#FAFBFC;">全部</div>
+                  <div style="padding:3px 9px;font-size:11.5px;background:#E4F1EF;color:#0B5F59;border-left:1px solid #D3D7DC;">指定条数</div>
+                </div>
+                <div style="width:44px;height:26px;border:1px solid #D3D7DC;background:#FFFFFF;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#15181D;">2</div>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#626B76;white-space:nowrap;">/ 共 2 条</span>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:10px;">
+                <span style="width:96px;font-size:11.5px;color:#626B76;padding-top:6px;">完整词缀模板</span>
+                <div style="flex:1;border:1px solid #D3D7DC;border-left:2px solid #0B7A73;background:#FFFFFF;padding:9px 11px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#2A3038;">#% increased Spell Critical Hit Chance</div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:6px;">
+                <span style="width:96px;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#626B76;">归一化 <span style="color:#4B535C;">&lt;PCT&gt; increased spell critical hit chance</span> · 找到 1 个数值，按顺序对应下方</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#626B76;">数值条件</span>
+                <div style="flex:1;height:1px;background:#E6E8EB;"></div>
+                <span style="font-size:11.5px;color:#0B7A73;">+ 添加数值</span>
+              </div>
+              <div style="margin-top:8px;border:1px solid #D3D7DC;">
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;background:#EFF1F3;border-bottom:1px solid #D3D7DC;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#626B76;">
+                  <div style="padding:6px 10px;">数值</div><div style="padding:6px 10px;">比较方式</div><div style="padding:6px 10px;">下限</div><div style="padding:6px 10px;">上限</div><div style="padding:6px 10px;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFFFF;border-bottom:1px solid #E6E8EB;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;color:#626B76;">1 · 百分比</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#15181D;">在范围内 <span style="font-size:8px;color:#626B76;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#15181D;">3.1</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#15181D;">3.8</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#626B76;">删除</div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFFFF;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#626B76;">2 · 普通</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#4B535C;">不限制数值 <span style="font-size:8px;color:#626B76;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#A3AAB3;">—</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#A3AAB3;">—</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#626B76;">删除</div>
+                </div>
+              </div>
+              <div style="margin-top:12px;display:flex;gap:9px;border-left:2px solid #C9962B;background:#FBF2E0;padding:9px 11px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#8C5A00;">注意</span>
+                <span style="font-size:11.5px;line-height:1.55;color:#6B4E14;">催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值，不推算基础值。</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="width:318px;flex:none;border-left:1px solid #D3D7DC;background:#EFF1F3;display:flex;flex-direction:column;">
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #E6E8EB;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#626B76;">运行</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">繁中 · Windows OCR</span>
+            </div>
+            <div style="padding:12px;border-bottom:1px solid #E6E8EB;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL1 }};"></div>
+                <span style="font-size:13px;font-weight:600;color:{{ statusColorL1 }};">{{ statusText }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#4B535C;">{{ elapsed }}</span>
+              </div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;">
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E6E8EB;font-size:11.5px;"><span style="color:#626B76;">判定 p50 / p95</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#15181D;">31.0 / 47.9 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E6E8EB;font-size:11.5px;"><span style="color:#626B76;">变化预检 p50</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#15181D;">3.1 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E6E8EB;font-size:11.5px;"><span style="color:#626B76;">局部复核</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#15181D;">4 / 27</span></div>
+                <div style="height:24px;display:flex;align-items:center;font-size:11.5px;"><span style="color:#626B76;">本轮命中</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#15181D;">{{ hitCount }}</span></div>
+              </div>
+            </div>
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #E6E8EB;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#626B76;">截图识别结果</span>
+              <span style="margin-left:auto;font-size:11px;color:#0B7A73;">识别截图</span>
+            </div>
+            <div style="flex:1;padding:9px 12px;display:flex;flex-direction:column;gap:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;line-height:1.5;overflow:hidden;background:#FAFBFC;">
+              <div style="color:#626B76;">band 00 · 32 ms</div>
+              <div style="color:#4B535C;padding-left:8px;">+24 生命</div>
+              <div style="color:#626B76;">band 01 · 29 ms</div>
+              <div style="color:#0B5F59;padding-left:8px;">7% 法術暴擊率</div>
+              <div style="color:#626B76;">band 02 · 31 ms</div>
+              <div style="color:#4B535C;padding-left:8px;">增加 12% 暴擊傷害</div>
+              <div style="margin-top:4px;padding:5px 8px;background:#E4F1EF;border-left:2px solid #0B7A73;color:#0B5F59;">规则命中 · 可接受结果 1 · 2/2 条</div>
+              <div style="color:#626B76;">共 5 行 · 全帧 1 次 · 复核 1 次</div>
+            </div>
+            <div style="padding:10px 12px;border-top:1px solid #E6E8EB;display:flex;gap:8px;background:#EFF1F3;">
+              <div style="flex:1;height:28px;border:1px solid #D3D7DC;background:#FAFBFC;display:flex;align-items:center;justify-content:center;font-size:12px;color:#15181D;">验证并保存</div>
+              <div style="width:74px;height:28px;border:1px solid #D3D7DC;background:#FAFBFC;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4B535C;">撤销</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:24px;flex:none;display:flex;align-items:center;background:#EFF1F3;border-top:1px solid #D3D7DC;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#4B535C;">
+          <span style="padding:0 11px;border-right:1px solid #E6E8EB;color:{{ statusColorL1 }};">{{ statusText }}</span>
+          <span style="padding:0 11px;border-right:1px solid #E6E8EB;">区域 1134×956 @ 0,58</span>
+          <span style="padding:0 11px;border-right:1px solid #E6E8EB;">OCR 繁中 · zh-TW</span>
+          <span style="padding:0 11px;border-right:1px solid #E6E8EB;">规则 2 方案 / 3 词缀</span>
+          <span style="padding:0 11px;">p50 31.0 ms</span>
+          <span style="margin-left:auto;padding:0 11px;border-left:1px solid #E6E8EB;color:#626B76;">Ctrl⇧F10 开始 · F11 框选 · F12 停止</span>
+        </div>
+      </div>
+
+      <div style="width:400px;height:620px;flex:none;background:#F3F4F6;border:1px solid #C7CCD2;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:28px;flex:none;display:flex;align-items:center;gap:9px;padding:0 11px;background:#EFF1F3;border-bottom:1px solid #D3D7DC;">
+          <div style="width:8px;height:8px;background:#0B7A73;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.16em;color:#4B535C;">DOCK</span>
+          <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#626B76;">Ctrl⇧2 展开</span>
+          <span style="font-size:10px;color:#626B76;margin-left:8px;">✕</span>
+        </div>
+        <div style="height:34px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;background:#FAFBFC;border-bottom:1px solid #D3D7DC;">
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#0B7A73;">⌘K</span>
+          <span style="font-size:12px;color:#626B76;">粘贴词缀 / 输入命令…</span>
+        </div>
+        <div style="padding:13px 12px 12px;border-bottom:1px solid #E6E8EB;background:#FAFBFC;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.16em;color:#626B76;">当前目标</span>
+            <div style="flex:1;height:1px;background:#E6E8EB;"></div>
+            <span style="font-size:10.5px;color:#626B76;">POE2 · 繁中 · 单条</span>
+          </div>
+          <div style="font-size:13.5px;line-height:1.55;color:#15181D;font-weight:600;">若近期有造成暴擊，增加 <span style="color:#0B7A73;">(6—8)%</span> 攻擊速度</div>
+          <div style="margin-top:6px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#626B76;">1 个数值占位 · 只比屏幕显示值</div>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">识别区域</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#4B535C;">1134×956 @ 0,58</span><span style="font-size:9px;color:#A3AAB3;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">词缀文字</span><span style="margin-left:auto;font-size:11.5px;color:#4B535C;">繁体中文词缀</span><span style="font-size:9px;color:#A3AAB3;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">命中方式</span><span style="margin-left:auto;font-size:11.5px;color:#4B535C;">单条词缀</span><span style="font-size:9px;color:#A3AAB3;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">画面提示</span><span style="margin-left:auto;font-size:11.5px;color:#4B535C;">常驻 · 录屏可见</span><span style="font-size:9px;color:#A3AAB3;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">提醒声音</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#4B535C;">divine-orb-drop.wav</span><span style="font-size:9px;color:#A3AAB3;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E6E8EB;"><span style="font-size:12px;color:#15181D;">启动热键</span><span style="margin-left:auto;display:flex;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#4B535C;"><span style="border:1px solid #D3D7DC;background:#FAFBFC;padding:2px 5px;">Ctrl</span><span style="border:1px solid #D3D7DC;background:#FAFBFC;padding:2px 5px;">⇧</span><span style="border:1px solid #D3D7DC;background:#FAFBFC;padding:2px 5px;">F10</span></span></div>
+        </div>
+        <div style="margin-top:auto;">
+          <div style="padding:11px 12px;border-top:1px solid #D3D7DC;background:#FAFBFC;">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL1 }};"></div>
+              <span style="font-size:12.5px;font-weight:600;color:{{ statusColorL1 }};">{{ statusText }}</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#4B535C;">{{ elapsed }}</span>
+            </div>
+            <div style="margin-top:7px;display:flex;flex-direction:column;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#626B76;">
+              <div>p50 31.0ms · p95 47.9ms · {{ hitLine }}</div>
+              <div>21:04:14 · 8(6-8)% 攻擊速度 · 02:11</div>
+              <div>20:51:02 · 7(6-8)% 攻擊速度 · 02:44</div>
+            </div>
+          </div>
+          <div style="padding:10px 12px 12px;display:flex;flex-direction:column;gap:7px;background:#F3F4F6;border-top:1px solid #E6E8EB;">
+            <div style="height:40px;background:#0B7A73;display:flex;align-items:center;justify-content:center;gap:11px;">
+              <span style="font-size:14px;font-weight:600;letter-spacing:.14em;color:#FFFFFF;">{{ primaryLabel }}</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#E8F4F2;border:1px solid #4A9C95;padding:2px 6px;">Ctrl⇧F10</span>
+            </div>
+            <div style="display:flex;gap:7px;">
+              <div style="flex:1;height:28px;border:1px solid #D3D7DC;background:#FAFBFC;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#4B535C;">识别截图</div>
+              <div style="flex:1;height:28px;border:1px solid #D3D7DC;background:#FAFBFC;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#4B535C;">保存设置</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;line-height:1.75;color:#8A929E;width:1640px;">
+      <span style="color:#C9CFD8;">主张：</span>冷中性灰白三层（canvas #F3F4F6 / panel #FAFBFC / well #FFFFFF），纯白只留给输入位；层级全部由 1px 线、字重和 96px label 列承担。墨青 #0B7A73 只出现在活动项、值和命中行。<br>
+      <span style="color:#C9CFD8;">取舍：</span>最安静、最不抢注意力，长期看最省眼睛；但性格也最中性 —— 少了 POE 的气质。
+    </div>
+  </div>
+
+  <div id="2b" style="display:flex;flex-direction:column;gap:14px;width:1640px;">
+    <div style="display:flex;align-items:baseline;gap:12px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#E0C489;border:1px solid #4A3F22;background:#16130E;padding:3px 8px;">2b</span>
+      <span style="font-size:15px;font-weight:600;">Ledger · 微暖白 + 墨绿青</span>
+      <span style="font-size:12px;color:#8A929E;">canvas #F5F2EC · 把 POE 的墨与羊皮纸译到浅色：暖白底 + 极淡暖灰线</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0;border:1px solid #1E2126;background:#0D0E11;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7B8492;">
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>表面</span><span style="width:22px;height:14px;background:#F5F2EC;"></span><span style="width:22px;height:14px;background:#FBF8F2;"></span><span style="width:22px;height:14px;background:#FFFDF9;border:1px solid #2A2F37;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>线</span><span style="width:22px;height:14px;background:#E9E3D8;"></span><span style="width:22px;height:14px;background:#D8D0C2;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;border-right:1px solid #1E2126;"><span>文字</span><span style="color:#1D1A15;background:#FBF8F2;padding:1px 5px;">主 12.4:1</span><span style="color:#524C41;background:#FBF8F2;padding:1px 5px;">次 6.6:1</span><span style="color:#6F6759;background:#FBF8F2;padding:1px 5px;">元 4.6:1</span><span style="color:#A79E8E;background:#FBF8F2;padding:1px 5px;">禁用</span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;"><span>状态</span><span style="color:#0E6A64;background:#E3EEEB;padding:1px 5px;">监控</span><span style="color:#BC2E22;background:#FCEBE8;padding:1px 5px;">命中</span><span style="color:#8A5A0B;background:#F6EEDD;padding:1px 5px;">提示</span></div>
+    </div>
+
+    <div style="display:flex;gap:20px;align-items:flex-start;">
+      <div style="width:1180px;height:620px;background:#F5F2EC;border:1px solid #CBC2B2;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:30px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;background:#F1EDE4;border-bottom:1px solid #D8D0C2;">
+          <div style="width:9px;height:9px;background:#0E6A64;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#524C41;">POE2</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A79E8E;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#524C41;">多词缀组合</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A79E8E;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#524C41;">可接受结果 1</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#A79E8E;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#1D1A15;">法术暴击率</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+            <div style="height:22px;padding:0 10px;background:#E3EEEB;border:1px solid #A6C9C4;display:flex;align-items:center;gap:7px;"><span style="color:#0E6A64;font-size:9px;">▶</span><span style="font-size:11.5px;color:#0B534E;">开始监控</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#0B534E;">F10</span></div>
+            <div style="height:22px;padding:0 10px;border:1px solid #D8D0C2;background:#FBF8F2;display:flex;align-items:center;gap:7px;"><span style="color:#A79E8E;font-size:9px;">■</span><span style="font-size:11.5px;color:#6F6759;">停止</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#A79E8E;">F12</span></div>
+            <div style="display:flex;align-items:center;gap:2px;color:#6F6759;margin-left:6px;">
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">—</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;">◻</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">✕</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0;">
+          <div style="width:218px;flex:none;border-right:1px solid #D8D0C2;background:#F1EDE4;display:flex;flex-direction:column;">
+            <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #E9E3D8;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#6F6759;">规则</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">2/8 · 3/32</span>
+            </div>
+            <div style="padding:6px 0;display:flex;flex-direction:column;">
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;background:#FBF8F2;border-left:2px solid #0E6A64;">
+                <span style="font-size:8px;color:#6F6759;">▾</span><span style="font-size:12px;font-weight:600;color:#1D1A15;">流放之路二</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#0E6A64;">活动</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#6F6759;">▾</span><span style="font-size:12px;color:#524C41;">可接受结果 1</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">≥2/2</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;background:#FBF8F2;">
+                <div style="width:4px;height:4px;background:#0E6A64;"></div><span style="font-size:12px;color:#1D1A15;">法术暴击率</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;">
+                <div style="width:4px;height:4px;background:#A79E8E;"></div><span style="font-size:12px;color:#524C41;">暴击伤害加成</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#6F6759;">▸</span><span style="font-size:12px;color:#524C41;">可接受结果 2</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">任意</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;margin-top:4px;">
+                <span style="font-size:8px;color:#6F6759;">▸</span><span style="font-size:12px;color:#524C41;">流放之路一</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">1/8</span>
+              </div>
+            </div>
+            <div style="margin-top:auto;border-top:1px solid #E9E3D8;display:flex;">
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#524C41;border-right:1px solid #E9E3D8;"><span style="color:#0E6A64;">+</span>方案</div>
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#524C41;"><span style="color:#0E6A64;">+</span>词缀</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#FBF8F2;">
+            <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid #D8D0C2;background:#F1EDE4;">
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#1D1A15;border-bottom:2px solid #0E6A64;background:#FBF8F2;">词缀条件</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#6F6759;">识别区域</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#6F6759;">提醒与显示</div>
+              <div style="margin-left:auto;padding:0 12px;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;"><span>settings.json</span><span style="color:#0E6A64;">已保存</span></div>
+            </div>
+            <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:10px;height:28px;">
+                <span style="width:96px;font-size:11.5px;color:#6F6759;">条件名称</span>
+                <div style="width:280px;height:26px;border:1px solid #D8D0C2;background:#FFFDF9;display:flex;align-items:center;padding:0 9px;font-size:12px;color:#1D1A15;">法术暴击率</div>
+                <span style="margin-left:16px;font-size:11.5px;color:#6F6759;">什么时候提醒</span>
+                <div style="display:flex;border:1px solid #D8D0C2;">
+                  <div style="padding:3px 9px;font-size:11.5px;color:#524C41;background:#FBF8F2;">任意</div>
+                  <div style="padding:3px 9px;font-size:11.5px;color:#524C41;border-left:1px solid #D8D0C2;background:#FBF8F2;">全部</div>
+                  <div style="padding:3px 9px;font-size:11.5px;background:#E3EEEB;color:#0B534E;border-left:1px solid #D8D0C2;">指定条数</div>
+                </div>
+                <div style="width:44px;height:26px;border:1px solid #D8D0C2;background:#FFFDF9;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#1D1A15;">2</div>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#6F6759;white-space:nowrap;">/ 共 2 条</span>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:10px;">
+                <span style="width:96px;font-size:11.5px;color:#6F6759;padding-top:6px;">完整词缀模板</span>
+                <div style="flex:1;border:1px solid #D8D0C2;border-left:2px solid #0E6A64;background:#FFFDF9;padding:9px 11px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#33302A;">#% increased Spell Critical Hit Chance</div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:6px;">
+                <span style="width:96px;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#6F6759;">归一化 <span style="color:#524C41;">&lt;PCT&gt; increased spell critical hit chance</span> · 找到 1 个数值，按顺序对应下方</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#6F6759;">数值条件</span>
+                <div style="flex:1;height:1px;background:#E9E3D8;"></div>
+                <span style="font-size:11.5px;color:#0E6A64;">+ 添加数值</span>
+              </div>
+              <div style="margin-top:8px;border:1px solid #D8D0C2;">
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;background:#F1EDE4;border-bottom:1px solid #D8D0C2;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#6F6759;">
+                  <div style="padding:6px 10px;">数值</div><div style="padding:6px 10px;">比较方式</div><div style="padding:6px 10px;">下限</div><div style="padding:6px 10px;">上限</div><div style="padding:6px 10px;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFDF9;border-bottom:1px solid #E9E3D8;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;color:#6F6759;">1 · 百分比</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#1D1A15;">在范围内 <span style="font-size:8px;color:#6F6759;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#1D1A15;">3.1</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#1D1A15;">3.8</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#6F6759;">删除</div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFDF9;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#6F6759;">2 · 普通</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#524C41;">不限制数值 <span style="font-size:8px;color:#6F6759;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#A79E8E;">—</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#A79E8E;">—</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#6F6759;">删除</div>
+                </div>
+              </div>
+              <div style="margin-top:12px;display:flex;gap:9px;border-left:2px solid #A8801F;background:#F6EEDD;padding:9px 11px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#8A5A0B;">注意</span>
+                <span style="font-size:11.5px;line-height:1.55;color:#6A4A0A;">催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值，不推算基础值。</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="width:318px;flex:none;border-left:1px solid #D8D0C2;background:#F1EDE4;display:flex;flex-direction:column;">
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #E9E3D8;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#6F6759;">运行</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">繁中 · Windows OCR</span>
+            </div>
+            <div style="padding:12px;border-bottom:1px solid #E9E3D8;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL2 }};"></div>
+                <span style="font-size:13px;font-weight:600;color:{{ statusColorL2 }};">{{ statusText }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#524C41;">{{ elapsed }}</span>
+              </div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;">
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E9E3D8;font-size:11.5px;"><span style="color:#6F6759;">判定 p50 / p95</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#1D1A15;">31.0 / 47.9 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E9E3D8;font-size:11.5px;"><span style="color:#6F6759;">变化预检 p50</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#1D1A15;">3.1 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #E9E3D8;font-size:11.5px;"><span style="color:#6F6759;">局部复核</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#1D1A15;">4 / 27</span></div>
+                <div style="height:24px;display:flex;align-items:center;font-size:11.5px;"><span style="color:#6F6759;">本轮命中</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#1D1A15;">{{ hitCount }}</span></div>
+              </div>
+            </div>
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #E9E3D8;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#6F6759;">截图识别结果</span>
+              <span style="margin-left:auto;font-size:11px;color:#0E6A64;">识别截图</span>
+            </div>
+            <div style="flex:1;padding:9px 12px;display:flex;flex-direction:column;gap:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;line-height:1.5;overflow:hidden;background:#FBF8F2;">
+              <div style="color:#6F6759;">band 00 · 32 ms</div>
+              <div style="color:#524C41;padding-left:8px;">+24 生命</div>
+              <div style="color:#6F6759;">band 01 · 29 ms</div>
+              <div style="color:#0B534E;padding-left:8px;">7% 法術暴擊率</div>
+              <div style="color:#6F6759;">band 02 · 31 ms</div>
+              <div style="color:#524C41;padding-left:8px;">增加 12% 暴擊傷害</div>
+              <div style="margin-top:4px;padding:5px 8px;background:#E3EEEB;border-left:2px solid #0E6A64;color:#0B534E;">规则命中 · 可接受结果 1 · 2/2 条</div>
+              <div style="color:#6F6759;">共 5 行 · 全帧 1 次 · 复核 1 次</div>
+            </div>
+            <div style="padding:10px 12px;border-top:1px solid #E9E3D8;display:flex;gap:8px;background:#F1EDE4;">
+              <div style="flex:1;height:28px;border:1px solid #D8D0C2;background:#FBF8F2;display:flex;align-items:center;justify-content:center;font-size:12px;color:#1D1A15;">验证并保存</div>
+              <div style="width:74px;height:28px;border:1px solid #D8D0C2;background:#FBF8F2;display:flex;align-items:center;justify-content:center;font-size:12px;color:#524C41;">撤销</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:24px;flex:none;display:flex;align-items:center;background:#F1EDE4;border-top:1px solid #D8D0C2;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#524C41;">
+          <span style="padding:0 11px;border-right:1px solid #E9E3D8;color:{{ statusColorL2 }};">{{ statusText }}</span>
+          <span style="padding:0 11px;border-right:1px solid #E9E3D8;">区域 1134×956 @ 0,58</span>
+          <span style="padding:0 11px;border-right:1px solid #E9E3D8;">OCR 繁中 · zh-TW</span>
+          <span style="padding:0 11px;border-right:1px solid #E9E3D8;">规则 2 方案 / 3 词缀</span>
+          <span style="padding:0 11px;">p50 31.0 ms</span>
+          <span style="margin-left:auto;padding:0 11px;border-left:1px solid #E9E3D8;color:#6F6759;">Ctrl⇧F10 开始 · F11 框选 · F12 停止</span>
+        </div>
+      </div>
+
+      <div style="width:400px;height:620px;flex:none;background:#F5F2EC;border:1px solid #CBC2B2;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:28px;flex:none;display:flex;align-items:center;gap:9px;padding:0 11px;background:#F1EDE4;border-bottom:1px solid #D8D0C2;">
+          <div style="width:8px;height:8px;background:#0E6A64;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.16em;color:#524C41;">DOCK</span>
+          <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6F6759;">Ctrl⇧2 展开</span>
+          <span style="font-size:10px;color:#6F6759;margin-left:8px;">✕</span>
+        </div>
+        <div style="height:34px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;background:#FBF8F2;border-bottom:1px solid #D8D0C2;">
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#0E6A64;">⌘K</span>
+          <span style="font-size:12px;color:#6F6759;">粘贴词缀 / 输入命令…</span>
+        </div>
+        <div style="padding:13px 12px 12px;border-bottom:1px solid #E9E3D8;background:#FBF8F2;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.16em;color:#6F6759;">当前目标</span>
+            <div style="flex:1;height:1px;background:#E9E3D8;"></div>
+            <span style="font-size:10.5px;color:#6F6759;">POE2 · 繁中 · 单条</span>
+          </div>
+          <div style="font-size:13.5px;line-height:1.55;color:#1D1A15;font-weight:600;">若近期有造成暴擊，增加 <span style="color:#0E6A64;">(6—8)%</span> 攻擊速度</div>
+          <div style="margin-top:6px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#6F6759;">1 个数值占位 · 只比屏幕显示值</div>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">识别区域</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#524C41;">1134×956 @ 0,58</span><span style="font-size:9px;color:#A79E8E;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">词缀文字</span><span style="margin-left:auto;font-size:11.5px;color:#524C41;">繁体中文词缀</span><span style="font-size:9px;color:#A79E8E;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">命中方式</span><span style="margin-left:auto;font-size:11.5px;color:#524C41;">单条词缀</span><span style="font-size:9px;color:#A79E8E;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">画面提示</span><span style="margin-left:auto;font-size:11.5px;color:#524C41;">常驻 · 录屏可见</span><span style="font-size:9px;color:#A79E8E;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">提醒声音</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#524C41;">divine-orb-drop.wav</span><span style="font-size:9px;color:#A79E8E;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #E9E3D8;"><span style="font-size:12px;color:#1D1A15;">启动热键</span><span style="margin-left:auto;display:flex;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#524C41;"><span style="border:1px solid #D8D0C2;background:#FBF8F2;padding:2px 5px;">Ctrl</span><span style="border:1px solid #D8D0C2;background:#FBF8F2;padding:2px 5px;">⇧</span><span style="border:1px solid #D8D0C2;background:#FBF8F2;padding:2px 5px;">F10</span></span></div>
+        </div>
+        <div style="margin-top:auto;">
+          <div style="padding:11px 12px;border-top:1px solid #D8D0C2;background:#FBF8F2;">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL2 }};"></div>
+              <span style="font-size:12.5px;font-weight:600;color:{{ statusColorL2 }};">{{ statusText }}</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#524C41;">{{ elapsed }}</span>
+            </div>
+            <div style="margin-top:7px;display:flex;flex-direction:column;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#6F6759;">
+              <div>p50 31.0ms · p95 47.9ms · {{ hitLine }}</div>
+              <div>21:04:14 · 8(6-8)% 攻擊速度 · 02:11</div>
+              <div>20:51:02 · 7(6-8)% 攻擊速度 · 02:44</div>
+            </div>
+          </div>
+          <div style="padding:10px 12px 12px;display:flex;flex-direction:column;gap:7px;background:#F5F2EC;border-top:1px solid #E9E3D8;">
+            <div style="height:40px;background:#0E6A64;display:flex;align-items:center;justify-content:center;gap:11px;">
+              <span style="font-size:14px;font-weight:600;letter-spacing:.14em;color:#FFFDF9;">{{ primaryLabel }}</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#EAF3F1;border:1px solid #4C8F8A;padding:2px 6px;">Ctrl⇧F10</span>
+            </div>
+            <div style="display:flex;gap:7px;">
+              <div style="flex:1;height:28px;border:1px solid #D8D0C2;background:#FBF8F2;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#524C41;">识别截图</div>
+              <div style="flex:1;height:28px;border:1px solid #D8D0C2;background:#FBF8F2;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#524C41;">保存设置</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;line-height:1.75;color:#8A929E;width:1640px;">
+      <span style="color:#C9CFD8;">主张：</span>同一套结构换成微暖白（canvas #F5F2EC / panel #FBF8F2），线也是暖灰 —— 长时间对着屏幕比冷灰白更松弛，也是三版里唯一带 POE 气质的。监控态用琥珀 #8A5A0B，命中用砖红 #A6382B，与暖底同族但明显更重。<br>
+      <span style="color:#C9CFD8;">取舍：</span>暖调让「安静」更自然，但琥珀既是监控态又是提示色，需要靠位置（状态点 / 左边框）区分。</div>
+  </div>
+
+
+  <div id="2c" style="display:flex;flex-direction:column;gap:14px;width:1640px;">
+    <div style="display:flex;align-items:baseline;gap:12px;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#8AC7DE;border:1px solid #26414E;background:#0E151A;padding:3px 8px;">2c</span>
+      <span style="font-size:15px;font-weight:600;">Blueprint · 冷蓝灰 + 青蓝</span>
+      <span style="font-size:12px;color:#8A929E;">canvas #E9EDF1 · 底色压深一档，面板靠亮度而不是阴影浮起</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0;border:1px solid #1E2126;background:#0D0E11;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7B8492;">
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>表面</span><span style="width:22px;height:14px;background:#E9EDF1;"></span><span style="width:22px;height:14px;background:#F8FAFC;"></span><span style="width:22px;height:14px;background:#FFFFFF;border:1px solid #2A2F37;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:6px;align-items:center;border-right:1px solid #1E2126;"><span>线</span><span style="width:22px;height:14px;background:#DDE4EA;"></span><span style="width:22px;height:14px;background:#C2CCD6;"></span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;border-right:1px solid #1E2126;"><span>文字</span><span style="color:#0F1720;background:#F8FAFC;padding:1px 5px;">主 13.6:1</span><span style="color:#41505E;background:#F8FAFC;padding:1px 5px;">次 7.4:1</span><span style="color:#5F6E7D;background:#F8FAFC;padding:1px 5px;">元 5.1:1</span><span style="color:#97A3B0;background:#F8FAFC;padding:1px 5px;">禁用</span></div>
+      <div style="padding:9px 12px;display:flex;gap:8px;align-items:center;"><span>状态</span><span style="color:#0A6E8C;background:#E1EEF4;padding:1px 5px;">监控</span><span style="color:#BC2E22;background:#FCEBE8;padding:1px 5px;">命中</span><span style="color:#8A5B00;background:#FAF1DE;padding:1px 5px;">提示</span></div>
+    </div>
+
+    <div style="display:flex;gap:20px;align-items:flex-start;">
+      <div style="width:1180px;height:620px;background:#E9EDF1;border:1px solid #AFBCC8;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:30px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;background:#F1F4F7;border-bottom:1px solid #C2CCD6;">
+          <div style="width:9px;height:9px;background:#0A6E8C;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#41505E;">POE2</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#97A3B0;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#41505E;">多词缀组合</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#97A3B0;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#41505E;">可接受结果 1</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#97A3B0;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#0F1720;">法术暴击率</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+            <div style="height:22px;padding:0 10px;background:#E1EEF4;border:1px solid #A5C9DA;display:flex;align-items:center;gap:7px;"><span style="color:#0A6E8C;font-size:9px;">▶</span><span style="font-size:11.5px;color:#08536B;">开始监控</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#08536B;">F10</span></div>
+            <div style="height:22px;padding:0 10px;border:1px solid #C2CCD6;background:#F8FAFC;display:flex;align-items:center;gap:7px;"><span style="color:#97A3B0;font-size:9px;">■</span><span style="font-size:11.5px;color:#5F6E7D;">停止</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#97A3B0;">F12</span></div>
+            <div style="display:flex;align-items:center;gap:2px;color:#5F6E7D;margin-left:6px;">
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">—</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;">◻</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">✕</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0;">
+          <div style="width:218px;flex:none;border-right:1px solid #C2CCD6;background:#F1F4F7;display:flex;flex-direction:column;">
+            <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #DDE4EA;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#5F6E7D;">规则</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">2/8 · 3/32</span>
+            </div>
+            <div style="padding:6px 0;display:flex;flex-direction:column;">
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;background:#F8FAFC;border-left:2px solid #0A6E8C;">
+                <span style="font-size:8px;color:#5F6E7D;">▾</span><span style="font-size:12px;font-weight:600;color:#0F1720;">流放之路二</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#0A6E8C;">活动</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#5F6E7D;">▾</span><span style="font-size:12px;color:#41505E;">可接受结果 1</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">≥2/2</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;background:#F8FAFC;">
+                <div style="width:4px;height:4px;background:#0A6E8C;"></div><span style="font-size:12px;color:#0F1720;">法术暴击率</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;">
+                <div style="width:4px;height:4px;background:#97A3B0;"></div><span style="font-size:12px;color:#41505E;">暴击伤害加成</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#5F6E7D;">▸</span><span style="font-size:12px;color:#41505E;">可接受结果 2</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">任意</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;margin-top:4px;">
+                <span style="font-size:8px;color:#5F6E7D;">▸</span><span style="font-size:12px;color:#41505E;">流放之路一</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">1/8</span>
+              </div>
+            </div>
+            <div style="margin-top:auto;border-top:1px solid #DDE4EA;display:flex;">
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#41505E;border-right:1px solid #DDE4EA;"><span style="color:#0A6E8C;">+</span>方案</div>
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#41505E;"><span style="color:#0A6E8C;">+</span>词缀</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#F8FAFC;">
+            <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid #C2CCD6;background:#F1F4F7;">
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#0F1720;border-bottom:2px solid #0A6E8C;background:#F8FAFC;">词缀条件</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#5F6E7D;">识别区域</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#5F6E7D;">提醒与显示</div>
+              <div style="margin-left:auto;padding:0 12px;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;"><span>settings.json</span><span style="color:#0A6E8C;">已保存</span></div>
+            </div>
+            <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:10px;height:28px;">
+                <span style="width:96px;font-size:11.5px;color:#5F6E7D;">条件名称</span>
+                <div style="width:280px;height:26px;border:1px solid #C2CCD6;background:#FFFFFF;display:flex;align-items:center;padding:0 9px;font-size:12px;color:#0F1720;">法术暴击率</div>
+                <span style="margin-left:16px;font-size:11.5px;color:#5F6E7D;">什么时候提醒</span>
+                <div style="display:flex;border:1px solid #C2CCD6;">
+                  <div style="padding:3px 9px;font-size:11.5px;color:#41505E;background:#F8FAFC;">任意</div>
+                  <div style="padding:3px 9px;font-size:11.5px;color:#41505E;border-left:1px solid #C2CCD6;background:#F8FAFC;">全部</div>
+                  <div style="padding:3px 9px;font-size:11.5px;background:#E1EEF4;color:#08536B;border-left:1px solid #C2CCD6;">指定条数</div>
+                </div>
+                <div style="width:44px;height:26px;border:1px solid #C2CCD6;background:#FFFFFF;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#0F1720;">2</div>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#5F6E7D;white-space:nowrap;">/ 共 2 条</span>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:10px;">
+                <span style="width:96px;font-size:11.5px;color:#5F6E7D;padding-top:6px;">完整词缀模板</span>
+                <div style="flex:1;border:1px solid #C2CCD6;border-left:2px solid #0A6E8C;background:#FFFFFF;padding:9px 11px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#1B2732;">#% increased Spell Critical Hit Chance</div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:6px;">
+                <span style="width:96px;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#5F6E7D;">归一化 <span style="color:#41505E;">&lt;PCT&gt; increased spell critical hit chance</span> · 找到 1 个数值，按顺序对应下方</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#5F6E7D;">数值条件</span>
+                <div style="flex:1;height:1px;background:#DDE4EA;"></div>
+                <span style="font-size:11.5px;color:#0A6E8C;">+ 添加数值</span>
+              </div>
+              <div style="margin-top:8px;border:1px solid #C2CCD6;">
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;background:#F1F4F7;border-bottom:1px solid #C2CCD6;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#5F6E7D;">
+                  <div style="padding:6px 10px;">数值</div><div style="padding:6px 10px;">比较方式</div><div style="padding:6px 10px;">下限</div><div style="padding:6px 10px;">上限</div><div style="padding:6px 10px;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFFFF;border-bottom:1px solid #DDE4EA;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;color:#5F6E7D;">1 · 百分比</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#0F1720;">在范围内 <span style="font-size:8px;color:#5F6E7D;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#0F1720;">3.1</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#0F1720;">3.8</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#5F6E7D;">删除</div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#FFFFFF;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#5F6E7D;">2 · 普通</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#41505E;">不限制数值 <span style="font-size:8px;color:#5F6E7D;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#97A3B0;">—</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#97A3B0;">—</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#5F6E7D;">删除</div>
+                </div>
+              </div>
+              <div style="margin-top:12px;display:flex;gap:9px;border-left:2px solid #B8862A;background:#FAF1DE;padding:9px 11px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#8A5B00;">注意</span>
+                <span style="font-size:11.5px;line-height:1.55;color:#6A4D12;">催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值，不推算基础值。</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="width:318px;flex:none;border-left:1px solid #C2CCD6;background:#F1F4F7;display:flex;flex-direction:column;">
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #DDE4EA;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#5F6E7D;">运行</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">繁中 · Windows OCR</span>
+            </div>
+            <div style="padding:12px;border-bottom:1px solid #DDE4EA;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL3 }};"></div>
+                <span style="font-size:13px;font-weight:600;color:{{ statusColorL3 }};">{{ statusText }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#41505E;">{{ elapsed }}</span>
+              </div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;">
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #DDE4EA;font-size:11.5px;"><span style="color:#5F6E7D;">判定 p50 / p95</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#0F1720;">31.0 / 47.9 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #DDE4EA;font-size:11.5px;"><span style="color:#5F6E7D;">变化预检 p50</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#0F1720;">3.1 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #DDE4EA;font-size:11.5px;"><span style="color:#5F6E7D;">局部复核</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#0F1720;">4 / 27</span></div>
+                <div style="height:24px;display:flex;align-items:center;font-size:11.5px;"><span style="color:#5F6E7D;">本轮命中</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#0F1720;">{{ hitCount }}</span></div>
+              </div>
+            </div>
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #DDE4EA;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#5F6E7D;">截图识别结果</span>
+              <span style="margin-left:auto;font-size:11px;color:#0A6E8C;">识别截图</span>
+            </div>
+            <div style="flex:1;padding:9px 12px;display:flex;flex-direction:column;gap:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;line-height:1.5;overflow:hidden;background:#F8FAFC;">
+              <div style="color:#5F6E7D;">band 00 · 32 ms</div>
+              <div style="color:#41505E;padding-left:8px;">+24 生命</div>
+              <div style="color:#5F6E7D;">band 01 · 29 ms</div>
+              <div style="color:#08536B;padding-left:8px;">7% 法術暴擊率</div>
+              <div style="color:#5F6E7D;">band 02 · 31 ms</div>
+              <div style="color:#41505E;padding-left:8px;">增加 12% 暴擊傷害</div>
+              <div style="margin-top:4px;padding:5px 8px;background:#E1EEF4;border-left:2px solid #0A6E8C;color:#08536B;">规则命中 · 可接受结果 1 · 2/2 条</div>
+              <div style="color:#5F6E7D;">共 5 行 · 全帧 1 次 · 复核 1 次</div>
+            </div>
+            <div style="padding:10px 12px;border-top:1px solid #DDE4EA;display:flex;gap:8px;background:#F1F4F7;">
+              <div style="flex:1;height:28px;border:1px solid #C2CCD6;background:#F8FAFC;display:flex;align-items:center;justify-content:center;font-size:12px;color:#0F1720;">验证并保存</div>
+              <div style="width:74px;height:28px;border:1px solid #C2CCD6;background:#F8FAFC;display:flex;align-items:center;justify-content:center;font-size:12px;color:#41505E;">撤销</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:24px;flex:none;display:flex;align-items:center;background:#F1F4F7;border-top:1px solid #C2CCD6;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#41505E;">
+          <span style="padding:0 11px;border-right:1px solid #DDE4EA;color:{{ statusColorL3 }};">{{ statusText }}</span>
+          <span style="padding:0 11px;border-right:1px solid #DDE4EA;">区域 1134×956 @ 0,58</span>
+          <span style="padding:0 11px;border-right:1px solid #DDE4EA;">OCR 繁中 · zh-TW</span>
+          <span style="padding:0 11px;border-right:1px solid #DDE4EA;">规则 2 方案 / 3 词缀</span>
+          <span style="padding:0 11px;">p50 31.0 ms</span>
+          <span style="margin-left:auto;padding:0 11px;border-left:1px solid #DDE4EA;color:#5F6E7D;">Ctrl⇧F10 开始 · F11 框选 · F12 停止</span>
+        </div>
+      </div>
+
+      <div style="width:400px;height:620px;flex:none;background:#E9EDF1;border:1px solid #AFBCC8;box-shadow:0 20px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+        <div style="height:28px;flex:none;display:flex;align-items:center;gap:9px;padding:0 11px;background:#F1F4F7;border-bottom:1px solid #C2CCD6;">
+          <div style="width:8px;height:8px;background:#0A6E8C;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.16em;color:#41505E;">DOCK</span>
+          <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5F6E7D;">Ctrl⇧2 展开</span>
+          <span style="font-size:10px;color:#5F6E7D;margin-left:8px;">✕</span>
+        </div>
+        <div style="height:34px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;background:#F8FAFC;border-bottom:1px solid #C2CCD6;">
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#0A6E8C;">⌘K</span>
+          <span style="font-size:12px;color:#5F6E7D;">粘贴词缀 / 输入命令…</span>
+        </div>
+        <div style="padding:13px 12px 12px;border-bottom:1px solid #DDE4EA;background:#F8FAFC;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.16em;color:#5F6E7D;">当前目标</span>
+            <div style="flex:1;height:1px;background:#DDE4EA;"></div>
+            <span style="font-size:10.5px;color:#5F6E7D;">POE2 · 繁中 · 单条</span>
+          </div>
+          <div style="font-size:13.5px;line-height:1.55;color:#0F1720;font-weight:600;">若近期有造成暴擊，增加 <span style="color:#0A6E8C;">(6—8)%</span> 攻擊速度</div>
+          <div style="margin-top:6px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#5F6E7D;">1 个数值占位 · 只比屏幕显示值</div>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">识别区域</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#41505E;">1134×956 @ 0,58</span><span style="font-size:9px;color:#97A3B0;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">词缀文字</span><span style="margin-left:auto;font-size:11.5px;color:#41505E;">繁体中文词缀</span><span style="font-size:9px;color:#97A3B0;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">命中方式</span><span style="margin-left:auto;font-size:11.5px;color:#41505E;">单条词缀</span><span style="font-size:9px;color:#97A3B0;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">画面提示</span><span style="margin-left:auto;font-size:11.5px;color:#41505E;">常驻 · 录屏可见</span><span style="font-size:9px;color:#97A3B0;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">提醒声音</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#41505E;">divine-orb-drop.wav</span><span style="font-size:9px;color:#97A3B0;margin-left:8px;">▾</span></div>
+          <div style="height:32px;display:flex;align-items:center;padding:0 12px;border-bottom:1px solid #DDE4EA;"><span style="font-size:12px;color:#0F1720;">启动热键</span><span style="margin-left:auto;display:flex;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#41505E;"><span style="border:1px solid #C2CCD6;background:#F8FAFC;padding:2px 5px;">Ctrl</span><span style="border:1px solid #C2CCD6;background:#F8FAFC;padding:2px 5px;">⇧</span><span style="border:1px solid #C2CCD6;background:#F8FAFC;padding:2px 5px;">F10</span></span></div>
+        </div>
+        <div style="margin-top:auto;">
+          <div style="padding:11px 12px;border-top:1px solid #C2CCD6;background:#F8FAFC;">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedL3 }};"></div>
+              <span style="font-size:12.5px;font-weight:600;color:{{ statusColorL3 }};">{{ statusText }}</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#41505E;">{{ elapsed }}</span>
+            </div>
+            <div style="margin-top:7px;display:flex;flex-direction:column;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#5F6E7D;">
+              <div>p50 31.0ms · p95 47.9ms · {{ hitLine }}</div>
+              <div>21:04:14 · 8(6-8)% 攻擊速度 · 02:11</div>
+              <div>20:51:02 · 7(6-8)% 攻擊速度 · 02:44</div>
+            </div>
+          </div>
+          <div style="padding:10px 12px 12px;display:flex;flex-direction:column;gap:7px;background:#E9EDF1;border-top:1px solid #DDE4EA;">
+            <div style="height:40px;background:#0A6E8C;display:flex;align-items:center;justify-content:center;gap:11px;">
+              <span style="font-size:14px;font-weight:600;letter-spacing:.14em;color:#FFFFFF;">{{ primaryLabel }}</span>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#E6F2F7;border:1px solid #4693AC;padding:2px 6px;">Ctrl⇧F10</span>
+            </div>
+            <div style="display:flex;gap:7px;">
+              <div style="flex:1;height:28px;border:1px solid #C2CCD6;background:#F8FAFC;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#41505E;">识别截图</div>
+              <div style="flex:1;height:28px;border:1px solid #C2CCD6;background:#F8FAFC;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#41505E;">保存设置</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;line-height:1.75;color:#8A929E;width:1640px;">
+      <span style="color:#C9CFD8;">主张：</span>canvas 压到 #E9EDF1，面板 #F8FAFC 靠亮度差自己浮起来 —— 完全不需要阴影和圆角，结构感最强，最像工程图纸 / 调试器。青蓝 #0A6E8C 做功能色，与琥珀提示、砖红命中三色互不混淆。<br>
+      <span style="color:#C9CFD8;">取舍：</span>结构最清楚、层次最立体；代价是整体对比略高于 2a，"几乎感觉不到存在"这一点稍弱。</div>
+  </div>
+
+
+</section>
+
+<section id="turn1" style="display:flex;flex-direction:column;gap:52px;padding:56px 60px 96px;background:#08090A;font-family:'Microsoft YaHei UI','Microsoft YaHei','PingFang SC','Segoe UI Variable Text','Segoe UI',sans-serif;color:#E6E9EE;">
+
+  <sc-if value="{{ showAnalysis }}" hint-placeholder-val="{{ true }}">
+  <div style="width:1420px;border:1px solid #1E2126;background:#0D0E11;">
+    <div style="display:flex;align-items:baseline;gap:14px;padding:22px 26px 18px;border-bottom:1px solid #1E2126;">
+      <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.14em;color:#7B8492;">01 · 信息结构</span>
+      <span style="font-size:17px;font-weight:600;letter-spacing:.01em;">POE Alarm 现有界面里其实有五层信息，但它们在同一个平面上</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+      <div style="border-right:1px solid #1E2126;padding:22px 26px 26px;display:flex;flex-direction:column;gap:0;">
+        <div style="display:grid;grid-template-columns:112px 1fr;gap:14px 18px;font-size:12.5px;line-height:1.65;">
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;padding-top:3px;">L1 会话</div>
+          <div style="color:#C9CFD8;">游戏 <span style="color:#8FA0FF;">POE1 / POE2</span>（两套完全独立的目标、区域、OCR 语言）· 界面语言 · 命中方式 · 保存设置</div>
+          <div style="grid-column:1 / -1;height:1px;background:#181B1F;"></div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;padding-top:3px;">L2 目标</div>
+          <div style="color:#C9CFD8;">单条：一条完整词缀模板，数值自动占位化<br><span style="color:#8A929E;">多词缀：命中方案 ≤ 8 → 词缀条件 ≤ 32 → 数值条件（不限 / 范围 / 至少 / 至多 / 等于）</span></div>
+          <div style="grid-column:1 / -1;height:1px;background:#181B1F;"></div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;padding-top:3px;">L3 识别</div>
+          <div style="color:#C9CFD8;">词缀文字（英文 / 繁体中文）· 识别区域 x·y·宽·高 + 框选 <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">Ctrl⇧F11</span></div>
+          <div style="grid-column:1 / -1;height:1px;background:#181B1F;"></div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;padding-top:3px;">L4 提醒</div>
+          <div style="color:#C9CFD8;">画面提示常驻 / 录屏可见 / 拖动保存位置 · 提醒声音 WAV 或内置 · 启动热键 <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">Ctrl⇧F10</span></div>
+          <div style="grid-column:1 / -1;height:1px;background:#181B1F;"></div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;padding-top:3px;">L5 运行</div>
+          <div style="color:#C9CFD8;">12 种状态与校验提示 · 截图识别结果 · 开始 / 停止 / 识别截图 · 画面提示浮窗 · 红色阻挡告警（<span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">Ctrl⇧F12</span> 解除）</div>
+        </div>
+      </div>
+      <div style="padding:22px 26px 26px;display:flex;flex-direction:column;gap:18px;">
+        <div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;margin-bottom:10px;">现状的四个结构问题</div>
+          <div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px;line-height:1.6;color:#C9CFD8;">
+            <div style="display:flex;gap:10px;"><span style="color:#E4685C;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">1</span><span>一次性配置（区域 / 声音 / 热键）占掉约六成面积，长期真正要盯的运行状态只有一条 34px 的横条。</span></div>
+            <div style="display:flex;gap:10px;"><span style="color:#E4685C;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">2</span><span>所有控件同权重、同色调、同尺寸；没有主次，眼睛没有落点。</span></div>
+            <div style="display:flex;gap:10px;"><span style="color:#E4685C;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">3</span><span>切换命中方式会让整块布局纵向跳动 186px，编辑态与运行态挤在同一平面。</span></div>
+            <div style="display:flex;gap:10px;"><span style="color:#E4685C;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;padding-top:2px;">4</span><span>8 套方案 × 32 条词缀的规则树被压进三个下拉框逐个点选，看不到全貌。</span></div>
+          </div>
+        </div>
+        <div style="height:1px;background:#181B1F;"></div>
+        <div>
+          <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.12em;color:#7B8492;margin-bottom:10px;">三个方向共用的前提</div>
+          <div style="font-size:12.5px;line-height:1.75;color:#C9CFD8;">监控开始后主窗会最小化 —— 所以主窗真正的职责是<span style="color:#E6E9EE;font-weight:600;">「配置 + 验证」</span>，浮窗才是长期可见面，红色告警是独占面。三个方向都按这个权重重排：目标与运行状态升到第一屏，一次性配置降为可折叠的一行摘要。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start;">
+
+    <sc-if value="{{ showRecreation }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:14px;width:1082px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#6C7482;border:1px solid #23272E;padding:3px 8px;">现状</span>
+        <span style="font-size:15px;font-weight:600;">原生迁移预览版 · 复刻</span>
+        <span style="font-size:12px;color:#6C7482;">1082 × 932 · 96 DPI · 单条词缀模式</span>
+      </div>
+
+      <div style="width:1082px;height:932px;background:#EFF6F6;border:1px solid #C4C4C4;box-shadow:0 24px 60px rgba(0,0,0,.55);font-family:'Microsoft YaHei UI','Microsoft YaHei','PingFang SC',sans-serif;">
+        <div style="height:30px;background:#F3F3F3;border-bottom:1px solid #E5E5E5;display:flex;align-items:center;">
+          <div style="width:9px;height:9px;border-radius:50%;background:#D93025;margin:0 9px 0 11px;"></div>
+          <div style="font-size:12px;color:#1A1A1A;">流放之路词缀提醒 — 原生迁移预览版零点一</div>
+          <div style="margin-left:auto;display:flex;">
+            <div style="width:44px;height:29px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#1A1A1A;">—</div>
+            <div style="width:44px;height:29px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#1A1A1A;">◻</div>
+            <div style="width:44px;height:29px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#1A1A1A;">✕</div>
+          </div>
+        </div>
+
+        <div style="position:relative;width:1080px;height:900px;background:#EFF6F6;">
+          <div style="position:absolute;left:0;top:0;width:1080px;height:82px;background:#F9FCFC;"></div>
+          <div style="position:absolute;left:30px;top:24px;font-size:26px;font-weight:600;color:#17302F;letter-spacing:.01em;">做装词缀提醒 · 原生迁移预览版</div>
+          <div style="position:absolute;left:30px;top:66px;font-size:13px;color:#5B7774;">设置想要的完整词缀。画面命中后会立即提醒。</div>
+
+          <div style="position:absolute;left:30px;top:100px;font-size:12px;font-weight:600;color:#355452;">游戏版本</div>
+          <div style="position:absolute;left:260px;top:100px;font-size:12px;font-weight:600;color:#355452;">界面语言</div>
+          <div style="position:absolute;left:490px;top:100px;font-size:12px;font-weight:600;color:#355452;">命中方式</div>
+
+          <div style="position:absolute;left:30px;top:116px;width:210px;height:30px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;display:flex;align-items:center;padding:0 10px;box-sizing:border-box;"><span style="font-size:14px;color:#17302F;">流放之路一</span><span style="margin-left:auto;font-size:9px;color:#5B7774;">▼</span></div>
+          <div style="position:absolute;left:260px;top:116px;width:210px;height:30px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;display:flex;align-items:center;padding:0 10px;box-sizing:border-box;"><span style="font-size:14px;color:#17302F;">中文</span><span style="margin-left:auto;font-size:9px;color:#5B7774;">▼</span></div>
+          <div style="position:absolute;left:490px;top:116px;width:260px;height:30px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;display:flex;align-items:center;padding:0 10px;box-sizing:border-box;"><span style="font-size:14px;color:#17302F;">单条词缀</span><span style="margin-left:auto;font-size:9px;color:#5B7774;">▼</span></div>
+          <div style="position:absolute;left:870px;top:114px;width:180px;height:36px;background:#0B756F;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#FFF;">保存设置</div>
+
+          <div style="position:absolute;left:22px;top:158px;width:1036px;height:154px;background:#F7FBFB;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;"></div>
+          <div style="position:absolute;left:30px;top:174px;font-size:12px;color:#5B7774;">直接粘贴游戏里显示的整条词缀；数值会自动识别。</div>
+          <div style="position:absolute;left:30px;top:202px;font-size:12px;font-weight:600;color:#355452;">完整词缀</div>
+          <div style="position:absolute;left:30px;top:220px;width:1020px;height:58px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;">
+            <div style="flex:1;padding:8px 10px;font-size:14px;color:#17302F;">若近期有造成暴擊，增加 (6—8)% 攻擊速度</div>
+            <div style="width:16px;background:#F0F0F0;border-left:1px solid #E3E3E3;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:2px 0;">
+              <span style="font-size:7px;color:#606060;">▲</span><span style="font-size:7px;color:#606060;">▼</span>
+            </div>
+          </div>
+
+          <div style="position:absolute;left:22px;top:322px;width:1036px;height:222px;background:#F7FBFB;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;"></div>
+          <div style="position:absolute;left:30px;top:337px;font-size:12px;font-weight:600;color:#355452;">词缀文字</div>
+          <div style="position:absolute;left:275px;top:337px;font-size:12px;font-weight:600;color:#355452;">识别区域（建议点击右侧按钮框选）</div>
+          <div style="position:absolute;left:30px;top:352px;width:210px;height:30px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;display:flex;align-items:center;padding:0 10px;box-sizing:border-box;"><span style="font-size:14px;color:#17302F;">繁体中文词缀</span><span style="margin-left:auto;font-size:9px;color:#5B7774;">▼</span></div>
+          <div style="position:absolute;left:390px;top:352px;width:100px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">0</div>
+          <div style="position:absolute;left:500px;top:352px;width:100px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">58</div>
+          <div style="position:absolute;left:610px;top:352px;width:100px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">1134</div>
+          <div style="position:absolute;left:720px;top:352px;width:100px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">956</div>
+          <div style="position:absolute;left:390px;top:392px;width:100px;text-align:center;font-size:12px;color:#5B7774;">左边</div>
+          <div style="position:absolute;left:500px;top:392px;width:100px;text-align:center;font-size:12px;color:#5B7774;">上边</div>
+          <div style="position:absolute;left:610px;top:392px;width:100px;text-align:center;font-size:12px;color:#5B7774;">宽度</div>
+          <div style="position:absolute;left:720px;top:392px;width:100px;text-align:center;font-size:12px;color:#5B7774;">高度</div>
+          <div style="position:absolute;left:840px;top:351px;width:190px;height:36px;background:#FFF;border:1px solid #84A5A2;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">框选识别区域</div>
+
+          <div style="position:absolute;left:30px;top:400px;font-size:12px;font-weight:600;color:#355452;">提醒与显示</div>
+          <div style="position:absolute;left:30px;top:422px;width:300px;height:26px;display:flex;align-items:center;gap:8px;">
+            <div style="width:15px;height:15px;background:#0B756F;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#FFF;">✓</div>
+            <span style="font-size:14px;color:#17302F;">持续显示画面提示</span>
+          </div>
+          <div style="position:absolute;left:350px;top:422px;width:340px;height:26px;display:flex;align-items:center;gap:8px;">
+            <div style="width:15px;height:15px;background:#0B756F;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#FFF;">✓</div>
+            <span style="font-size:14px;color:#17302F;">截图中保留画面提示</span>
+          </div>
+          <div style="position:absolute;left:30px;top:448px;width:220px;height:36px;background:#FFF;border:1px solid #84A5A2;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">调整提示位置</div>
+          <div style="position:absolute;left:270px;top:458px;font-size:12px;color:#5B7774;">点击按钮后，可直接拖动画面提示。</div>
+
+          <div style="position:absolute;left:30px;top:486px;font-size:12px;font-weight:600;color:#355452;">提醒声音（留空使用内置声音）</div>
+          <div style="position:absolute;left:820px;top:486px;font-size:12px;font-weight:600;color:#355452;">开始监控快捷键</div>
+          <div style="position:absolute;left:30px;top:510px;width:510px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;padding:0 10px;font-size:14px;color:#17302F;">D:\sounds\divine-orb-drop.wav</div>
+          <div style="position:absolute;left:550px;top:509px;width:120px;height:36px;background:#FFF;border:1px solid #84A5A2;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">选择声音</div>
+          <div style="position:absolute;left:680px;top:509px;width:120px;height:36px;background:#FFF;border:1px solid #84A5A2;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">使用内置</div>
+          <div style="position:absolute;left:820px;top:510px;width:210px;height:30px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;display:flex;align-items:center;padding:0 10px;box-sizing:border-box;"><span style="font-size:14px;color:#17302F;">Ctrl+Shift+F10</span><span style="margin-left:auto;font-size:9px;color:#5B7774;">▼</span></div>
+
+          <div style="position:absolute;left:22px;top:554px;width:1036px;height:34px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;"></div>
+          <div style="position:absolute;left:27px;top:562px;width:3px;height:18px;background:#0B756F;border-radius:2px;"></div>
+          <div style="position:absolute;left:40px;top:564px;font-size:12px;font-weight:600;color:#355452;">当前状态</div>
+          <div style="position:absolute;left:150px;top:563px;font-size:14px;font-weight:600;color:#0B756F;">可以开始</div>
+
+          <div style="position:absolute;left:30px;top:596px;font-size:12px;font-weight:600;color:#355452;">截图识别结果</div>
+          <div style="position:absolute;left:30px;top:618px;width:690px;height:274px;background:#FFF;border:1px solid #BCD1CF;border-radius:7px;box-sizing:border-box;display:flex;">
+            <div style="flex:1;"></div>
+            <div style="width:16px;background:#F0F0F0;border-left:1px solid #E3E3E3;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:2px 0;">
+              <span style="font-size:7px;color:#606060;">▲</span><span style="font-size:7px;color:#606060;">▼</span>
+            </div>
+          </div>
+          <div style="position:absolute;left:740px;top:596px;width:310px;height:34px;background:#0B756F;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#FFF;">开始监控</div>
+          <div style="position:absolute;left:740px;top:634px;width:310px;height:34px;background:#EAF0EF;border:1px solid #D8E5E4;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#80918F;">停止监控</div>
+          <div style="position:absolute;left:740px;top:672px;width:310px;height:34px;background:#FFF;border:1px solid #84A5A2;border-radius:7px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:14px;color:#17302F;">识别截图</div>
+        </div>
+      </div>
+
+      <div style="font-size:12px;line-height:1.7;color:#6C7482;width:1000px;">按 <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;">theme.rs</span> 的 SEA_GLASS 调色板与 <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;">win32.rs</span> 的 place! 坐标复刻，作为下面三个方向的对照基准。</div>
+    </div>
+    </sc-if>
+
+    <div id="1a" style="display:flex;flex-direction:column;gap:14px;width:1000px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#8FA0FF;border:1px solid #2B3350;background:#12141C;padding:3px 8px;">1a</span>
+        <span style="font-size:15px;font-weight:600;">仪表台 / Instrument</span>
+        <span style="font-size:12px;color:#6C7482;">1000 × 620 · 全部信息一屏、零卡片、数据用等宽字</span>
+      </div>
+
+      <div style="width:1000px;height:620px;background:#0E1013;border:1px solid #23272E;box-shadow:0 24px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;">
+        <div style="height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid #1B1F25;background:#101317;">
+          <div style="width:10px;height:10px;background:#8FA0FF;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.16em;color:#C9CFD8;">POE ALARM</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">1.0.0-rs</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:2px;color:#6C7482;">
+            <div style="width:34px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;">—</div>
+            <div style="width:34px;height:24px;display:flex;align-items:center;justify-content:center;font-size:9px;">◻</div>
+            <div style="width:34px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;">✕</div>
+          </div>
+        </div>
+
+        <div style="height:46px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid #1B1F25;background:#0B0D10;">
+          <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedA }};box-shadow:0 0 0 3px rgba(143,160,255,.10);"></div>
+          <span style="font-size:13.5px;font-weight:600;color:{{ statusColorA }};">{{ statusText }}</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#8A929E;">{{ elapsed }}</span>
+          <div style="width:1px;height:16px;background:#23272E;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#6C7482;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:340px;">{{ hitLine }}</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">
+            <span style="border:1px solid #23272E;padding:2px 5px;">F10</span><span>开始</span>
+            <span style="border:1px solid #23272E;padding:2px 5px;">F11</span><span>框选</span>
+            <span style="border:1px solid #23272E;padding:2px 5px;">F12</span><span>停止</span>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0;">
+          <div style="width:600px;flex:none;border-right:1px solid #1B1F25;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 8px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">目标 / TARGET</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+              <div style="display:flex;border:1px solid #23272E;">
+                <div style="padding:3px 10px;font-size:11.5px;background:#1B2033;color:#B9C2FF;">单条词缀</div>
+                <div style="padding:3px 10px;font-size:11.5px;color:#6C7482;border-left:1px solid #23272E;">多词缀组合</div>
+              </div>
+              <div style="display:flex;border:1px solid #23272E;">
+                <div style="padding:3px 9px;font-size:11.5px;color:#6C7482;">POE1</div>
+                <div style="padding:3px 9px;font-size:11.5px;background:#1B2033;color:#B9C2FF;border-left:1px solid #23272E;">POE2</div>
+              </div>
+            </div>
+            <div style="margin:6px 16px 0;display:flex;background:#0A0C0F;border:1px solid #1B1F25;border-left:2px solid #8FA0FF;">
+              <div style="flex:1;padding:11px 13px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#E6E9EE;">若近期有造成暴擊，增加 <span style="color:#8FA0FF;">(6—8)%</span> 攻擊速度</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 16px 0;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">
+              <span>归一化 → <span style="color:#8A929E;">若近期有造成暴擊，增加 &lt;PCT&gt; 攻擊速度</span></span>
+              <span style="margin-left:auto;color:#6C7482;">1 个数值占位</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 6px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">识别 / CAPTURE</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;padding:0 16px;">
+              <div style="height:30px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">词缀文字</span>
+                <span style="font-size:12.5px;color:#E6E9EE;">繁体中文词缀</span>
+                <span style="font-size:8px;color:#7B8492;margin-left:7px;">▼</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">Windows zh-TW · 内置 PP-OCRv5 备用</span>
+              </div>
+              <div style="height:30px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">识别区域</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;color:#E6E9EE;">0, 58</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;color:#7B8492;margin:0 8px;">→</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;color:#E6E9EE;">1134 × 956</span>
+                <span style="margin-left:auto;display:flex;align-items:center;gap:7px;">
+                  <span style="border:1px solid #2B3350;color:#B9C2FF;font-size:11.5px;padding:2px 9px;">框选</span>
+                  <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">F11</span>
+                </span>
+              </div>
+              <div style="height:30px;display:flex;align-items:center;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">区域预览</span>
+                <div style="position:relative;width:104px;height:20px;border:1px solid #23272E;background:#0A0C0F;">
+                  <div style="position:absolute;left:0;top:2px;width:92px;height:17px;border:1px solid #8FA0FF;background:rgba(143,160,255,.10);"></div>
+                </div>
+                <span style="margin-left:12px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">占主显示器 55% · 区域越小越快</span>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;padding:20px 16px 6px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">提醒 / ALERT</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;padding:0 16px;">
+              <div style="height:30px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">画面提示</span>
+                <div style="display:flex;align-items:center;gap:16px;">
+                  <span style="display:flex;align-items:center;gap:7px;font-size:12px;color:#E6E9EE;"><span style="width:13px;height:13px;border:1px solid #2B3350;background:#1B2033;color:#B9C2FF;font-size:9px;display:flex;align-items:center;justify-content:center;">✓</span>常驻</span>
+                  <span style="display:flex;align-items:center;gap:7px;font-size:12px;color:#E6E9EE;"><span style="width:13px;height:13px;border:1px solid #2B3350;background:#1B2033;color:#B9C2FF;font-size:9px;display:flex;align-items:center;justify-content:center;">✓</span>录屏可见</span>
+                  <span style="display:flex;align-items:center;gap:7px;font-size:12px;color:#8A929E;"><span style="width:13px;height:13px;border:1px solid #23272E;"></span>拖动定位</span>
+                </div>
+              </div>
+              <div style="height:30px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">提醒声音</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#E6E9EE;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:270px;">…\POE\divine-orb-drop.wav</span>
+                <span style="margin-left:auto;display:flex;gap:7px;">
+                  <span style="border:1px solid #23272E;color:#C9CFD8;font-size:11.5px;padding:2px 9px;">更换</span>
+                  <span style="border:1px solid #23272E;color:#6C7482;font-size:11.5px;padding:2px 9px;">内置</span>
+                </span>
+              </div>
+              <div style="height:30px;display:flex;align-items:center;">
+                <span style="width:96px;font-size:12px;color:#8A929E;">启动热键</span>
+                <span style="display:flex;align-items:center;gap:4px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#C9CFD8;">
+                  <span style="border:1px solid #23272E;padding:2px 6px;">Ctrl</span><span style="color:#7B8492;">+</span>
+                  <span style="border:1px solid #23272E;padding:2px 6px;">Shift</span><span style="color:#7B8492;">+</span>
+                  <span style="border:1px solid #23272E;padding:2px 6px;">F10</span>
+                </span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">无冲突</span>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 6px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">记录 / HISTORY</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7C848F;">本次会话 2 次命中</span>
+            </div>
+            <div style="display:flex;flex-direction:column;padding:0 16px;">
+              <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7C848F;width:96px;">21:04:14</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#C9CFD8;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">8(6-8)% 攻擊速度</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">02:11</span>
+              </div>
+              <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7C848F;width:96px;">20:51:02</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#C9CFD8;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">7(6-8)% 攻擊速度</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">02:44</span>
+              </div>
+              <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181D;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7C848F;width:96px;">20:38:47</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#8A929E;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">未命中 · 手动停止</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#8A929E;">06:03</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#0B0D10;">
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">运行 / RUN</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;margin:0 16px;background:#1B1F25;border:1px solid #1B1F25;">
+              <div style="background:#0E1013;padding:9px 11px;"><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#7B8492;">判定 P50</div><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:16px;color:#E6E9EE;">31.0<span style="font-size:10px;color:#6C7482;"> ms</span></div></div>
+              <div style="background:#0E1013;padding:9px 11px;"><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#7B8492;">判定 P95</div><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:16px;color:#E6E9EE;">47.9<span style="font-size:10px;color:#6C7482;"> ms</span></div></div>
+              <div style="background:#0E1013;padding:9px 11px;"><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#7B8492;">变化预检</div><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:16px;color:#E6E9EE;">3.1<span style="font-size:10px;color:#6C7482;"> ms</span></div></div>
+              <div style="background:#0E1013;padding:9px 11px;"><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#7B8492;">局部复核</div><div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:16px;color:#E6E9EE;">4<span style="font-size:10px;color:#6C7482;"> / 27</span></div></div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;padding:16px 16px 8px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.16em;color:#7B8492;">识别结果</span>
+              <div style="flex:1;height:1px;background:#1B1F25;"></div>
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#7B8492;">最近 6 帧</span>
+            </div>
+            <div style="flex:1;margin:0 16px;border:1px solid #1B1F25;background:#0A0C0F;padding:9px 10px;display:flex;flex-direction:column;gap:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;line-height:1.5;overflow:hidden;">
+              <div style="display:flex;gap:8px;"><span style="color:#7C848F;">21:04:12.338</span><span style="color:#6C7482;">frame</span><span style="color:#8A929E;">unchanged · 复用</span></div>
+              <div style="display:flex;gap:8px;"><span style="color:#7C848F;">21:04:12.371</span><span style="color:#6C7482;">ocr</span><span style="color:#8FA0FF;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">增加 7% 攻擊速度</span></div>
+              <div style="display:flex;gap:8px;"><span style="color:#7C848F;">21:04:12.371</span><span style="color:#6C7482;">ocr</span><span style="color:#8FA0FF;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">+24 生命</span></div>
+              <div style="display:flex;gap:8px;"><span style="color:#7C848F;">21:04:12.402</span><span style="color:#6C7482;">rule</span><span style="color:#8A929E;">miss · 缺 1 行</span></div>
+              <div style="display:flex;gap:8px;"><span style="color:#7C848F;">21:04:14.116</span><span style="color:#6C7482;">recheck</span><span style="color:#8A929E;">原色局部 · 2 行</span></div>
+              <div style="display:flex;gap:8px;background:rgba(228,104,92,.10);margin:0 -10px;padding:1px 10px;"><span style="color:#7C848F;">21:04:14.147</span><span style="color:#E4685C;">HIT</span><span style="color:#E4685C;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">若近期有造成暴擊，增加 8(6-8)% 攻擊速度</span></div>
+            </div>
+
+            <div style="padding:12px 16px 0;display:flex;flex-direction:column;gap:7px;">
+              <div style="height:34px;background:#1B2033;border:1px solid #3A4470;display:flex;align-items:center;justify-content:center;gap:9px;">
+                <span style="font-size:13px;font-weight:600;color:#C6CEFF;">{{ primaryLabel }}</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#7D87B8;">Ctrl⇧F10</span>
+              </div>
+              <div style="display:flex;gap:7px;">
+                <div style="flex:1;height:28px;border:1px solid #23272E;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8A929E;">识别截图</div>
+                <div style="flex:1;height:28px;border:1px solid #23272E;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8A929E;">保存设置</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:26px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-top:1px solid #1B1F25;background:#101317;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#7B8492;">
+          <span>%LOCALAPPDATA%\PoeAlarm\settings.json</span>
+          <span style="color:#2E343D;">|</span>
+          <span>schema 3</span>
+          <span style="color:#2E343D;">|</span>
+          <span>本机运行 · 无联网 · 无遥测</span>
+          <span style="margin-left:auto;color:#6C7482;">已保存</span>
+        </div>
+      </div>
+
+      <div style="font-size:12px;line-height:1.75;color:#8A929E;width:1000px;">
+        <span style="color:#C9CFD8;">主张：</span>整个窗口是一张仪表，不是一叠表单。左半永久显示「目标 / 识别 / 提醒」三组行表（label 96px 对齐、行高 30px、无卡片、只有 1px 分隔线），右半是运行侧：延迟指标 + 逐帧识别流水 + 主操作。所有数据用等宽字，POE 蓝紫只给「值」和「命中」，界面本身保持中性石墨。<br>
+        <span style="color:#C9CFD8;">取舍：</span>信息密度最高、最像 btop / Zed；但 8 套方案的规则树在这个平面里只能折叠成摘要行，重编辑要进第二层。
+      </div>
+    </div>
+
+    <div id="1b" style="display:flex;flex-direction:column;gap:14px;width:900px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#C9A24A;border:1px solid #3A3220;background:#16130E;padding:3px 8px;">1b</span>
+        <span style="font-size:15px;font-weight:600;">停靠条 / Dock</span>
+        <span style="font-size:12px;color:#6C7482;">520 × 748 · 常驻游戏旁的窄条 · 键盘优先 · 墨 + 暗金</span>
+      </div>
+
+      <div style="display:flex;gap:36px;align-items:flex-start;">
+        <div style="width:520px;height:748px;flex:none;background:#0B0A09;border:1px solid #2A2520;box-shadow:0 24px 60px rgba(0,0,0,.65);display:flex;flex-direction:column;overflow:hidden;font-family:'Microsoft YaHei UI','Segoe UI Variable Text','Segoe UI',sans-serif;">
+          <div style="height:30px;flex:none;display:flex;align-items:center;gap:9px;padding:0 11px;border-bottom:1px solid #1A1713;">
+            <div style="width:7px;height:7px;background:#C9A24A;transform:rotate(45deg);"></div>
+            <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;letter-spacing:.18em;color:#B9AE99;">POE ALARM</span>
+            <span style="margin-left:auto;font-size:10px;color:#8C8272;">停靠 · 置顶</span>
+            <span style="font-size:10px;color:#8C8272;margin-left:10px;">✕</span>
+          </div>
+
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;background:#15130F;border-bottom:1px solid #3A3220;">
+            <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#C9A24A;">⌘K</span>
+            <span style="font-size:12.5px;color:#8C8272;">粘贴词缀 / 输入命令…</span>
+            <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#8C8272;border:1px solid #2A2520;padding:2px 6px;">⇧⌘K</span>
+          </div>
+
+          <div style="padding:16px 14px 14px;border-bottom:1px solid #1A1713;">
+            <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.18em;color:#C9A24A;">当前目标</span>
+              <div style="flex:1;height:1px;background:#1A1713;"></div>
+              <span style="font-size:10.5px;color:#8C8272;">POE2 · 繁中 · 单条</span>
+            </div>
+            <div style="font-size:14.5px;line-height:1.6;color:#EDE7DA;font-weight:600;">若近期有造成暴擊，增加 <span style="color:#C9A24A;">(6—8)%</span> 攻擊速度</div>
+            <div style="margin-top:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#8C8272;">1 个数值占位 · 不限 roll · 只比屏幕显示值</div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;">
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;background:#100E0B;">
+              <span style="font-size:12.5px;color:#EDE7DA;">识别区域</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#C9A24A;">1134 × 956 @ 0,58</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="padding:10px 14px 12px;border-bottom:1px solid #15130F;background:#0E0C0A;display:flex;align-items:center;gap:7px;">
+              <div style="display:flex;flex-direction:column;gap:3px;"><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9px;color:#8C8272;">左</span><div style="width:58px;height:26px;border:1px solid #2A2520;background:#080706;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#EDE7DA;">0</div></div>
+              <div style="display:flex;flex-direction:column;gap:3px;"><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9px;color:#8C8272;">上</span><div style="width:58px;height:26px;border:1px solid #2A2520;background:#080706;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#EDE7DA;">58</div></div>
+              <div style="display:flex;flex-direction:column;gap:3px;"><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9px;color:#8C8272;">宽</span><div style="width:58px;height:26px;border:1px solid #2A2520;background:#080706;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#EDE7DA;">1134</div></div>
+              <div style="display:flex;flex-direction:column;gap:3px;"><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9px;color:#8C8272;">高</span><div style="width:58px;height:26px;border:1px solid #2A2520;background:#080706;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#EDE7DA;">956</div></div>
+              <div style="margin-left:auto;display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9px;color:#8C8272;">⇧⌘F11</span>
+                <div style="height:26px;padding:0 12px;border:1px solid #6B5A2E;background:#171309;display:flex;align-items:center;font-size:12px;color:#C9A24A;">重新框选</div>
+              </div>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">词缀文字</span>
+              <span style="margin-left:auto;font-size:12px;color:#B9AE99;">繁体中文词缀</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">命中方式</span>
+              <span style="margin-left:auto;font-size:12px;color:#B9AE99;">单条词缀</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">画面提示</span>
+              <span style="margin-left:auto;font-size:12px;color:#B9AE99;">常驻 · 录屏可见 · 已定位</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">提醒声音</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#B9AE99;">divine-orb-drop.wav</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">启动热键</span>
+              <span style="margin-left:auto;display:flex;gap:3px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#B9AE99;">
+                <span style="border:1px solid #2A2520;padding:2px 5px;">Ctrl</span><span style="border:1px solid #2A2520;padding:2px 5px;">⇧</span><span style="border:1px solid #2A2520;padding:2px 5px;">F10</span>
+              </span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">多词缀方案</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#B9AE99;">2 套 · 3 条词缀</span>
+              <span style="font-size:10px;color:#8A8172;margin-left:10px;">▾</span>
+            </div>
+            <div style="height:36px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #15130F;">
+              <span style="font-size:12.5px;color:#EDE7DA;">最近命中</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#B9AE99;">21:04 · 8(6-8)% 攻擊速度</span>
+            </div>
+          </div>
+
+          <div style="margin-top:auto;">
+            <div style="padding:14px;border-top:1px solid #1A1713;background:#0E0C0A;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedB }};"></div>
+                <span style="font-size:13px;font-weight:600;color:{{ statusColorB }};">{{ statusText }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#8C8272;">{{ elapsed }}</span>
+              </div>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#8C8272;">
+                <span>p50 31.0ms</span><span style="color:#2A2520;">·</span><span>p95 47.9ms</span><span style="color:#2A2520;">·</span><span>{{ hitLine }}</span>
+              </div>
+            </div>
+            <div style="padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;background:#0B0A09;border-top:1px solid #1A1713;">
+              <div style="height:46px;border:1px solid #6B5A2E;background:#17130A;display:flex;align-items:center;justify-content:center;gap:12px;">
+                <span style="font-size:14.5px;font-weight:600;letter-spacing:.18em;color:#E4C878;">{{ primaryLabel }}</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#B69A5C;border:1px solid #4A3F22;padding:2px 6px;">Ctrl⇧F10</span>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <div style="flex:1;height:30px;border:1px solid #2A2520;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8C8272;">识别截图</div>
+                <div style="flex:1;height:30px;border:1px solid #2A2520;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8C8272;">保存设置</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:24px;padding-top:6px;">
+          <div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.14em;color:#7B8492;margin-bottom:9px;">画面提示浮窗 · 两态</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="width:296px;background:#0B0A09;border:1px solid #2A2520;border-left:2px solid #8A8172;padding:9px 11px;">
+                <div style="display:flex;align-items:center;gap:8px;"><div style="width:6px;height:6px;border-radius:50%;background:#8C8272;"></div><span style="font-size:12px;font-weight:600;color:#B9AE99;">未监控</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#8A8172;">--:--</span></div>
+                <div style="margin-top:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#8C8272;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">增加 (6—8)% 攻擊速度</div>
+              </div>
+              <div style="width:296px;background:#0B0A09;border:1px solid #3A3220;border-left:2px solid #C9A24A;padding:9px 11px;">
+                <div style="display:flex;align-items:center;gap:8px;"><div style="width:6px;height:6px;border-radius:50%;background:#C9A24A;"></div><span style="font-size:12px;font-weight:600;color:#E4C878;">监控中</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#8C8272;">00:12</span></div>
+                <div style="margin-top:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#B9AE99;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">增加 (6—8)% 攻擊速度</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;letter-spacing:.14em;color:#7B8492;margin-bottom:9px;">命中锁定卡 · 独占</div>
+            <div style="width:296px;border:2px solid #C4342A;background:#140A08;padding:16px 16px 14px;">
+              <div style="font-size:15px;font-weight:600;letter-spacing:.06em;color:#F0D9CF;">目标词缀命中</div>
+              <div style="margin-top:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;line-height:1.55;color:#E8B9AE;">8(6-8)% 攻擊速度 · 若近期有造成暴擊</div>
+              <div style="margin-top:10px;font-size:11px;color:#B08A80;">后续鼠标点击已被阻挡，请先检查装备</div>
+              <div style="margin-top:12px;height:34px;border:1px solid #C4342A;background:#2A0F0B;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#F0D9CF;">我已检查，解除锁定</div>
+              <div style="margin-top:7px;text-align:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#B0857A;">或 Ctrl ⇧ F12</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size:12px;line-height:1.75;color:#8A929E;width:900px;">
+        <span style="color:#C9CFD8;">主张：</span>不做「工具窗口」，做一条常驻在游戏旁的窄条。一次性配置全部折叠成 36px 摘要行（右侧就是当前值），点开才展开输入；顶部一条命令行接管所有操作与粘贴。配色取 POE 的墨黑 + 暗金，只用一层 1px 金线和一个金色主按钮，其余全是灰烬色。<br>
+        <span style="color:#C9CFD8;">取舍：</span>最省屏幕、最贴合「长期开着」；代价是多词缀规则编辑必须另开一个面板，靠命令行进入。
+      </div>
+    </div>
+
+    <div id="1c" style="display:flex;flex-direction:column;gap:14px;width:1180px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#5BA8A0;border:1px solid #24393A;background:#0F1618;padding:3px 8px;">1c</span>
+        <span style="font-size:15px;font-weight:600;">工作台 / Workbench</span>
+        <span style="font-size:12px;color:#6C7482;">1180 × 720 · 规则树 + 编辑器 + 运行面板 · 为 8 × 32 而设计</span>
+      </div>
+
+      <div style="width:1180px;height:720px;background:#101215;border:1px solid #262B33;box-shadow:0 24px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;">
+        <div style="height:30px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;background:#0C0E11;border-bottom:1px solid #1D2127;">
+          <div style="width:9px;height:9px;background:#5BA8A0;"></div>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#98A1AD;">POE2</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7E8794;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#98A1AD;">多词缀组合</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7E8794;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#98A1AD;">可接受结果 1</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#7E8794;">›</span>
+          <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11px;color:#DDE2E8;">法术暴击率</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+            <div style="height:22px;padding:0 10px;background:#14262A;border:1px solid #2C4A4B;display:flex;align-items:center;gap:7px;">
+              <span style="color:#5BA8A0;font-size:9px;">▶</span><span style="font-size:11.5px;color:#8FD0C7;">开始监控</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#6FA9A3;">F10</span>
+            </div>
+            <div style="height:22px;padding:0 10px;border:1px solid #262B33;display:flex;align-items:center;gap:7px;">
+              <span style="color:#7E8794;font-size:9px;">■</span><span style="font-size:11.5px;color:#7E8794;">停止</span><span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7E8794;">F12</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:2px;color:#828B98;margin-left:6px;">
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">—</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9px;">◻</div>
+              <div style="width:28px;height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;">✕</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0;">
+          <div style="width:218px;flex:none;border-right:1px solid #1D2127;background:#0D0F12;display:flex;flex-direction:column;">
+            <div style="height:28px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #1D2127;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#828B98;">规则</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7E8794;">2/8 · 3/32</span>
+            </div>
+            <div style="padding:6px 0;display:flex;flex-direction:column;">
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;background:#14181C;border-left:2px solid #5BA8A0;">
+                <span style="font-size:8px;color:#7E8794;">▾</span><span style="font-size:12px;font-weight:600;color:#DDE2E8;">流放之路二</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#5BA8A0;">活动</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#7E8794;">▾</span><span style="font-size:12px;color:#C3CAD3;">可接受结果 1</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#828B98;">≥2/2</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;background:#171B20;">
+                <div style="width:4px;height:4px;background:#5BA8A0;"></div><span style="font-size:12px;color:#DDE2E8;">法术暴击率</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#828B98;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 40px;">
+                <div style="width:4px;height:4px;background:#3C434D;"></div><span style="font-size:12px;color:#98A1AD;">暴击伤害加成</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#828B98;">1 值</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px 0 24px;">
+                <span style="font-size:8px;color:#7E8794;">▸</span><span style="font-size:12px;color:#C3CAD3;">可接受结果 2</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#828B98;">任意</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;margin-top:4px;">
+                <span style="font-size:8px;color:#7E8794;">▸</span><span style="font-size:12px;color:#98A1AD;">流放之路一</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7E8794;">1/8</span>
+              </div>
+            </div>
+            <div style="margin-top:auto;border-top:1px solid #1D2127;display:flex;">
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#7E8794;border-right:1px solid #1D2127;"><span style="color:#5BA8A0;">+</span>方案</div>
+              <div style="flex:1;height:28px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:11.5px;color:#7E8794;"><span style="color:#5BA8A0;">+</span>词缀</div>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+            <div style="height:30px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid #1D2127;background:#0D0F12;">
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#DDE2E8;border-bottom:2px solid #5BA8A0;background:#101215;">词缀条件</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#7E8794;">识别区域</div>
+              <div style="padding:0 14px;display:flex;align-items:center;font-size:12px;color:#7E8794;">提醒与显示</div>
+              <div style="margin-left:auto;padding:0 12px;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7E8794;">
+                <span>settings.json</span><span style="color:#5BA8A0;">已保存</span>
+              </div>
+            </div>
+
+            <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:0;min-height:0;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:10px;height:28px;">
+                <span style="width:96px;font-size:11.5px;color:#7E8794;">条件名称</span>
+                <div style="width:280px;height:26px;border:1px solid #262B33;background:#0B0D10;display:flex;align-items:center;padding:0 9px;font-size:12px;color:#DDE2E8;">法术暴击率</div>
+                <span style="margin-left:16px;font-size:11.5px;color:#7E8794;">什么时候提醒</span>
+                <div style="display:flex;border:1px solid #262B33;">
+                  <div style="padding:3px 9px;font-size:11.5px;color:#7E8794;">任意</div>
+                  <div style="padding:3px 9px;font-size:11.5px;color:#7E8794;border-left:1px solid #262B33;">全部</div>
+                  <div style="padding:3px 9px;font-size:11.5px;background:#14262A;color:#8FD0C7;border-left:1px solid #262B33;">指定条数</div>
+                </div>
+                <div style="width:44px;height:26px;border:1px solid #262B33;background:#0B0D10;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#DDE2E8;">2</div>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#828B98;white-space:nowrap;">/ 共 2 条</span>
+              </div>
+
+              <div style="display:flex;gap:10px;margin-top:10px;">
+                <span style="width:96px;font-size:11.5px;color:#7E8794;padding-top:6px;">完整词缀模板</span>
+                <div style="flex:1;border:1px solid #262B33;border-left:2px solid #5BA8A0;background:#0B0D10;padding:9px 11px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#DDE2E8;">#% increased Spell Critical Hit Chance</div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:6px;">
+                <span style="width:96px;"></span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;color:#828B98;">归一化 <span style="color:#98A1AD;">&lt;PCT&gt; increased spell critical hit chance</span> · 找到 1 个数值，按顺序对应下方</span>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#828B98;">数值条件</span>
+                <div style="flex:1;height:1px;background:#1D2127;"></div>
+                <span style="font-size:11.5px;color:#5BA8A0;">+ 添加数值</span>
+              </div>
+              <div style="margin-top:8px;border:1px solid #1D2127;">
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;background:#0D0F12;border-bottom:1px solid #1D2127;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.1em;color:#828B98;">
+                  <div style="padding:6px 10px;">数值</div><div style="padding:6px 10px;">比较方式</div><div style="padding:6px 10px;">下限</div><div style="padding:6px 10px;">上限</div><div style="padding:6px 10px;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#0B0D10;border-bottom:1px solid #15181C;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;white-space:nowrap;color:#98A1AD;">1 · 百分比</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#DDE2E8;">在范围内 <span style="font-size:8px;color:#828B98;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#DDE2E8;">3.1</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#DDE2E8;">3.8</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#828B98;">删除</div>
+                </div>
+                <div style="display:grid;grid-template-columns:104px 1fr 110px 110px 60px;align-items:center;background:#0B0D10;">
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#98A1AD;">2 · 普通</div>
+                  <div style="padding:7px 10px;font-size:12px;color:#7E8794;">不限制数值 <span style="font-size:8px;color:#828B98;">▾</span></div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#6B737E;">—</div>
+                  <div style="padding:7px 10px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:12px;color:#6B737E;">—</div>
+                  <div style="padding:7px 10px;font-size:11px;color:#828B98;">删除</div>
+                </div>
+              </div>
+              <div style="margin-top:12px;display:flex;gap:9px;border-left:2px solid #6E5A28;background:#14120C;padding:9px 11px;">
+                <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#C99A3C;">注意</span>
+                <span style="font-size:11.5px;line-height:1.55;color:#A79A82;">催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值，不推算基础值。</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="width:318px;flex:none;border-left:1px solid #1D2127;background:#0D0F12;display:flex;flex-direction:column;">
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #1D2127;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#828B98;">运行</span>
+              <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;color:#7E8794;">繁中 · Windows OCR</span>
+            </div>
+            <div style="padding:12px;border-bottom:1px solid #1D2127;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:{{ statusLedC }};"></div>
+                <span style="font-size:13px;font-weight:600;color:{{ statusColorC }};">{{ statusText }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:11.5px;color:#7E8794;">{{ elapsed }}</span>
+              </div>
+              <div style="margin-top:10px;display:flex;flex-direction:column;">
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181C;font-size:11.5px;"><span style="color:#7E8794;">判定 p50 / p95</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#DDE2E8;">31.0 / 47.9 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181C;font-size:11.5px;"><span style="color:#7E8794;">变化预检 p50</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#DDE2E8;">3.1 ms</span></div>
+                <div style="height:24px;display:flex;align-items:center;border-bottom:1px solid #15181C;font-size:11.5px;"><span style="color:#7E8794;">局部复核</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#DDE2E8;">4 / 27</span></div>
+                <div style="height:24px;display:flex;align-items:center;font-size:11.5px;"><span style="color:#7E8794;">本轮命中</span><span style="margin-left:auto;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;color:#DDE2E8;">{{ hitCount }}</span></div>
+              </div>
+            </div>
+            <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #1D2127;">
+              <span style="font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:9.5px;letter-spacing:.14em;color:#828B98;">截图识别结果</span>
+              <span style="margin-left:auto;font-size:11px;color:#5BA8A0;">识别截图</span>
+            </div>
+            <div style="flex:1;padding:9px 12px;display:flex;flex-direction:column;gap:5px;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10.5px;line-height:1.5;overflow:hidden;">
+              <div style="color:#7E8794;">band 00 · 32 ms</div>
+              <div style="color:#98A1AD;padding-left:8px;">+24 生命</div>
+              <div style="color:#7E8794;">band 01 · 29 ms</div>
+              <div style="color:#8FD0C7;padding-left:8px;">7% 法術暴擊率</div>
+              <div style="color:#7E8794;">band 02 · 31 ms</div>
+              <div style="color:#98A1AD;padding-left:8px;">增加 12% 暴擊傷害</div>
+              <div style="margin-top:4px;padding:5px 8px;background:#14262A;border-left:2px solid #5BA8A0;color:#8FD0C7;">规则命中 · 可接受结果 1 · 2/2 条</div>
+              <div style="color:#7E8794;">共 5 行 · 全帧 1 次 · 复核 1 次</div>
+            </div>
+            <div style="padding:10px 12px;border-top:1px solid #1D2127;display:flex;gap:8px;">
+              <div style="flex:1;height:28px;border:1px solid #262B33;display:flex;align-items:center;justify-content:center;font-size:12px;color:#98A1AD;">验证并保存</div>
+              <div style="width:74px;height:28px;border:1px solid #262B33;display:flex;align-items:center;justify-content:center;font-size:12px;color:#7E8794;">撤销</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:24px;flex:none;display:flex;align-items:center;gap:0;background:#0C0E11;border-top:1px solid #1D2127;font-family:'JetBrains Mono',ui-monospace,Consolas,monospace;font-size:10px;color:#828B98;">
+          <span style="padding:0 11px;border-right:1px solid #1D2127;color:{{ statusColorC }};">{{ statusText }}</span>
+          <span style="padding:0 11px;border-right:1px solid #1D2127;">区域 1134×956 @ 0,58</span>
+          <span style="padding:0 11px;border-right:1px solid #1D2127;">OCR 繁中 · zh-TW</span>
+          <span style="padding:0 11px;border-right:1px solid #1D2127;">规则 2 方案 / 3 词缀</span>
+          <span style="padding:0 11px;">p50 31.0 ms</span>
+          <span style="margin-left:auto;padding:0 11px;border-left:1px solid #1D2127;">Ctrl⇧F10 开始 · F11 框选 · F12 停止</span>
+        </div>
+      </div>
+
+      <div style="font-size:12px;line-height:1.75;color:#8A929E;width:1180px;">
+        <span style="color:#C9CFD8;">主张：</span>把规则当代码看：左树、中编辑器、右运行面板，底部一条 24px 状态栏永远告诉你「现在会不会响」。数值条件从三个下拉框变成一张真正的表；两个游戏、8 套方案、32 条词缀第一次能同屏看全。运行控制放进标题栏，像调试工具条。<br>
+        <span style="color:#C9CFD8;">取舍：</span>最强的表达力和最高的密度，但窗口最大（1180 宽），不适合贴在游戏边上常开；更像「制作前先坐下来配规则」的台子。
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;runState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;待机&quot;,&quot;监控中&quot;,&quot;已命中&quot;],&quot;default&quot;:&quot;待机&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;演示状态&quot;},&quot;showRecreation&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;画布&quot;},&quot;showAnalysis&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;画布&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const state = this.props.runState ?? "待机";
+    const table = {
+      "待机": { text: "可以开始", a: "#8A929E", b: "#8C8272", c: "#7E8794", ledA: "#7B8492", ledB: "#8C8272", ledC: "#7E8794", l1: "#4B535C", l2: "#524C41", l3: "#41505E", ledL1: "#A3AAB3", ledL2: "#A79E8E", ledL3: "#97A3B0", elapsed: "--:--", primary: "开始监控", hit: "等待启动", hits: "0" },
+      "监控中": { text: "正在监控词缀", a: "#8FA0FF", b: "#E4C878", c: "#D69A3C", ledA: "#8FA0FF", ledB: "#C9A24A", ledC: "#D69A3C", l1: "#0B7A73", l2: "#8A5A0B", l3: "#0A6E8C", ledL1: "#0B7A73", ledL2: "#8A5A0B", ledL3: "#0A6E8C", elapsed: "00:12", primary: "停止监控", hit: "扫描中 · 未命中", hits: "0" },
+      "已命中": { text: "已命中目标，请确认提醒", a: "#E4685C", b: "#E2857A", c: "#E0574A", ledA: "#E4685C", ledB: "#C4342A", ledC: "#E0574A", l1: "#BC2E22", l2: "#A6382B", l3: "#AF2A1E", ledL1: "#BC2E22", ledL2: "#A6382B", ledL3: "#AF2A1E", elapsed: "01:47", primary: "解除鼠标锁定", hit: "命中 · 8(6-8)% 攻擊速度", hits: "1" }
+    };
+    const s = table[state] ?? table["待机"];
+    return {
+      statusText: s.text,
+      statusColorA: s.a, statusColorB: s.b, statusColorC: s.c,
+      statusLedA: s.ledA, statusLedB: s.ledB, statusLedC: s.ledC,
+      statusColorL1: s.l1, statusColorL2: s.l2, statusColorL3: s.l3,
+      statusLedL1: s.ledL1, statusLedL2: s.ledL2, statusLedL3: s.ledL3,
+      elapsed: s.elapsed,
+      primaryLabel: s.primary,
+      hitLine: s.hit,
+      hitCount: s.hits,
+      showRecreation: this.props.showRecreation ?? true,
+      showAnalysis: this.props.showAnalysis ?? true
+    };
+  }
+}
+
+</script>
+</body>
+</html>
