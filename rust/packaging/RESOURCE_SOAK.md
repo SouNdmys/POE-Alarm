@@ -66,6 +66,17 @@ diagnostic (`20260813-153154`) is excluded because 1,711 cycles reported only
 0.074 seconds of recognition, proving it reused request-scoped evidence instead
 of exercising OCR on every request.
 
+A follow-up 900-second run of the same executable completed 9,556 real OCR
+cycles (460.178 seconds of reported recognition time) and shut down in 2.465
+ms. The unchanged endpoint gate passed: private bytes
+`74,067,968 -> 60,698,624`, handles `220 -> 216`, and threads `11 -> 8`.
+After excluding the first 180 seconds, the first and last five-minute
+private-byte medians were 70.195 and 70.191 MiB; the 180-900 second OLS slope
+was +0.0402 MiB/min with R² 0.00073. This supports a bounded native
+allocator/ONNX plateau, not completion of the required two-hour live-game
+field gate. Evidence prefix:
+`artifacts/rust-validation/resource-soak/20260814-000418-screenshot-`.
+
 For the actual two-hour wall-clock gate, set `-DurationSeconds 7200` and do not
 set `-MaximumCycles`. The JSON report sets `wallClockTwoHourGate=true` only in
 that case. Any shorter or cycle-limited run is explicitly classified as a

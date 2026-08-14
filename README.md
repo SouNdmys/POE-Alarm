@@ -4,7 +4,7 @@ POE 制作时的本地 OCR 告警工具。它读取选定屏幕区域中的蓝�
 
 当前正式版本：`1.0.0`。目标环境为 Windows 10/11 x64，支持 POE1 / POE2 的 English 与繁體中文客户端。两款游戏会分别保存目标词缀、框选区域和游戏语言；POE1 English 保持原有 Windows OCR 路径，POE2 English 使用独立复核层，繁中使用 Windows 中文多行 OCR 快速路径，并仅在局部疑难内容或系统没有中文 OCR 能力时使用内置 PP-OCRv5。实测数据与边界见[繁體中文 OCR 生产说明](docs/traditional-chinese-ocr.md)。
 
-仓库正在以 1.0.0 为不可变对照开发纯原生 Win32/WinRT Rust 版本。当前正式版仍是 `.NET 1.0.0`；Rust 只作为并排预览，不覆盖正式版设置，也不会在实机门禁完成前替代它。功能矩阵、基准命令、切换与回滚条件见 [Rust 全量迁移规格](docs/RUST_MIGRATION_PLAN.md)，实测数据见 [Rust 原生预览版验收报告](docs/RUST_VALIDATION_REPORT.md)。
+仓库正在以 1.0.0 为不可变对照开发纯原生 Win32/WinRT Rust 版本。当前正式版仍是 `.NET 1.0.0`；Rust 只作为并排预览，不覆盖正式版设置，也不会在实机门禁完成前替代它。功能矩阵、基准命令、切换与回滚条件见 [Rust 全量迁移规格](docs/RUST_MIGRATION_PLAN.md)，实测数据见 [Rust 原生预览版验收报告](docs/RUST_VALIDATION_REPORT.md)。暂停自动长测期间的实机反馈格式和后续续作顺序见 [Rust 后续工作计划](docs/RUST_NEXT_SESSION_PLAN.md)。
 
 ## Rust 原生预览进度
 
@@ -175,7 +175,7 @@ cargo test --manifest-path rust\Cargo.toml --workspace --all-targets --locked --
 
 1. 恢复 POE1 English 私有真实截图清单，完成五轮正例、语义近邻和跨截图反例。
 2. 采集一张游戏原生提示框中同一词缀自然换成两行的截图，再补跑六档瞬态回放；不得用人工像素重排替代。
-3. 60 秒未变化监控和固定真实截图 OCR 预检已完成，但 300 秒内存首末门槛仍失败；继续完成 15 分钟诊断和真实游戏连续 2 小时增长门禁。
+3. 60 秒未变化监控和固定真实截图 15 分钟 OCR 稳定性诊断已完成；继续完成真实游戏连续 2 小时增长门禁。
 4. POE1/POE2 × English/繁中四种配置各完成 30 分钟真实游戏高速制作，并至少经过三次独立使用时段。
 5. 在干净 Windows 用户环境验证预览包、设置备份、正式路径切换和 `.NET 1.0.0` 回滚。
 6. 只有上述证据与性能结论都满足迁移合同后，才讨论把 Rust 从 Preview 改为正式推荐版；在此之前 `.NET 1.0.0` 始终保留。
