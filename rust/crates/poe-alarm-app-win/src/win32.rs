@@ -3824,12 +3824,23 @@ unsafe fn draw_text(
     format: windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT,
 ) {
     let previous = unsafe { SelectObject(dc, HGDIOBJ(font.0)) };
+    // A fresh window paint DC defaults to an opaque text background. The HUD uses white text,
+    // so leaving that default in place paints an opaque white rectangle behind every rendered
+    // line and makes the glyphs appear completely blank. Keep all shared text drawing explicitly
+    // transparent and restore the caller's mode afterwards.
+    let previous_background_mode = unsafe { SetBkMode(dc, TRANSPARENT) };
     unsafe {
         SetTextColor(dc, color);
     }
     let mut value = text.encode_utf16().collect::<Vec<_>>();
     unsafe {
         DrawTextW(dc, &mut value, &mut bounds, format);
+        if previous_background_mode != 0 {
+            SetBkMode(
+                dc,
+                windows::Win32::Graphics::Gdi::BACKGROUND_MODE(previous_background_mode as u32),
+            );
+        }
         SelectObject(dc, previous);
     }
 }
