@@ -185,6 +185,29 @@ impl ScreenCapture for GdiScreenCapture {
                 SRCCOPY | CAPTUREBLT,
             )
         };
+        // CAPTUREBLT synchronously waits on every layered window in the session.
+        // If a layered window's owning thread is not pumping (e.g. the GPUI main
+        // window throttled while the game is foreground), BitBlt fails with
+        // ERROR_TIMEOUT (1460). Retry once with plain SRCCOPY: the game itself is
+        // not a layered window, so the affix pixels are captured identically.
+        let copied = if copied == 0 {
+            // SAFETY: identical to the call above, minus the CAPTUREBLT flag.
+            unsafe {
+                bit_blt(
+                    self.memory_dc,
+                    0,
+                    0,
+                    width,
+                    height,
+                    self.screen_dc,
+                    region.x,
+                    region.y,
+                    SRCCOPY,
+                )
+            }
+        } else {
+            copied
+        };
         if copied == 0 {
             let error = last_os_error("BitBlt");
             self.release_resources();

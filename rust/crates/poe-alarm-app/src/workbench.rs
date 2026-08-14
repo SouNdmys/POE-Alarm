@@ -446,9 +446,7 @@ impl AppShell {
             .font_family(FONT_MONO)
             .text_size(fs(FS_10_5))
             .text_color(c(TEXT_META))
-            .child(
-                "归一化 <PCT> increased spell critical hit chance · 找到 1 个数值,按顺序对应下方",
-            );
+            .child(self.normalized_preview(cx));
 
         // 数值条件表:104 / 1fr / 110 / 110 / 60
         let mut table = div().v_flex().border_1().border_color(c(HAIRLINE));
