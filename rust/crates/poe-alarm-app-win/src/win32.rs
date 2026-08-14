@@ -34,11 +34,14 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
+use windows::Win32::UI::Controls::EM_SETSEL;
 use windows::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
     GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetKeyState, IsWindowEnabled, VK_A, VK_CONTROL,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_PUSHBUTTON, CB_ADDSTRING,
     CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CREATESTRUCTW,
@@ -51,8 +54,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle,
     WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_HOTKEY,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER, WS_CAPTION,
-    WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER,
+    WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    WS_VSCROLL,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -315,6 +319,7 @@ fn run_window(self_test: bool) -> Result<(), String> {
                 }
                 break;
             }
+            _ if unsafe { handle_edit_shortcut(window, &message) } => {}
             _ => unsafe {
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
@@ -322,6 +327,27 @@ fn run_window(self_test: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+unsafe fn handle_edit_shortcut(window: HWND, message: &MSG) -> bool {
+    if message.message != WM_KEYDOWN
+        || message.wParam.0 as u16 != VK_A.0
+        || unsafe { GetKeyState(i32::from(VK_CONTROL.0)) } >= 0
+    {
+        return false;
+    }
+    let state = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) } as *const WindowState;
+    if state.is_null() {
+        return false;
+    }
+    let controls = unsafe { &(*state).controls };
+    if message.hwnd != controls.quick_template && message.hwnd != controls.condition_template {
+        return false;
+    }
+    unsafe {
+        SendMessageW(message.hwnd, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+    }
+    true
 }
 
 struct WindowState {
@@ -626,6 +652,9 @@ struct StatusHud {
     child: HWND,
     paint: Box<HudPaintState>,
     dpi: u32,
+    bounds: RectI,
+    capture_affinity: CaptureAffinity,
+    visible: bool,
     headless: bool,
     placement: bool,
 }
@@ -682,6 +711,9 @@ impl StatusHud {
             child,
             paint,
             dpi,
+            bounds,
+            capture_affinity: policy.capture_affinity,
+            visible: false,
             headless,
             placement: false,
         })
@@ -689,7 +721,8 @@ impl StatusHud {
 
     fn resize_for_dpi(&mut self, dpi: u32, bounds: RectI) -> Result<(), String> {
         let dpi = dpi.max(96);
-        if self.dpi != dpi {
+        let dpi_changed = self.dpi != dpi;
+        if dpi_changed {
             let font = unsafe { create_font(dpi, 20, FW_SEMIBOLD.0 as i32) };
             let old_font = std::mem::replace(&mut self.paint.font, font);
             if !old_font.0.is_null() {
@@ -699,12 +732,16 @@ impl StatusHud {
             }
             self.dpi = dpi;
         }
+        if !dpi_changed && self.bounds == bounds {
+            return Ok(());
+        }
         self.shell
             .set_bounds(bounds)
             .map_err(|error| error.to_string())?;
         unsafe {
             let _ = MoveWindow(self.child, 0, 0, bounds.width, bounds.height, true);
         }
+        self.bounds = bounds;
         Ok(())
     }
 
@@ -734,40 +771,45 @@ impl StatusHud {
             return Ok(());
         }
         let elapsed = monitoring_elapsed.map(format_hud_elapsed);
-        self.paint.text = language
+        let text = language
             .text()
             .hud_text(status, target_summary, elapsed.as_deref());
-        if matches!(
-            status,
-            MonitorStatus::Monitoring | MonitorStatus::MatchFound
-        ) {
-            self.shell
-                .set_interaction_mode(poe_alarm_platform_win::HudInteractionMode::Passive)
-                .map_err(|error| error.to_string())?;
-        }
-        self.paint.color = match status {
+        let color = match status {
             MonitorStatus::MatchFound => rgb(198, 42, 54),
             MonitorStatus::Monitoring => rgb(20, 145, 103),
             _ => rgb(88, 102, 111),
         };
+        let paint_changed = self.paint.text != text || self.paint.color != color;
+        self.paint.text = text;
+        self.paint.color = color;
         let affinity = if settings.allow_overlay_capture {
             CaptureAffinity::Include
         } else {
             CaptureAffinity::Exclude
         };
-        self.shell
-            .set_capture_affinity(affinity)
-            .map_err(|error| error.to_string())?;
+        if self.capture_affinity != affinity {
+            self.shell
+                .set_capture_affinity(affinity)
+                .map_err(|error| error.to_string())?;
+            self.capture_affinity = affinity;
+        }
         self.sync_layout(settings)?;
-        unsafe {
-            let _ = InvalidateRect(Some(self.child), None, false);
+        if paint_changed {
+            unsafe {
+                let _ = InvalidateRect(Some(self.child), None, false);
+            }
         }
         let visible = hud_should_be_visible(status, settings.keep_hud_visible);
-        if visible && !self.headless {
-            self.shell.show().map_err(|error| error.to_string())
-        } else {
-            self.shell.hide().map_err(|error| error.to_string())
+        let should_show = visible && !self.headless;
+        if should_show != self.visible {
+            if should_show {
+                self.shell.show().map_err(|error| error.to_string())?;
+            } else {
+                self.shell.hide().map_err(|error| error.to_string())?;
+            }
+            self.visible = should_show;
         }
+        Ok(())
     }
 
     fn begin_placement(&mut self, language: UiLanguage) -> Result<(), String> {
@@ -778,8 +820,9 @@ impl StatusHud {
         self.paint.placement = true;
         self.paint.color = rgb(52, 112, 168);
         self.paint.text = language.text().hud_placement_instruction().to_owned();
-        if !self.headless {
+        if !self.headless && !self.visible {
             self.shell.show().map_err(|error| error.to_string())?;
+            self.visible = true;
         }
         unsafe {
             let _ = InvalidateRect(Some(self.child), None, false);
@@ -1382,6 +1425,12 @@ impl WindowState {
                         if let Some(session) = self.hud_session.as_mut() {
                             session.started_at.get_or_insert_with(Instant::now);
                         }
+                        // Live snapshots are coalesced status data, not UI model changes. A full
+                        // form refresh here used to rewrite every control and repeatedly Show/Move
+                        // the HUD at the 16 ms runtime pump rate, making both windows visibly flash.
+                        // The pump below refreshes only the HUD text when its displayed second
+                        // actually changes.
+                        return;
                     }
                     RuntimeState::MatchFound => self.model.report_match_found(),
                     RuntimeState::Faulted => {

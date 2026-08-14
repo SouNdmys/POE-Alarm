@@ -18,8 +18,8 @@ pub struct CompiledRuntimeSettings {
     pub region: CaptureRegion,
     pub ui: CompiledUiBindings,
     pub alert_copy: AlertCopy,
-    /// Matches the .NET 1.0 safety boundary: localized OCR and both POE2
-    /// profiles use the short pending-input guard; POE1 English does not.
+    /// Reserved for a future explicitly selected protection policy. The released fast mode must
+    /// never suppress crafting clicks before a real match has been confirmed.
     pub input_guard_enabled: bool,
 }
 
@@ -138,8 +138,7 @@ pub fn compile_settings(
         region,
         ui: CompiledUiBindings::from_settings(settings),
         alert_copy: AlertCopy::for_ui_language(&settings.ui_language),
-        input_guard_enabled: language == RecognitionLanguage::TraditionalChinese
-            || game == GameVersion::Poe2,
+        input_guard_enabled: false,
     })
 }
 
@@ -174,15 +173,15 @@ mod tests {
     }
 
     #[test]
-    fn input_guard_matches_released_profile_boundary() {
+    fn fast_mode_never_suppresses_crafting_clicks_before_a_match() {
         let mut settings = valid_settings();
         settings.profiles.poe1.ocr_language = "zh-TW".to_owned();
-        assert!(compile_settings(&settings).unwrap().input_guard_enabled);
+        assert!(!compile_settings(&settings).unwrap().input_guard_enabled);
 
         settings.profiles.poe1.ocr_language = "en".to_owned();
         settings.selected_game_profile = GameProfile::Poe2;
         settings.profiles.poe2 = settings.profiles.poe1.clone();
-        assert!(compile_settings(&settings).unwrap().input_guard_enabled);
+        assert!(!compile_settings(&settings).unwrap().input_guard_enabled);
     }
 
     #[test]

@@ -46,25 +46,24 @@ Detections, faults, screenshot results and lifecycle transitions use the
 reliable event channel. This prevents an unresponsive UI from creating an
 unbounded snapshot backlog.
 
-## Input protection and alert handoff
+## Fast input semantics and alert handoff
 
-For compatibility with the verified .NET 1.0 behavior, the pending mouse hook
-is used only for Traditional Chinese recognition and POE2. POE1 English still
-uses the semantic fingerprint cache but never installs or arms this short
-guard. Where enabled, the hook is installed before `Monitor::start`, while it
-is still pass-through, so an already-held physical button is known before the
-first changed frame arms protection. The monitor callback performs this order:
+Released fast mode never installs or arms the pending mouse hook for any game
+or OCR language. Buttons and the wheel remain pass-through while recognition
+and strict rule evaluation are pending. This keeps Traditional Chinese and
+POE2 crafting as responsive as POE1 English, with the explicit trade-off that
+a user can over-roll during the OCR latency window.
 
-1. arm the prepared pending-input guard;
-2. run recognition and strict rule evaluation;
-3. synchronously pass the owned guard to `BlockingAlertService::trigger`;
-4. return only after the red alert has accepted ownership;
-5. let the monitor release its now-empty short guard request.
+After a strict match, `BlockingAlertService::trigger` creates and validates the
+red overlay. The overlay must be visible, hit-testable and cover the intended
+desktop before the runtime reports that the alert owns the interaction. Any
+trigger or presentation failure is surfaced as a typed `RuntimeEvent::Fault`.
+There is no yellow/careful mode.
 
-The alert service verifies that its red overlay is visible and hit-testable
-before it transfers the guard. Any preparation, arm, trigger or presentation
-failure fails open and is surfaced as a typed `RuntimeEvent::Fault`. There is
-no yellow/careful mode.
+The platform still contains an optional pending-input guard implementation for
+historical validation and a possible future explicitly selected policy. The
+current compiler always sets `input_guard_enabled` to false; this dormant code
+must not be used to describe released fast-mode behavior.
 
 An audio playback failure is different: the verified red overlay continues to
 block input, so the runtime emits `AlertSoundFailed` without releasing the
@@ -118,15 +117,13 @@ still invalidates the tracked worker without joining it. The red alert, sound
 services are stopped and verified synchronously on the runtime actor before
 `ShutdownComplete`.
 
-Terminal pending-input cleanup first atomically force-releases the lock-free
-guard state, making every subsequent mouse message pass through. Waking the
-native hook thread is best-effort and the actor never joins that thread. The
-hook thread retains the process-wide singleton token until it really unhooks,
-so a stalled cleanup rejects another hook with `AlreadyInUse` instead of
-installing two conflicting callbacks. A drain worker or hook thread normally
-exits a few milliseconds later; if native inference or native cleanup is
-stuck, process termination is the final reclamation boundary rather than a UI
-or input-safety blocker.
+If a future explicit policy creates the optional pending-input guard, terminal
+cleanup first atomically force-releases its lock-free state. Waking the native
+hook thread is best-effort and the actor never joins that thread. The hook
+thread retains the process-wide singleton token until it really unhooks, so a
+stalled cleanup rejects another hook with `AlreadyInUse` instead of installing
+two conflicting callbacks. In the released fast mode this path is dormant and
+shutdown has no pending mouse hook to reclaim.
 
 Screenshot workers have the same production limitation because the public
 offline recognition entry points use a non-cancellable probe. They are
