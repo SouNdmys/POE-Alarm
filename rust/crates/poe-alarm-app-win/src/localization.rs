@@ -31,6 +31,7 @@ pub struct TextCatalog {
     pub region_width: &'static str,
     pub region_height: &'static str,
     pub select_region_button: &'static str,
+    pub structured_single_help: &'static str,
     pub structured_help: &'static str,
     pub results_label: &'static str,
     pub add_result: &'static str,
@@ -135,8 +136,8 @@ impl TextCatalog {
         let name = name.trim();
         if name.is_empty() {
             match self.language {
-                UiLanguage::SimplifiedChinese => format!("可接受结果 {}", index + 1),
-                UiLanguage::English => format!("Acceptable result {}", index + 1),
+                UiLanguage::SimplifiedChinese => format!("命中方案 {}", index + 1),
+                UiLanguage::English => format!("Match option {}", index + 1),
             }
         } else {
             format!("{} — {name}", index + 1)
@@ -147,8 +148,8 @@ impl TextCatalog {
         let name = name.trim();
         if name.is_empty() {
             match self.language {
-                UiLanguage::SimplifiedChinese => format!("词缀条件 {}", index + 1),
-                UiLanguage::English => format!("Affix condition {}", index + 1),
+                UiLanguage::SimplifiedChinese => format!("词缀 {}", index + 1),
+                UiLanguage::English => format!("Affix {}", index + 1),
             }
         } else {
             format!("{} — {name}", index + 1)
@@ -323,28 +324,28 @@ impl TextCatalog {
                 "The minimum value cannot be greater than the maximum value".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::TooManyResults) => {
-                "最多可以添加八种可接受结果".into()
+                "最多可以添加八套命中方案".into()
             }
             (UiLanguage::English, EditorError::TooManyResults) => {
-                "You can add up to eight acceptable results".into()
+                "You can add up to eight match options".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::LastResultRequired) => {
-                "至少要保留一种可接受结果".into()
+                "至少要保留一套命中方案".into()
             }
             (UiLanguage::English, EditorError::LastResultRequired) => {
-                "Keep at least one acceptable result".into()
+                "Keep at least one match option".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::TooManyConditions) => {
-                "所有结果合计最多可以添加三十二条词缀条件".into()
+                "所有方案合计最多可以添加三十二条词缀".into()
             }
             (UiLanguage::English, EditorError::TooManyConditions) => {
-                "All results together can contain up to thirty-two affix conditions".into()
+                "All match options together can contain up to thirty-two affixes".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::LastConditionRequired) => {
-                "每种结果至少要保留一条词缀条件".into()
+                "每套命中方案至少要保留一条词缀".into()
             }
             (UiLanguage::English, EditorError::LastConditionRequired) => {
-                "Each acceptable result needs at least one affix condition".into()
+                "Each match option needs at least one affix".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::InvalidTemplate) => {
                 "完整词缀模板必须包含词语；请直接粘贴游戏里显示的整条词缀".into()
@@ -372,10 +373,10 @@ impl TextCatalog {
                 "Enter the complete affix you want to match".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::EmptyResult) => {
-                "请添加至少一种可接受结果".into()
+                "请添加至少一套命中方案".into()
             }
             (UiLanguage::English, EditorError::EmptyResult) => {
-                "Add at least one acceptable result".into()
+                "Add at least one match option".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::EmptyConditionTemplate) => {
                 "每条词缀条件都要填写完整词缀模板".into()
@@ -384,16 +385,16 @@ impl TextCatalog {
                 "Every affix condition needs a full affix template".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::DuplicateResultName) => {
-                "可接受结果的名称不能重复".into()
+                "命中方案的名称不能重复".into()
             }
             (UiLanguage::English, EditorError::DuplicateResultName) => {
-                "Acceptable result names must be unique".into()
+                "Match option names must be unique".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::DuplicateConditionName) => {
-                "同一种结果里的词缀条件名称不能重复".into()
+                "同一套方案里的词缀名称不能重复".into()
             }
             (UiLanguage::English, EditorError::DuplicateConditionName) => {
-                "Affix condition names within one result must be unique".into()
+                "Affix names within one match option must be unique".into()
             }
             (UiLanguage::SimplifiedChinese, EditorError::InvalidRuleThreshold) => {
                 "至少命中条数必须介于一和当前词缀条件总数之间".into()
@@ -581,10 +582,10 @@ impl TextCatalog {
         };
         match self.language {
             UiLanguage::SimplifiedChinese => {
-                format!("{name}（{result_count} 种结果，{condition_count} 条词缀）")
+                format!("{name}（{result_count} 套方案，{condition_count} 条词缀）")
             }
             UiLanguage::English => {
-                format!("{name} ({result_count} results, {condition_count} affixes)")
+                format!("{name} ({result_count} options, {condition_count} affixes)")
             }
         }
     }
@@ -623,17 +624,18 @@ static ZH: TextCatalog = TextCatalog {
     region_width: "宽度",
     region_height: "高度",
     select_region_button: "框选识别区域",
-    structured_help: "每种可接受结果互为“或者”；命中任意一种就提醒。",
-    results_label: "可接受结果",
-    add_result: "添加结果",
-    delete_result: "删除结果",
-    result_name: "结果名称",
-    group_rule: "组内命中方式",
-    group_any: "任意一条",
-    group_all: "全部命中",
-    group_at_least: "至少命中几条",
-    required_count: "命中条数",
-    conditions_label: "词缀条件",
+    structured_single_help: "添加想要的词缀，再选择什么时候提醒。",
+    structured_help: "每套命中方案互为“或者”；满足任意一套就提醒。",
+    results_label: "命中方案",
+    add_result: "添加另一套命中方案",
+    delete_result: "删除当前方案",
+    result_name: "方案名称",
+    group_rule: "什么时候提醒",
+    group_any: "任意一条命中就提醒",
+    group_all: "全部命中才提醒",
+    group_at_least: "达到指定条数就提醒",
+    required_count: "最少条数",
+    conditions_label: "想要的词缀",
     add_condition: "添加词缀",
     delete_condition: "删除词缀",
     condition_name: "条件名称",
@@ -696,17 +698,18 @@ static EN: TextCatalog = TextCatalog {
     region_width: "Width",
     region_height: "Height",
     select_region_button: "Select capture area",
-    structured_help: "Acceptable results are alternatives. Matching any one result triggers the alert.",
-    results_label: "Acceptable results",
-    add_result: "Add result",
-    delete_result: "Delete result",
-    result_name: "Result name",
-    group_rule: "Match within this result",
-    group_any: "Any one",
-    group_all: "All",
-    group_at_least: "At least a count",
-    required_count: "Required count",
-    conditions_label: "Affix conditions",
+    structured_single_help: "Add the affixes you want, then choose when to trigger the alert.",
+    structured_help: "Match options are alternatives. Meeting any one option triggers the alert.",
+    results_label: "Match options",
+    add_result: "Add another match option",
+    delete_result: "Delete this option",
+    result_name: "Option name",
+    group_rule: "Alert when",
+    group_any: "Any affix matches",
+    group_all: "All affixes match",
+    group_at_least: "A chosen number match",
+    required_count: "Minimum count",
+    conditions_label: "Desired affixes",
     add_condition: "Add affix",
     delete_condition: "Delete affix",
     condition_name: "Condition name",
@@ -773,6 +776,7 @@ mod tests {
             catalog.region_width,
             catalog.region_height,
             catalog.select_region_button,
+            catalog.structured_single_help,
             catalog.structured_help,
             catalog.results_label,
             catalog.add_result,
@@ -890,7 +894,7 @@ mod tests {
             zh.hud_status(MonitorStatus::Monitoring).to_owned(),
             zh.hud_text(MonitorStatus::Monitoring, "暴击率", Some("00:12")),
             zh.hud_empty_target().to_owned(),
-            zh.structured_rule_summary("可接受结果", 2, 4),
+            zh.structured_rule_summary("命中方案", 2, 4),
             zh.hud_placement_instruction().to_owned(),
             zh.screenshot_report(false, &[], 1.0, 2.0, 3.0, 4.0),
             zh.screenshot_full_image_fallback().to_owned(),
@@ -916,7 +920,7 @@ mod tests {
             en.hud_status(MonitorStatus::Monitoring).to_owned(),
             en.hud_text(MonitorStatus::Monitoring, "Critical chance", Some("00:12")),
             en.hud_empty_target().to_owned(),
-            en.structured_rule_summary("Acceptable results", 2, 4),
+            en.structured_rule_summary("Match options", 2, 4),
             en.hud_placement_instruction().to_owned(),
             en.screenshot_report(false, &[], 1.0, 2.0, 3.0, 4.0),
             en.screenshot_full_image_fallback().to_owned(),
@@ -939,6 +943,21 @@ mod tests {
         assert!(!combined.contains("谨慎"));
         assert!(!combined.contains("鏡子"));
         assert!(!combined.contains("镜子"));
+    }
+
+    #[test]
+    fn structured_rule_copy_uses_plain_match_option_language() {
+        let zh = UiLanguage::SimplifiedChinese.text();
+        assert_eq!(zh.conditions_label, "想要的词缀");
+        assert_eq!(zh.group_rule, "什么时候提醒");
+        assert!(zh.add_result.contains("另一套"));
+        assert!(!zh.structured_help.contains("可接受结果"));
+
+        let en = UiLanguage::English.text();
+        assert_eq!(en.conditions_label, "Desired affixes");
+        assert_eq!(en.group_rule, "Alert when");
+        assert!(en.add_result.contains("another match option"));
+        assert!(!en.structured_help.contains("acceptable result"));
     }
 
     fn is_han(character: char) -> bool {

@@ -103,7 +103,7 @@ Rust 繁中最终五进程 Quick A/B 为：POE2 `190/190`，warm p50/p95
 | 状态浮窗 | 灰色未监控、绿色监控、点击穿透、不抢焦点、可拖动保存、避开 ROI | 原生 topmost/no-activate/click-through 窗口；目标摘要、计时、显隐、DPI 缩放与拖动保存均接到真实设置 | HUD snapshot + Win32 behavior test |
 | 选区与快捷键 | F11 框选；默认 F10 启动（3 组可选）；F12 确认/停止 | `RegisterHotKey`；冲突时明确报错；Esc 取消选区；框选结果写回当前游戏配置 | hotkey + selection tests |
 | 截图测试 | 和实时监控使用同一预处理/OCR/matcher/规则链；关闭时取消并等待 | 渐进识别允许超过 3 轮，最多 128 轮后返回明确不收敛故障；取消优先，且不弹迟到告警 | screenshot replay + close/cancel race |
-| 设置 | `%LOCALAPPDATA%/PoeAlarm/settings.json`，schema 3，旧字段迁移，未来 schema 只读，临时文件原子替换 | 预览版先写独立目录；解析和保存与 .NET 双向兼容 | settings profile assertions |
+| 设置 | `%LOCALAPPDATA%/PoeAlarm/settings.json`，旧字段迁移，未来 schema 只读，临时文件原子替换 | 预览版在独立目录写 schema 4；可只读导入 .NET schema 1–3，并按游戏×词缀语言分别保存规则 | settings profile assertions |
 | 体验设置 | 中/英界面、状态浮窗、位置、启动热键、本地 PCM WAV、浮层是否进入录屏 | 不夹杂另一语言；WAV 路径仅本地；主窗按工作区反算布局缩放，覆盖 96/120/144 DPI 与 1024×768/1920×1080；用 `SetWindowDisplayAffinity` 实现录屏选择 | UI copy + DPI/layout + manual |
 | 生命周期 | 快速开始/停止、截图分析并发、关闭程序均不死锁，不残留 hook 或迟到事件 | 所有 worker、COM/WinRT、GDI、窗口、hook 可取消并有明确所有权 | 1000-cycle soak + race suite |
 
@@ -120,7 +120,7 @@ poe-alarm-app-win（WinMain + 原生 Win32 UI）
   ├─ poe-alarm-ocr-paddle（ONNX Runtime、CTC、局部复核）
   ├─ poe-alarm-vision（BGRA → mask/fingerprint/bands）
   ├─ poe-alarm-core（归一化、完整词缀、数值、复合规则）
-  └─ poe-alarm-settings（schema 3、原子保存、预览隔离/导入）
+  └─ poe-alarm-settings（schema 4、游戏×词缀语言规则档案、原子保存、预览隔离/导入）
 ```
 
 实际 crate 可以在不破坏依赖方向的前提下合并。必须遵守以下边界：

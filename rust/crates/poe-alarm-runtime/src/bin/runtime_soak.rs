@@ -333,9 +333,12 @@ impl Arguments {
             ..AppSettings::default()
         };
         let profile = settings.profiles.get_mut(self.game);
-        profile.target_affix.clone_from(&self.template);
         profile.capture_region = Some(self.region);
         profile.ocr_language.clone_from(&self.language);
+        profile
+            .selected_rules_mut()
+            .target_affix
+            .clone_from(&self.template);
         settings
     }
 }
