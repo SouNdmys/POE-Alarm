@@ -37,6 +37,10 @@ pub struct AppShell {
     /// 就地通知(状态栏右侧/编辑区顶部),不弹窗。
     pub notice: Option<(StatusKind, SharedString)>,
     monitor_since: Option<Instant>,
+    /// BitBlt 类一次性故障后的自动重启预算(成功进入监控后复位)。
+    auto_restart_budget: u8,
+    /// 延迟启动时刻:热键去抖(按键/IME 弹窗散场)与故障重建后的冷却。
+    pending_start_at: Option<Instant>,
     pub scan_count: u64,
     pub capture_ms: f64,
     pub ocr_ms: f64,
@@ -130,6 +134,8 @@ impl AppShell {
             log: vec![(LogKind::Meta, "就绪 · 等待开始监控".into())],
             notice,
             monitor_since: None,
+            auto_restart_budget: 2,
+            pending_start_at: None,
             scan_count: 0,
             capture_ms: 0.0,
             ocr_ms: 0.0,
@@ -230,6 +236,7 @@ impl AppShell {
     fn tick(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         let mut reset_runtime = false;
+        let mut auto_restart = false;
         let platform_events = match &mut self.backend {
             Some(backend) => backend.poll_platform(),
             None => Vec::new(),
@@ -238,8 +245,10 @@ impl AppShell {
             changed = true;
             match event {
                 PlatformEvent::HotKeyStart => {
-                    if self.s.run == RunPhase::Idle {
-                        self.toggle_run(cx);
+                    if self.s.run == RunPhase::Idle && self.pending_start_at.is_none() {
+                        // 去抖 350ms:等热键按键抬起、IME 切换弹窗散场后再首帧截屏。
+                        self.pending_start_at = Some(Instant::now() + Duration::from_millis(350));
+                        self.push_log(LogKind::Meta, "热键触发 · 即将开始监控…".to_owned());
                     }
                 }
                 PlatformEvent::HotKeySelectRegion => self.begin_region_selection(cx),
@@ -330,6 +339,10 @@ impl AppShell {
                     self.push_log(LogKind::Meta, format!("错误:{detail}"));
                     self.apply_runtime_state(BridgeState::Idle);
                     reset_runtime = true;
+                    if detail.contains("BitBlt") && self.auto_restart_budget > 0 {
+                        self.auto_restart_budget -= 1;
+                        auto_restart = true;
+                    }
                 }
                 BridgeEvent::SoundFallback => {
                     self.notice = Some((
@@ -341,7 +354,21 @@ impl AppShell {
         }
         if reset_runtime && let Some(backend) = &mut self.backend {
             backend.reset_runtime();
-            self.push_log(LogKind::Meta, "运行时已重建,可重新开始监控".to_owned());
+            self.push_log(LogKind::Meta, "运行时已重建".to_owned());
+        }
+        if auto_restart {
+            // 重建后的警报服务线程需要时间释放进程单例,延迟 700ms 再启动。
+            self.pending_start_at = Some(Instant::now() + Duration::from_millis(700));
+            self.push_log(LogKind::Meta, "截屏一次性故障,稍后自动重试启动…".to_owned());
+        }
+        if let Some(at) = self.pending_start_at
+            && Instant::now() >= at
+        {
+            self.pending_start_at = None;
+            if self.s.run == RunPhase::Idle {
+                self.toggle_run(cx);
+            }
+            changed = true;
         }
         // 监控计时(状态点+文字+计时坐标恒定,只更新文本)
         if let Some(since) = self.monitor_since {
@@ -370,6 +397,11 @@ impl AppShell {
         };
         if next == RunPhase::Monitoring && self.monitor_since.is_none() {
             self.monitor_since = Some(Instant::now());
+            self.auto_restart_budget = 2;
+            // 成功进入监控后清掉遗留的错误提示,避免旧故障一直挂在栏上。
+            if matches!(self.notice, Some((StatusKind::Error, _))) {
+                self.notice = None;
+            }
         }
         if next != RunPhase::Monitoring {
             self.monitor_since = None;

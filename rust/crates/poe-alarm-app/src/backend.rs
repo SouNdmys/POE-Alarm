@@ -243,16 +243,31 @@ impl Backend {
         if self.runtime.is_some() {
             return Ok(());
         }
-        let (wave, fell_back) = resolve_alert_wave(&self.settings)?;
-        let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
-        alert.allow_overlay_capture = self.settings.allow_overlay_capture;
-        let handle = poe_alarm_runtime::RuntimeHandle::start_production(
-            poe_alarm_runtime::ProductionRuntimeConfig {
-                alert,
-                paddle: None,
-            },
-        )
-        .map_err(|e| format!("runtime startup failed: {e}"))?;
+        // 旧运行时刚被丢弃时,其警报服务线程可能尚未释放进程单例
+        // (AlreadyInUse);短暂等待重试而不是直接报错。
+        let mut attempt = 0u8;
+        let (handle, fell_back) = loop {
+            let (wave, fell_back) = resolve_alert_wave(&self.settings)?;
+            let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
+            alert.allow_overlay_capture = self.settings.allow_overlay_capture;
+            match poe_alarm_runtime::RuntimeHandle::start_production(
+                poe_alarm_runtime::ProductionRuntimeConfig {
+                    alert,
+                    paddle: None,
+                },
+            ) {
+                Ok(handle) => break (handle, fell_back),
+                Err(e) => {
+                    let text = e.to_string();
+                    if text.contains("AlreadyInUse") && attempt < 6 {
+                        attempt += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        continue;
+                    }
+                    return Err(format!("runtime startup failed: {text}"));
+                }
+            }
+        };
         self.runtime = Some(handle);
         self.sound_fell_back = fell_back;
         Ok(())

@@ -30,6 +30,10 @@ fn main() {
             KeyBinding::new("ctrl-shift-1", SwitchWorkbench, None),
             KeyBinding::new("ctrl-shift-2", SwitchInstrument, None),
             KeyBinding::new("ctrl-shift-3", SwitchDock, None),
+            // 中文输入法常拦截 Ctrl+Shift 组合,提供 Ctrl+数字 作为等效快捷键。
+            KeyBinding::new("ctrl-1", SwitchWorkbench, None),
+            KeyBinding::new("ctrl-2", SwitchInstrument, None),
+            KeyBinding::new("ctrl-3", SwitchDock, None),
         ]);
 
         let (w, h) = Tier::Workbench.size();
