@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::ffi::c_void;
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -22,19 +22,23 @@ use poe_alarm_settings::{
     release_settings_path,
 };
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_ROUND, DwmSetWindowAttribute,
+};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
     DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK,
     DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect, GetMonitorInfoW, HBRUSH,
-    HFONT, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
-    UpdateWindow,
+    HDC, HFONT, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SelectObject, SetBkColor, SetBkMode, SetTextColor,
+    TRANSPARENT, UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
-use windows::Win32::UI::Controls::EM_SETSEL;
+use windows::Win32::UI::Controls::{EM_SETSEL, SetWindowTheme};
 use windows::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
     GetDpiForWindow, SetProcessDpiAwarenessContext,
@@ -53,13 +57,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, PostQuitMessage, RegisterClassExW, SW_HIDE, SW_MINIMIZE, SW_SHOW, SWP_NOACTIVATE,
     SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_HOTKEY,
-    WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER,
-    WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
-    WS_VSCROLL,
+    WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER, WS_CAPTION,
+    WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
+use crate::theme::{DARK_PALETTE, Rgb, StatusTone};
 use crate::{
     AppState, BackgroundCommand, BackgroundCompletion, ConditionEdit, EditorError, EditorForm,
     Game, GlobalEdit, GroupEdit, MonitorStatus, NumericConstraintEdit, OcrLanguage, Operation,
@@ -355,6 +360,7 @@ struct WindowState {
     model: AppState,
     settings_path: PathBuf,
     controls: Controls,
+    theme_brushes: ThemeBrushes,
     fonts: Fonts,
     dpi: u32,
     save_worker: Option<mpsc::Sender<SaveRequest>>,
@@ -1116,6 +1122,7 @@ impl WindowState {
             model,
             settings_path,
             controls: Controls::default(),
+            theme_brushes: ThemeBrushes::new(),
             fonts: Fonts::default(),
             dpi: 96,
             save_worker: None,
@@ -1179,7 +1186,9 @@ impl WindowState {
                 window_bounds.top,
             )
         }?;
+        unsafe { apply_native_window_theme(self.hwnd) };
         self.controls = unsafe { Controls::create(self.hwnd) }?;
+        unsafe { self.controls.apply_visual_theme() };
         self.fonts = unsafe { Fonts::create(self.dpi) };
         match StatusHud::create(self.model.settings(), self.self_test) {
             Ok(hud) => self.hud = Some(hud),
@@ -2511,6 +2520,31 @@ impl WindowState {
         }
     }
 
+    unsafe fn paint_control_background(
+        &self,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        let dc = HDC(wparam.0 as *mut c_void);
+        let control = HWND(lparam.0 as *mut c_void);
+        let disabled = !unsafe { IsWindowEnabled(control) }.as_bool();
+        let foreground = if disabled {
+            DARK_PALETTE.text_disabled
+        } else {
+            DARK_PALETTE.text_primary
+        };
+        let (background, brush) = match message {
+            WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (DARK_PALETTE.input, &self.theme_brushes.input),
+            _ => (DARK_PALETTE.card, &self.theme_brushes.card),
+        };
+        unsafe {
+            SetTextColor(dc, theme_color(foreground));
+            SetBkColor(dc, theme_color(background));
+        }
+        LRESULT(brush.0.0 as isize)
+    }
+
     unsafe fn paint(&self) {
         let mut paint = PAINTSTRUCT::default();
         let dc = unsafe { BeginPaint(self.hwnd, &mut paint) };
@@ -2521,9 +2555,12 @@ impl WindowState {
             }
             return;
         }
-        let background = Brush::new(rgb(244, 248, 250));
-        let header = Brush::new(rgb(12, 42, 56));
-        let section = Brush::new(rgb(255, 255, 255));
+        let background = Brush::new(theme_color(DARK_PALETTE.canvas));
+        let header = Brush::new(theme_color(DARK_PALETTE.header));
+        let section = Brush::new(theme_color(DARK_PALETTE.card));
+        let raised_section = Brush::new(theme_color(DARK_PALETTE.card_raised));
+        let section_border = Brush::new(theme_color(DARK_PALETTE.divider));
+        let gold = Brush::new(theme_color(DARK_PALETTE.accent));
         let accent = Brush::new(self.status_color());
         unsafe {
             FillRect(dc, &client, background.0);
@@ -2536,10 +2573,21 @@ impl WindowState {
                     left: 0,
                     top: 0,
                     right: client.right,
-                    bottom: s(82),
+                    bottom: s(80),
                 },
                 header.0,
             );
+            FillRect(
+                dc,
+                &RECT {
+                    left: 0,
+                    top: s(80),
+                    right: client.right,
+                    bottom: s(82),
+                },
+                gold.0,
+            );
+            let border = s(1).max(1);
             FillRect(
                 dc,
                 &RECT {
@@ -2547,6 +2595,16 @@ impl WindowState {
                     top: s(160),
                     right: s(1062),
                     bottom: s(535),
+                },
+                section_border.0,
+            );
+            FillRect(
+                dc,
+                &RECT {
+                    left: s(18) + border,
+                    top: s(160) + border,
+                    right: s(1062) - border,
+                    bottom: s(535) - border,
                 },
                 section.0,
             );
@@ -2558,6 +2616,16 @@ impl WindowState {
                     right: s(1062),
                     bottom: s(704),
                 },
+                section_border.0,
+            );
+            FillRect(
+                dc,
+                &RECT {
+                    left: s(18) + border,
+                    top: s(542) + border,
+                    right: s(1062) - border,
+                    bottom: s(704) - border,
+                },
                 section.0,
             );
             FillRect(
@@ -2568,7 +2636,17 @@ impl WindowState {
                     right: s(1062),
                     bottom: s(742),
                 },
-                section.0,
+                section_border.0,
+            );
+            FillRect(
+                dc,
+                &RECT {
+                    left: s(18) + border,
+                    top: s(710) + border,
+                    right: s(1062) - border,
+                    bottom: s(742) - border,
+                },
+                raised_section.0,
             );
             FillRect(
                 dc,
@@ -2587,7 +2665,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.title,
-                rgb(255, 255, 255),
+                theme_color(DARK_PALETTE.text_primary),
                 text.heading,
                 rect(s(30), s(16), s(650), s(48)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2595,7 +2673,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.subtitle,
-                rgb(198, 219, 226),
+                theme_color(DARK_PALETTE.text_muted),
                 text.subtitle,
                 rect(s(30), s(49), s(1020), s(76)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -2797,7 +2875,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.label,
-                rgb(84, 105, 115),
+                theme_color(DARK_PALETTE.text_muted),
                 text.status_label,
                 rect(s(36), s(711), s(160), s(740)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2812,7 +2890,7 @@ impl WindowState {
             draw_text(
                 dc,
                 self.fonts.status,
-                rgb(15, 42, 54),
+                self.status_color(),
                 &status,
                 rect(s(160), s(711), s(1040), s(740)),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -2830,18 +2908,19 @@ impl WindowState {
     }
 
     fn status_color(&self) -> COLORREF {
-        match self.model.status() {
-            MonitorStatus::Monitoring | MonitorStatus::SettingsSaved => rgb(20, 156, 118),
+        let tone = match self.model.status() {
+            MonitorStatus::Monitoring | MonitorStatus::SettingsSaved => StatusTone::Success,
             MonitorStatus::MatchFound
             | MonitorStatus::Error
             | MonitorStatus::ValidationError
-            | MonitorStatus::ReadOnly => rgb(205, 72, 86),
+            | MonitorStatus::ReadOnly => StatusTone::Danger,
             MonitorStatus::Starting
             | MonitorStatus::Stopping
             | MonitorStatus::TestingScreenshot
-            | MonitorStatus::SavingSettings => rgb(221, 151, 47),
-            _ => rgb(28, 146, 176),
-        }
+            | MonitorStatus::SavingSettings => StatusTone::Warning,
+            _ => StatusTone::Info,
+        };
+        theme_color(DARK_PALETTE.status_color(tone))
     }
 
     unsafe fn begin_self_test(&mut self) {
@@ -3035,6 +3114,17 @@ impl Controls {
         })
     }
 
+    unsafe fn apply_visual_theme(&self) {
+        // Windows owns the keyboard, focus, IME and accessibility behaviour of these
+        // controls. Asking its native theme renderer for the dark variant gives us the
+        // desired states without replacing that mature interaction layer.
+        for control in self.all() {
+            unsafe {
+                let _ = SetWindowTheme(control, w!("DarkMode_Explorer"), PCWSTR::null());
+            }
+        }
+    }
+
     fn all(&self) -> Vec<HWND> {
         vec![
             self.game,
@@ -3205,6 +3295,20 @@ impl Drop for Brush {
     }
 }
 
+struct ThemeBrushes {
+    card: Brush,
+    input: Brush,
+}
+
+impl ThemeBrushes {
+    fn new() -> Self {
+        Self {
+            card: Brush::new(theme_color(DARK_PALETTE.card)),
+            input: Brush::new(theme_color(DARK_PALETTE.input)),
+        }
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
@@ -3248,6 +3352,9 @@ unsafe extern "system" fn window_proc(
             unsafe { state.on_command(wparam) };
             LRESULT(0)
         }
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => unsafe {
+            state.paint_control_background(message, wparam, lparam)
+        },
         WM_APP_WORK_COMPLETED => {
             if lparam.0 != 0 {
                 let completion = unsafe { Box::from_raw(lparam.0 as *mut BackgroundCompletion) };
@@ -3816,7 +3923,7 @@ unsafe fn draw_label(
         draw_text(
             dc,
             font,
-            rgb(52, 76, 87),
+            theme_color(DARK_PALETTE.text_secondary),
             text,
             rect(x, y, x + width, y + 24),
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -3836,7 +3943,7 @@ unsafe fn draw_small_label(
         draw_text(
             dc,
             font,
-            rgb(84, 105, 115),
+            theme_color(DARK_PALETTE.text_muted),
             text,
             rect(x, y, x + width, y + 20),
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -3856,7 +3963,7 @@ unsafe fn draw_help(
         draw_text(
             dc,
             font,
-            rgb(84, 105, 115),
+            theme_color(DARK_PALETTE.text_muted),
             text,
             rect(x, y, x + width, y + 42),
             DT_LEFT | DT_WORDBREAK,
@@ -3909,6 +4016,29 @@ fn scale(value: i32, dpi: u32) -> i32 {
 
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+unsafe fn apply_native_window_theme(window: HWND) {
+    let dark_mode = 1_i32;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            window,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&dark_mode as *const i32).cast(),
+            size_of::<i32>() as u32,
+        );
+        let corner_preference: DWM_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            window,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&corner_preference as *const DWM_WINDOW_CORNER_PREFERENCE).cast(),
+            size_of_val(&corner_preference) as u32,
+        );
+    }
+}
+
+const fn theme_color(color: Rgb) -> COLORREF {
+    COLORREF(color.colorref())
 }
 
 fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {

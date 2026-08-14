@@ -9,6 +9,7 @@
 mod alert_cue;
 mod localization;
 mod model;
+pub mod theme;
 
 #[cfg(not(windows))]
 mod non_windows;
