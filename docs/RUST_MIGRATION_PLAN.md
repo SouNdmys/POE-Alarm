@@ -16,10 +16,10 @@
 5. Rust 预览版不得覆盖 `.NET 1.0` 的设置。正式切换前必须自动备份，且旧版 EXE 和发布 ZIP 不删除。
 6. **不移植已经删除的谨慎模式 / Mirror Tier 安全模式**：不实现黄色暂停、每次点击确认、逐次点击放行或其状态机。
 
-这里需要特别区分两个名称相近但含义不同的功能：
+这里需要特别区分当前产品行为和历史验证模型：
 
-- 必须迁移：繁中与 POE2 在画面变化后使用的短时 `WH_MOUSE_LL` 输入闸门。它只在 OCR 未决期间成对丢弃后续按键，未命中、停止、异常或超时立即放行。
-- 明确不迁移：已删除的“谨慎模式”。内部语料名 `MirrorCorpus` 只是高端装备的复合规则测试；瞬态回放参数 `--roll-model guarded` 只是模拟上述短时输入闸门，均不代表谨慎模式仍然存在。
+- 当前快速模式在所有语言与游戏中都不启用命中前的 `WH_MOUSE_LL` 输入闸门；识别未决期间鼠标完全直通，严格命中后才由已验证的红色告警窗阻挡输入。
+- 明确不迁移：已删除的“谨慎模式”。内部语料名 `MirrorCorpus` 只是高端装备的复合规则测试；瞬态回放参数 `--roll-model guarded` 只是历史输入闸门模型，均不代表当前产品仍有谨慎模式或命中前保护。
 
 ## 2. .NET 1.0 权威基线
 
@@ -98,8 +98,8 @@ Rust 繁中最终五进程 Quick A/B 为：POE2 `190/190`，warm p50/p95
 | 离线兼容引擎 | ONNX Runtime + PP-OCRv5 mobile rec + 18,383 项字典 | 使用 ONNX Runtime 原生 API；无 Windows 繁中 OCR 时 Quick/Structured 进入完整 Paddle 物理行渐进路径；100/14/72 蓝字阈值、模型/字典哈希、形状和真实推理一致 | OCR self-test + 私有行门禁 26/26 |
 | 识别缓存 | frame / band 指纹缓存，最多 256 band；变化时失效 | 有边界、可观测、无跨配置污染；相同画面必须跳过重复 OCR | cache assertions + benchmark |
 | 监控循环 | 未命中持续等待；非缓存轮次约 4 ms、缓存轮次约 8 ms 让出；停止/命中/异常有代际隔离 | 单一监控 worker；旧任务不得在停止、重启或关闭后报警 | wait、race、dispose assertions |
-| 短时输入闸门 | 繁中和 POE2 预装 `WH_MOUSE_LL`；画面变化后同步武装；按下/抬起成对处理 | 独立 Win32 消息线程；hook callback 不做 OCR、不加阻塞锁、不调用 UI；750 ms fail-open | input-guard + 30/40/50 ms replay |
-| 红色告警 | 命中后红色全屏边框/屏幕中央卡片、循环 WAV、手动确认、确认后吸收约 300 ms 双击尾击 | 每次显示重查虚拟桌面/目标显示器并响应拓扑与 DPI 变化；先验证红窗可见、可点击、完整覆盖，再转交 hook；UI 卡住时 750 ms 独立放行 | blocking/live-blocking + topology assertions |
+| 快速点击语义 | 所有 profile 在识别未决期间完全直通按钮与滚轮；不安装或武装命中前闸门 | 识别不得造成点击丢失或鼠标被抢；明确接受 OCR 窗口内可能点过目标的取舍 | 实机高速点击与零 hook 断言 |
+| 红色告警 | 命中后红色全屏边框/屏幕中央卡片、循环 WAV、手动确认、确认后吸收约 300 ms 双击尾击 | 每次显示重查虚拟桌面/目标显示器并响应拓扑与 DPI 变化；先验证红窗可见、可点击、完整覆盖，再开始阻挡；失败时明确停止而不假装受保护 | blocking/live-blocking + topology assertions |
 | 状态浮窗 | 灰色未监控、绿色监控、点击穿透、不抢焦点、可拖动保存、避开 ROI | 原生 topmost/no-activate/click-through 窗口；目标摘要、计时、显隐、DPI 缩放与拖动保存均接到真实设置 | HUD snapshot + Win32 behavior test |
 | 选区与快捷键 | F11 框选；默认 F10 启动（3 组可选）；F12 确认/停止 | `RegisterHotKey`；冲突时明确报错；Esc 取消选区；框选结果写回当前游戏配置 | hotkey + selection tests |
 | 截图测试 | 和实时监控使用同一预处理/OCR/matcher/规则链；关闭时取消并等待 | 渐进识别允许超过 3 轮，最多 128 轮后返回明确不收敛故障；取消优先，且不弹迟到告警 | screenshot replay + close/cancel race |
@@ -150,10 +150,10 @@ poe-alarm-app-win（WinMain + 原生 Win32 UI）
 ```text
 复用 DIB 截图 → 单次 BGRA 扫描（mask + fingerprint）
              → 指纹未变：复用结果并短暂让出
-             → 指纹变化：同步武装短时输入闸门
+             → 指纹变化：鼠标保持直通
              → bands / WinRT OCR / 有界局部 ONNX 复核
              → 完整词缀或复合规则求值
-             → 未命中：释放闸门；命中：原子转交红色阻挡窗
+             → 未命中：继续监控；命中：显示并验证红色阻挡窗
 ```
 
 正常扫描不得复制整张 ROI 两次以上；mask、行墨水、band 图像和 OCR tensor 使用池化/复用缓冲。任何 `unsafe` 必须封装在小型 Windows/ONNX 适配层，公开 API 用长度、stride 和生命周期验证防止越界或悬垂。
@@ -276,8 +276,8 @@ artifacts\publish\1.0.0\win-x64\PoeAlarm.exe --audio-self-test artifacts\baselin
 瞬态回放必须覆盖普通 top-1、游戏自然两行词缀、CTC-assisted、调度 rank-3。
 `tools/PoeAlarm.TransientReplay --wrap-case` 仅把真实字形像素人工重排为两行，可作为布局压力
 诊断，不能充当“游戏自然两行词缀”的发布证据。真实两行素材必须来自游戏原生 tooltip，
-并在生产 OCR 预检中得到 strict `physical_line_count=2`；`guarded` 参数仍表示短时输入
-闸门模型，不表示已删除的谨慎模式。2026-08-13 对现有 25 张私图、8 份清单的有界审计
+并在生产 OCR 预检中得到 strict `physical_line_count=2`；`guarded` 参数仅表示历史输入
+闸门回放模型，不表示当前产品行为或已删除的谨慎模式。2026-08-13 对现有 25 张私图、8 份清单的有界审计
 得到 125 个严格命中，全部为一行，因此当前缺口是采集素材，不是可用合成测试绕过的代码项。
 
 Rust 当前工作区统一验证入口为：
@@ -318,7 +318,7 @@ matched group 和最终报警决定。
 
 ### 阶段 D：监控、告警和原生 UI（已完成自动化闭环）
 
-- 接入代际取消、短时闸门、红窗 handoff、HUD、选区、热键、WAV 和设置。
+- 接入代际取消、命中后红窗阻挡、HUD、选区、热键、WAV 和设置；快速模式不启用命中前闸门。
 - 已通过代际竞态、close、fail-open、高 DPI 布局、多显示器拓扑和录屏兼容行为测试；
   POE2 八行、F10/F11/F12、HUD、框选、截图最多 128 轮和红窗所有权转交均接到生产链。
 - UI 文案以用户能直接理解为准；中文不夹英文术语，English 不夹中文。
@@ -353,7 +353,7 @@ matched group 和最终报警决定。
 
 - 功能矩阵逐项有实现文件和自动/人工测试记录；
 - 公开 corpus、私有真实截图、PoEDB/PoE2DB、数值 3.73% 实图全部通过；
-- 六档瞬态回放和输入闸门测试无过点、误报、漏报、卡键；
+- 六档瞬态识别回放无误报、漏报；实机快速点击不丢键，命中后红窗阻挡可靠；
 - 性能 CSV 证明像素/指纹与 warm 端到端达到门禁，而非只展示规则 microbenchmark；
 - 1,000 次生命周期和 2 小时 soak 无卡死、泄漏、迟到报警；
 - 原生 ZIP 无 Tauri/.NET 依赖，体积、许可证、模型自检和 SHA-256 完整；
