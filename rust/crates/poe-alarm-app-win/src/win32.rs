@@ -25,22 +25,23 @@ use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POI
 use windows::Win32::Graphics::Dwm::{
     DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE, DWMSBT_MAINWINDOW,
     DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+    DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn,
     CreateSolidBrush, DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
     DT_VCENTER, DT_WORDBREAK, DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect,
     FillRgn, GetMonitorInfoW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
-    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
+    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MapWindowPoints, MonitorFromRect, OUT_DEFAULT_PRECIS,
+    PAINTSTRUCT, SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT,
+    UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::Dialogs::{
     GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
 use windows::Win32::UI::Controls::{
-    DRAWITEMSTRUCT, EM_SETSEL, MARGINS, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_SELECTED,
+    DRAWITEMSTRUCT, EM_SETMARGINS, EM_SETSEL, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_SELECTED,
     ODT_BUTTON, SetWindowTheme,
 };
 use windows::Win32::UI::HiDpi::{
@@ -52,20 +53,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_OWNERDRAW, CB_ADDSTRING,
-    CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CBN_SELCHANGE, CBS_DROPDOWNLIST, CREATESTRUCTW,
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE, ES_READONLY, ES_WANTRETURN, GWLP_USERDATA,
-    GetClientRect, GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, HMENU, HTCAPTION, IDC_ARROW, IDYES, KillTimer,
-    LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_YESNO, MSG, MessageBoxW, MoveWindow,
-    PostMessageW, PostQuitMessage, RegisterClassExW, SW_HIDE, SW_MINIMIZE, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle,
-    WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_HOTKEY,
-    WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_BORDER,
-    WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
-    WS_VSCROLL,
+    CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CBN_SELCHANGE, CBS_DROPDOWNLIST,
+    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, EC_LEFTMARGIN, EC_RIGHTMARGIN, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE,
+    ES_READONLY, ES_WANTRETURN, GWLP_USERDATA, GetClientRect, GetCursorPos, GetMessageW,
+    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HMENU, HTCAPTION,
+    IDC_ARROW, IDYES, IsWindowVisible, KillTimer, LoadCursorW, LoadIconW, MB_ICONINFORMATION,
+    MB_YESNO, MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassExW,
+    SW_HIDE, SW_MINIMIZE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE as WinWindowStyle, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
+    WM_CTLCOLORBTN, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DPICHANGED, WM_DRAWITEM, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY,
+    WM_PAINT, WM_SETFONT, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX,
+    WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -77,19 +78,58 @@ use crate::{
 };
 
 const CLASS_NAME: PCWSTR = w!("PoeAlarmNativeConfigWindow");
+const FONT_SEGOE_TEXT: PCWSTR = w!("Segoe UI Variable Text");
+const FONT_SEGOE_DISPLAY: PCWSTR = w!("Segoe UI Variable Display");
+const FONT_YAHEI_UI: PCWSTR = w!("Microsoft YaHei UI");
 const APP_ICON_RESOURCE_ID: usize = 101;
 const CLIENT_WIDTH: i32 = 1080;
 const CLIENT_HEIGHT: i32 = 900;
 #[cfg(test)]
 const RIGHTMOST_CONTROL_EDGE: i32 = 1050;
 #[cfg(test)]
-const BOTTOMMOST_CONTROL_EDGE: i32 = 890;
+const BOTTOMMOST_CONTROL_EDGE: i32 = 892;
 const WM_APP_WORK_COMPLETED: u32 = WM_APP + 1;
 const WM_APP_SELF_TEST: u32 = WM_APP + 2;
 const WM_APP_CLOSE_SAVE_COMPLETED: u32 = WM_APP + 3;
 const RUNTIME_TIMER_ID: usize = 1;
 const RUNTIME_TIMER_INTERVAL_MS: u32 = 16;
 const CLOSE_DEADLINE: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy)]
+struct UiGeometry {
+    rules_bottom: i32,
+    settings_top: i32,
+    settings_bottom: i32,
+    status_top: i32,
+    status_bottom: i32,
+    results_label_y: i32,
+    results_top: i32,
+    action_top: i32,
+}
+
+const fn ui_geometry(mode: RuleMode) -> UiGeometry {
+    let settings_top = match mode {
+        RuleMode::Quick => 322,
+        RuleMode::MultipleAffixes => 508,
+    };
+    let settings_bottom = settings_top + 222;
+    let status_top = settings_bottom + 10;
+    let status_bottom = status_top + 34;
+    let results_label_y = status_bottom + 8;
+    UiGeometry {
+        rules_bottom: match mode {
+            RuleMode::Quick => 312,
+            RuleMode::MultipleAffixes => 500,
+        },
+        settings_top,
+        settings_bottom,
+        status_top,
+        status_bottom,
+        results_label_y,
+        results_top: results_label_y + 22,
+        action_top: results_label_y,
+    }
+}
 
 const ID_GAME: u16 = 101;
 const ID_LANGUAGE: u16 = 102;
@@ -368,6 +408,7 @@ struct WindowState {
     theme_brushes: ThemeBrushes,
     fonts: Fonts,
     dpi: u32,
+    layout_key: Option<(u32, RuleMode)>,
     save_worker: Option<mpsc::Sender<SaveRequest>>,
     runtime: Box<dyn RuntimeClient>,
     runtime_alert_key: (Option<String>, bool),
@@ -648,14 +689,18 @@ fn close_needs_save(
 }
 
 const HUD_CONTENT_CLASS: PCWSTR = w!("PoeAlarmAppStatusHudContent");
-const HUD_WIDTH: i32 = 300;
-const HUD_HEIGHT: i32 = 62;
-const HUD_FONT_SIZE: i32 = 15;
+const HUD_WIDTH: i32 = 320;
+const HUD_HEIGHT: i32 = 68;
+const HUD_PRIMARY_FONT_SIZE: i32 = 13;
+const HUD_SECONDARY_FONT_SIZE: i32 = 12;
 
 struct HudPaintState {
-    text: String,
+    primary_text: String,
+    secondary_text: String,
     color: COLORREF,
-    font: HFONT,
+    primary_font: HFONT,
+    secondary_font: HFONT,
+    font_language: UiLanguage,
     placement: bool,
 }
 
@@ -672,7 +717,11 @@ struct StatusHud {
 }
 
 impl StatusHud {
-    fn create(settings: &AppSettings, headless: bool) -> Result<Self, String> {
+    fn create(
+        settings: &AppSettings,
+        headless: bool,
+        language: UiLanguage,
+    ) -> Result<Self, String> {
         ensure_hud_content_class()?;
         let bounds = hud_bounds(settings, 96)?;
         let policy = HudWindowPolicy {
@@ -695,10 +744,14 @@ impl StatusHud {
         shell
             .set_bounds(bounds)
             .map_err(|error| error.to_string())?;
+        let (primary_font, secondary_font) = unsafe { create_hud_fonts(dpi, language) };
         let mut paint = Box::new(HudPaintState {
-            text: String::new(),
-            color: rgb(94, 105, 112),
-            font: unsafe { create_font(dpi, HUD_FONT_SIZE, FW_SEMIBOLD.0 as i32) },
+            primary_text: String::new(),
+            secondary_text: String::new(),
+            color: theme_color(SEA_GLASS_PALETTE.info),
+            primary_font,
+            secondary_font,
+            font_language: language,
             placement: false,
         });
         let child = unsafe {
@@ -718,6 +771,7 @@ impl StatusHud {
             )
         }
         .map_err(win_error)?;
+        unsafe { apply_hud_shape(parent, bounds.width, bounds.height, dpi) };
         Ok(Self {
             shell,
             child,
@@ -735,13 +789,8 @@ impl StatusHud {
         let dpi = dpi.max(96);
         let dpi_changed = self.dpi != dpi;
         if dpi_changed {
-            let font = unsafe { create_font(dpi, HUD_FONT_SIZE, FW_SEMIBOLD.0 as i32) };
-            let old_font = std::mem::replace(&mut self.paint.font, font);
-            if !old_font.0.is_null() {
-                unsafe {
-                    let _ = DeleteObject(HGDIOBJ(old_font.0));
-                }
-            }
+            let language = self.paint.font_language;
+            unsafe { replace_hud_fonts(&mut self.paint, dpi, language) };
             self.dpi = dpi;
         }
         if !dpi_changed && self.bounds == bounds {
@@ -752,6 +801,8 @@ impl StatusHud {
             .map_err(|error| error.to_string())?;
         unsafe {
             let _ = MoveWindow(self.child, 0, 0, bounds.width, bounds.height, true);
+            let shell = HWND(self.shell.window_handle().as_raw() as *mut c_void);
+            apply_hud_shape(shell, bounds.width, bounds.height, dpi);
         }
         self.bounds = bounds;
         Ok(())
@@ -786,13 +837,25 @@ impl StatusHud {
         let text = language
             .text()
             .hud_text(status, target_summary, elapsed.as_deref());
+        let (primary_text, secondary_text) = text.split_once("\r\n").map_or_else(
+            || (text.as_str(), ""),
+            |(primary, secondary)| (primary, secondary),
+        );
         let color = match status {
-            MonitorStatus::MatchFound => rgb(198, 42, 54),
-            MonitorStatus::Monitoring => rgb(20, 145, 103),
-            _ => rgb(88, 102, 111),
+            MonitorStatus::MatchFound => theme_color(SEA_GLASS_PALETTE.danger),
+            MonitorStatus::Monitoring => theme_color(SEA_GLASS_PALETTE.success),
+            _ => theme_color(SEA_GLASS_PALETTE.info),
         };
-        let paint_changed = self.paint.text != text || self.paint.color != color;
-        self.paint.text = text;
+        let font_changed = self.paint.font_language != language;
+        if font_changed {
+            unsafe { replace_hud_fonts(&mut self.paint, self.dpi, language) };
+        }
+        let paint_changed = self.paint.primary_text != primary_text
+            || self.paint.secondary_text != secondary_text
+            || self.paint.color != color
+            || font_changed;
+        self.paint.primary_text = primary_text.to_owned();
+        self.paint.secondary_text = secondary_text.to_owned();
         self.paint.color = color;
         let affinity = if settings.allow_overlay_capture {
             CaptureAffinity::Include
@@ -830,8 +893,12 @@ impl StatusHud {
             .map_err(|error| error.to_string())?;
         self.placement = true;
         self.paint.placement = true;
-        self.paint.color = rgb(52, 112, 168);
-        self.paint.text = language.text().hud_placement_instruction().to_owned();
+        if self.paint.font_language != language {
+            unsafe { replace_hud_fonts(&mut self.paint, self.dpi, language) };
+        }
+        self.paint.color = theme_color(SEA_GLASS_PALETTE.info);
+        self.paint.primary_text = language.text().hud_placement_instruction().to_owned();
+        self.paint.secondary_text.clear();
         if !self.headless && !self.visible {
             self.shell.show().map_err(|error| error.to_string())?;
             self.visible = true;
@@ -895,12 +962,15 @@ impl Drop for StatusHud {
             }
             self.child = HWND::default();
         }
-        if !self.paint.font.0.is_null() {
-            unsafe {
-                let _ = DeleteObject(HGDIOBJ(self.paint.font.0));
+        for font in [self.paint.primary_font, self.paint.secondary_font] {
+            if !font.0.is_null() {
+                unsafe {
+                    let _ = DeleteObject(HGDIOBJ(font.0));
+                }
             }
-            self.paint.font = HFONT::default();
         }
+        self.paint.primary_font = HFONT::default();
+        self.paint.secondary_font = HFONT::default();
     }
 }
 
@@ -975,6 +1045,20 @@ fn hud_bounds(settings: &AppSettings, dpi: u32) -> Result<RectI, String> {
         .ok_or_else(|| "the status window position is invalid".to_owned())
 }
 
+unsafe fn apply_hud_shape(window: HWND, width: i32, height: i32, dpi: u32) {
+    let diameter = scale(11, dpi).max(3) * 2;
+    let region = unsafe { CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter) };
+    if region.0.is_null() {
+        return;
+    }
+    // SetWindowRgn owns the region after success; retain ownership only on failure.
+    if unsafe { SetWindowRgn(window, Some(region), true) } == 0 {
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(region.0));
+        }
+    }
+}
+
 unsafe extern "system" fn hud_content_proc(
     hwnd: HWND,
     message: u32,
@@ -998,36 +1082,77 @@ unsafe extern "system" fn hud_content_proc(
             unsafe {
                 let _ = GetClientRect(hwnd, &mut client);
             }
-            let brush = Brush::new(state.color);
+            let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
+            let canvas = Brush::new(theme_color(SEA_GLASS_PALETTE.canvas));
+            let border = Brush::new(theme_color(SEA_GLASS_PALETTE.border));
+            let surface = Brush::new(theme_color(SEA_GLASS_PALETTE.card_raised));
+            let accent = Brush::new(state.color);
             unsafe {
-                FillRect(dc, &client, brush.0);
+                FillRect(dc, &client, canvas.0);
+                draw_rounded_surface(dc, client, border.0, scale(11, dpi));
+                let border_width = scale(1, dpi).max(1);
+                draw_rounded_surface(
+                    dc,
+                    RECT {
+                        left: client.left + border_width,
+                        top: client.top + border_width,
+                        right: client.right - border_width,
+                        bottom: client.bottom - border_width,
+                    },
+                    surface.0,
+                    (scale(11, dpi) - border_width).max(2),
+                );
+                draw_rounded_surface(
+                    dc,
+                    RECT {
+                        left: scale(10, dpi),
+                        top: scale(12, dpi),
+                        right: scale(14, dpi),
+                        bottom: client.bottom - scale(12, dpi),
+                    },
+                    accent.0,
+                    scale(2, dpi).max(1),
+                );
                 if state.placement {
                     let mut placement_bounds = client;
-                    placement_bounds.left += scale(10, GetDpiForWindow(hwnd).max(96));
-                    placement_bounds.top += scale(5, GetDpiForWindow(hwnd).max(96));
-                    placement_bounds.right -= scale(10, GetDpiForWindow(hwnd).max(96));
-                    placement_bounds.bottom -= scale(5, GetDpiForWindow(hwnd).max(96));
+                    placement_bounds.left += scale(22, dpi);
+                    placement_bounds.top += scale(8, dpi);
+                    placement_bounds.right -= scale(12, dpi);
+                    placement_bounds.bottom -= scale(8, dpi);
                     draw_text(
                         dc,
-                        state.font,
-                        rgb(255, 255, 255),
-                        &state.text,
+                        state.primary_font,
+                        theme_color(SEA_GLASS_PALETTE.text_primary),
+                        &state.primary_text,
                         placement_bounds,
                         DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS,
                     );
                 } else {
-                    let mut content_bounds = client;
-                    content_bounds.left += scale(10, GetDpiForWindow(hwnd).max(96));
-                    content_bounds.top += scale(5, GetDpiForWindow(hwnd).max(96));
-                    content_bounds.right -= scale(10, GetDpiForWindow(hwnd).max(96));
-                    content_bounds.bottom -= scale(5, GetDpiForWindow(hwnd).max(96));
                     draw_text(
                         dc,
-                        state.font,
-                        rgb(255, 255, 255),
-                        &state.text,
-                        content_bounds,
-                        DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS,
+                        state.primary_font,
+                        state.color,
+                        &state.primary_text,
+                        rect(
+                            scale(24, dpi),
+                            scale(7, dpi),
+                            client.right - scale(12, dpi),
+                            scale(31, dpi),
+                        ),
+                        DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                    );
+                    draw_text(
+                        dc,
+                        state.secondary_font,
+                        theme_color(SEA_GLASS_PALETTE.text_secondary),
+                        &state.secondary_text,
+                        rect(
+                            scale(24, dpi),
+                            scale(31, dpi),
+                            client.right - scale(12, dpi),
+                            client.bottom - scale(7, dpi),
+                        ),
+                        DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
                     );
                 }
                 let _ = EndPaint(hwnd, &paint);
@@ -1132,6 +1257,7 @@ impl WindowState {
             theme_brushes: ThemeBrushes::new(),
             fonts: Fonts::default(),
             dpi: 96,
+            layout_key: None,
             save_worker: None,
             runtime,
             runtime_alert_key,
@@ -1196,8 +1322,8 @@ impl WindowState {
         unsafe { apply_native_window_theme(self.hwnd) };
         self.controls = unsafe { Controls::create(self.hwnd) }?;
         unsafe { self.controls.apply_visual_theme() };
-        self.fonts = unsafe { Fonts::create(self.dpi) };
-        match StatusHud::create(self.model.settings(), self.self_test) {
+        self.fonts = unsafe { Fonts::create(self.dpi, self.model.language()) };
+        match StatusHud::create(self.model.settings(), self.self_test, self.model.language()) {
             Ok(hud) => self.hud = Some(hud),
             Err(error) => {
                 eprintln!("status window creation failed: {error}");
@@ -1207,6 +1333,7 @@ impl WindowState {
         }
         unsafe {
             self.apply_fonts();
+            self.controls.apply_control_metrics(self.dpi);
             self.layout();
             self.refresh_all();
         }
@@ -1818,6 +1945,12 @@ impl WindowState {
 
     unsafe fn refresh_all(&mut self) {
         unsafe {
+            if self.fonts.language != self.model.language() {
+                self.recreate_fonts();
+            }
+            if self.layout_key != Some((self.dpi, self.model.rule_mode())) {
+                self.layout();
+            }
             self.refresh_localized_controls();
             self.refresh_editor_lists();
             self.refresh_editor_fields();
@@ -2162,12 +2295,16 @@ impl WindowState {
     }
 
     unsafe fn recreate_fonts(&mut self) {
-        self.fonts = unsafe { Fonts::create(self.dpi) };
-        unsafe { self.apply_fonts() };
+        self.fonts = unsafe { Fonts::create(self.dpi, self.model.language()) };
+        unsafe {
+            self.apply_fonts();
+            self.controls.apply_control_metrics(self.dpi);
+        }
     }
 
-    unsafe fn layout(&self) {
+    unsafe fn layout(&mut self) {
         let s = |value| scale(value, self.dpi);
+        let geometry = ui_geometry(self.model.rule_mode());
         macro_rules! place {
             ($control:expr, $x:expr, $y:expr, $width:expr, $height:expr) => {
                 unsafe {
@@ -2175,50 +2312,89 @@ impl WindowState {
                 }
             };
         }
+        macro_rules! place_edit {
+            ($control:expr, $x:expr, $y:expr, $width:expr, $height:expr) => {
+                unsafe {
+                    move_control(
+                        $control,
+                        s($x + 2),
+                        s($y + 2),
+                        s($width - 4),
+                        s($height - 4),
+                    );
+                }
+            };
+        }
         place!(self.controls.game, 30, 116, 210, 220);
         place!(self.controls.language, 260, 116, 210, 220);
         place!(self.controls.rule_mode, 490, 116, 260, 220);
         place!(self.controls.save, 870, 114, 180, 36);
-        place!(self.controls.quick_template, 30, 220, 1020, 54);
+        place_edit!(self.controls.quick_template, 30, 220, 1020, 58);
 
         place!(self.controls.results, 30, 218, 330, 250);
         place!(self.controls.add_result, 370, 217, 130, 34);
         place!(self.controls.delete_result, 510, 217, 130, 34);
-        place!(self.controls.group_name, 660, 218, 180, 32);
+        place_edit!(self.controls.group_name, 660, 218, 180, 34);
         place!(self.controls.group_mode, 850, 218, 170, 220);
-        place!(self.controls.required_count, 930, 268, 90, 30);
+        place_edit!(self.controls.required_count, 930, 268, 90, 32);
 
         place!(self.controls.conditions, 30, 326, 330, 250);
         place!(self.controls.add_condition, 370, 325, 130, 34);
         place!(self.controls.delete_condition, 510, 325, 130, 34);
-        place!(self.controls.condition_name, 660, 326, 360, 32);
-        place!(self.controls.condition_template, 30, 400, 610, 48);
+        place_edit!(self.controls.condition_name, 660, 326, 360, 34);
+        place_edit!(self.controls.condition_template, 30, 400, 610, 50);
         place!(self.controls.numeric_rules, 660, 400, 150, 220);
         place!(self.controls.add_numeric, 820, 399, 100, 34);
         place!(self.controls.delete_numeric, 930, 399, 100, 34);
-        place!(self.controls.numeric_mode, 660, 446, 160, 220);
-        place!(self.controls.numeric_first, 830, 446, 100, 30);
-        place!(self.controls.numeric_second, 940, 446, 90, 30);
+        place!(self.controls.numeric_mode, 660, 462, 160, 220);
+        place_edit!(self.controls.numeric_first, 830, 462, 100, 32);
+        place_edit!(self.controls.numeric_second, 940, 462, 90, 32);
 
-        place!(self.controls.ocr_language, 30, 520, 210, 220);
-        place!(self.controls.region_x, 390, 520, 100, 30);
-        place!(self.controls.region_y, 500, 520, 100, 30);
-        place!(self.controls.region_width, 610, 520, 100, 30);
-        place!(self.controls.region_height, 720, 520, 100, 30);
-        place!(self.controls.select_region, 840, 518, 190, 34);
+        let settings_top = geometry.settings_top;
+        place!(self.controls.ocr_language, 30, settings_top + 30, 210, 220);
+        place_edit!(self.controls.region_x, 390, settings_top + 30, 100, 34);
+        place_edit!(self.controls.region_y, 500, settings_top + 30, 100, 34);
+        place_edit!(self.controls.region_width, 610, settings_top + 30, 100, 34);
+        place_edit!(self.controls.region_height, 720, settings_top + 30, 100, 34);
+        place!(self.controls.select_region, 840, settings_top + 29, 190, 36);
 
-        place!(self.controls.keep_hud, 30, 580, 300, 28);
-        place!(self.controls.allow_overlay_capture, 350, 580, 340, 28);
-        place!(self.controls.place_hud, 30, 612, 220, 34);
-        place!(self.controls.alert_sound, 30, 674, 510, 30);
-        place!(self.controls.browse_sound, 550, 672, 120, 34);
-        place!(self.controls.default_sound, 680, 672, 120, 34);
-        place!(self.controls.hotkey, 820, 674, 210, 220);
+        place!(self.controls.keep_hud, 30, settings_top + 100, 300, 26);
+        place!(
+            self.controls.allow_overlay_capture,
+            350,
+            settings_top + 100,
+            340,
+            26
+        );
+        place!(self.controls.place_hud, 30, settings_top + 126, 220, 36);
+        place_edit!(self.controls.alert_sound, 30, settings_top + 188, 510, 34);
+        place!(self.controls.browse_sound, 550, settings_top + 187, 120, 36);
+        place!(
+            self.controls.default_sound,
+            680,
+            settings_top + 187,
+            120,
+            36
+        );
+        place!(self.controls.hotkey, 820, settings_top + 188, 210, 220);
 
-        place!(self.controls.screenshot_result, 30, 760, 740, 126);
-        place!(self.controls.start, 790, 760, 260, 38);
-        place!(self.controls.stop, 790, 806, 260, 38);
-        place!(self.controls.screenshot, 790, 852, 260, 38);
+        place_edit!(
+            self.controls.screenshot_result,
+            30,
+            geometry.results_top,
+            690,
+            892 - geometry.results_top
+        );
+        place!(self.controls.start, 740, geometry.action_top, 310, 34);
+        place!(self.controls.stop, 740, geometry.action_top + 38, 310, 34);
+        place!(
+            self.controls.screenshot,
+            740,
+            geometry.action_top + 76,
+            310,
+            34
+        );
+        self.layout_key = Some((self.dpi, self.model.rule_mode()));
     }
 
     unsafe fn on_command(&mut self, wparam: WPARAM) {
@@ -2541,11 +2717,12 @@ impl WindowState {
         } else {
             SEA_GLASS_PALETTE.text_primary
         };
-        let (background, brush) = match message {
-            WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
-                (SEA_GLASS_PALETTE.input, &self.theme_brushes.input)
-            }
-            _ => (SEA_GLASS_PALETTE.card, &self.theme_brushes.card),
+        let input_surface = matches!(message, WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX)
+            || control == self.controls.screenshot_result;
+        let (background, brush) = if input_surface {
+            (SEA_GLASS_PALETTE.input, &self.theme_brushes.input)
+        } else {
+            (SEA_GLASS_PALETTE.card, &self.theme_brushes.card)
         };
         unsafe {
             SetTextColor(dc, theme_color(foreground));
@@ -2649,6 +2826,39 @@ impl WindowState {
         LRESULT(1)
     }
 
+    unsafe fn paint_edit_shells(&self, dc: HDC) {
+        let fill = Brush::new(theme_color(SEA_GLASS_PALETTE.input));
+        let border = Brush::new(theme_color(SEA_GLASS_PALETTE.border));
+        let expansion = scale(2, self.dpi).max(1);
+        let radius = scale(7, self.dpi).max(3);
+        for edit in self.controls.text_inputs() {
+            if !unsafe { IsWindowVisible(edit) }.as_bool() {
+                continue;
+            }
+            let bounds = unsafe { control_bounds_in_parent(edit, self.hwnd) };
+            let outer = RECT {
+                left: bounds.left - expansion,
+                top: bounds.top - expansion,
+                right: bounds.right + expansion,
+                bottom: bounds.bottom + expansion,
+            };
+            unsafe {
+                draw_rounded_surface(dc, outer, border.0, radius);
+                draw_rounded_surface(
+                    dc,
+                    RECT {
+                        left: outer.left + 1,
+                        top: outer.top + 1,
+                        right: outer.right - 1,
+                        bottom: outer.bottom - 1,
+                    },
+                    fill.0,
+                    (radius - 1).max(2),
+                );
+            }
+        }
+    }
+
     unsafe fn paint(&self) {
         let mut paint = PAINTSTRUCT::default();
         let dc = unsafe { BeginPaint(self.hwnd, &mut paint) };
@@ -2671,6 +2881,7 @@ impl WindowState {
             FillRect(dc, &client, background.0);
         }
         let s = |value| scale(value, self.dpi);
+        let geometry = ui_geometry(self.model.rule_mode());
         unsafe {
             FillRect(
                 dc,
@@ -2698,7 +2909,7 @@ impl WindowState {
                     left: s(18),
                     top: s(160),
                     right: s(1062),
-                    bottom: s(535),
+                    bottom: s(geometry.rules_bottom),
                 },
                 self.dpi,
                 section.0,
@@ -2709,9 +2920,9 @@ impl WindowState {
                 dc,
                 RECT {
                     left: s(18),
-                    top: s(542),
+                    top: s(geometry.settings_top),
                     right: s(1062),
-                    bottom: s(704),
+                    bottom: s(geometry.settings_bottom),
                 },
                 self.dpi,
                 section.0,
@@ -2722,9 +2933,9 @@ impl WindowState {
                 dc,
                 RECT {
                     left: s(18),
-                    top: s(710),
+                    top: s(geometry.status_top),
                     right: s(1062),
-                    bottom: s(742),
+                    bottom: s(geometry.status_bottom),
                 },
                 section_border.0,
                 s(10),
@@ -2734,9 +2945,9 @@ impl WindowState {
                 dc,
                 RECT {
                     left: s(18) + status_inset,
-                    top: s(710) + status_inset,
+                    top: s(geometry.status_top) + status_inset,
                     right: s(1062) - status_inset,
-                    bottom: s(742) - status_inset,
+                    bottom: s(geometry.status_bottom) - status_inset,
                 },
                 raised_section.0,
                 (s(10) - status_inset).max(2),
@@ -2745,13 +2956,14 @@ impl WindowState {
                 dc,
                 RECT {
                     left: s(24),
-                    top: s(718),
+                    top: s(geometry.status_top + 8),
                     right: s(28),
-                    bottom: s(734),
+                    bottom: s(geometry.status_bottom - 8),
                 },
                 accent.0,
                 s(2).max(1),
             );
+            self.paint_edit_shells(dc);
             SetBkMode(dc, TRANSPARENT);
         }
         let text = self.model.language().text();
@@ -2878,7 +3090,7 @@ impl WindowState {
                     self.fonts.label,
                     text.numeric_comparison,
                     s(660),
-                    s(423),
+                    s(438),
                     s(160),
                 );
                 draw_label(
@@ -2886,7 +3098,7 @@ impl WindowState {
                     self.fonts.label,
                     text.first_value,
                     s(830),
-                    s(423),
+                    s(438),
                     s(105),
                 );
                 draw_label(
@@ -2894,7 +3106,7 @@ impl WindowState {
                     self.fonts.label,
                     text.second_value,
                     s(940),
-                    s(423),
+                    s(438),
                     s(100),
                 );
                 draw_help(
@@ -2912,7 +3124,7 @@ impl WindowState {
                 self.fonts.label,
                 text.ocr_language_label,
                 s(30),
-                s(496),
+                s(geometry.settings_top + 8),
                 s(220),
             );
             draw_label(
@@ -2920,17 +3132,31 @@ impl WindowState {
                 self.fonts.label,
                 text.capture_region_label,
                 s(270),
-                s(496),
+                s(geometry.settings_top + 8),
                 s(560),
             );
-            draw_small_label(dc, self.fonts.body, text.region_x, s(390), s(547), s(100));
-            draw_small_label(dc, self.fonts.body, text.region_y, s(500), s(547), s(100));
+            draw_small_label(
+                dc,
+                self.fonts.body,
+                text.region_x,
+                s(390),
+                s(geometry.settings_top + 64),
+                s(100),
+            );
+            draw_small_label(
+                dc,
+                self.fonts.body,
+                text.region_y,
+                s(500),
+                s(geometry.settings_top + 64),
+                s(100),
+            );
             draw_small_label(
                 dc,
                 self.fonts.body,
                 text.region_width,
                 s(610),
-                s(547),
+                s(geometry.settings_top + 64),
                 s(100),
             );
             draw_small_label(
@@ -2938,7 +3164,7 @@ impl WindowState {
                 self.fonts.body,
                 text.region_height,
                 s(720),
-                s(547),
+                s(geometry.settings_top + 64),
                 s(100),
             );
             draw_label(
@@ -2946,7 +3172,7 @@ impl WindowState {
                 self.fonts.label,
                 text.general_settings_label,
                 s(30),
-                s(560),
+                s(geometry.settings_top + 78),
                 s(300),
             );
             draw_small_label(
@@ -2954,7 +3180,7 @@ impl WindowState {
                 self.fonts.body,
                 text.hud_position_help,
                 s(270),
-                s(618),
+                s(geometry.settings_top + 132),
                 s(520),
             );
             draw_label(
@@ -2962,16 +3188,28 @@ impl WindowState {
                 self.fonts.label,
                 text.alert_sound,
                 s(30),
-                s(650),
+                s(geometry.settings_top + 164),
                 s(560),
             );
-            draw_label(dc, self.fonts.label, text.hotkey, s(820), s(650), s(220));
+            draw_label(
+                dc,
+                self.fonts.label,
+                text.hotkey,
+                s(820),
+                s(geometry.settings_top + 164),
+                s(220),
+            );
             draw_text(
                 dc,
                 self.fonts.label,
                 theme_color(SEA_GLASS_PALETTE.text_muted),
                 text.status_label,
-                rect(s(36), s(711), s(160), s(740)),
+                rect(
+                    s(36),
+                    s(geometry.status_top),
+                    s(160),
+                    s(geometry.status_bottom),
+                ),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
             );
             let status = if self.closing || matches!(self.model.notice(), crate::UiNotice::None) {
@@ -2986,7 +3224,12 @@ impl WindowState {
                 self.fonts.status,
                 self.status_color(),
                 &status,
-                rect(s(160), s(711), s(1040), s(740)),
+                rect(
+                    s(160),
+                    s(geometry.status_top),
+                    s(1040),
+                    s(geometry.status_bottom),
+                ),
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
             draw_small_label(
@@ -2994,7 +3237,7 @@ impl WindowState {
                 self.fonts.label,
                 text.screenshot_results_label,
                 s(30),
-                s(738),
+                s(geometry.results_label_y),
                 s(360),
             );
             let _ = EndPaint(self.hwnd, &paint);
@@ -3219,6 +3462,70 @@ impl Controls {
         }
     }
 
+    unsafe fn apply_control_metrics(&self, layout_dpi: u32) {
+        for edit in self.text_inputs() {
+            let margin = scale(8, layout_dpi).clamp(1, i32::from(u16::MAX)) as u16;
+            let packed_margins = u32::from(margin) | (u32::from(margin) << 16);
+            unsafe {
+                SendMessageW(
+                    edit,
+                    EM_SETMARGINS,
+                    Some(WPARAM((EC_LEFTMARGIN | EC_RIGHTMARGIN) as usize)),
+                    Some(LPARAM(packed_margins as isize)),
+                );
+            }
+        }
+        for combo in self.combos() {
+            unsafe {
+                SendMessageW(
+                    combo,
+                    CB_SETITEMHEIGHT,
+                    Some(WPARAM(usize::MAX)),
+                    Some(LPARAM(scale(27, layout_dpi) as isize)),
+                );
+                SendMessageW(
+                    combo,
+                    CB_SETITEMHEIGHT,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(scale(25, layout_dpi) as isize)),
+                );
+            }
+        }
+    }
+
+    fn text_inputs(&self) -> [HWND; 13] {
+        [
+            self.quick_template,
+            self.region_x,
+            self.region_y,
+            self.region_width,
+            self.region_height,
+            self.group_name,
+            self.required_count,
+            self.condition_name,
+            self.condition_template,
+            self.numeric_first,
+            self.numeric_second,
+            self.alert_sound,
+            self.screenshot_result,
+        ]
+    }
+
+    fn combos(&self) -> [HWND; 10] {
+        [
+            self.game,
+            self.language,
+            self.rule_mode,
+            self.ocr_language,
+            self.results,
+            self.group_mode,
+            self.conditions,
+            self.numeric_rules,
+            self.numeric_mode,
+            self.hotkey,
+        ]
+    }
+
     fn all(&self) -> Vec<HWND> {
         vec![
             self.game,
@@ -3339,16 +3646,20 @@ struct Fonts {
     title: HFONT,
     subtitle: HFONT,
     status: HFONT,
+    language: UiLanguage,
 }
 
 impl Fonts {
-    unsafe fn create(dpi: u32) -> Self {
+    unsafe fn create(dpi: u32, language: UiLanguage) -> Self {
+        let text_face = ui_font_face(language, false);
+        let display_face = ui_font_face(language, true);
         Self {
-            body: unsafe { create_font(dpi, 15, FW_NORMAL.0 as i32) },
-            label: unsafe { create_font(dpi, 13, FW_SEMIBOLD.0 as i32) },
-            title: unsafe { create_font(dpi, 27, FW_SEMIBOLD.0 as i32) },
-            subtitle: unsafe { create_font(dpi, 14, FW_NORMAL.0 as i32) },
-            status: unsafe { create_font(dpi, 15, FW_SEMIBOLD.0 as i32) },
+            body: unsafe { create_font(dpi, 14, FW_NORMAL.0 as i32, text_face) },
+            label: unsafe { create_font(dpi, 12, FW_SEMIBOLD.0 as i32, text_face) },
+            title: unsafe { create_font(dpi, 26, FW_SEMIBOLD.0 as i32, display_face) },
+            subtitle: unsafe { create_font(dpi, 13, FW_NORMAL.0 as i32, text_face) },
+            status: unsafe { create_font(dpi, 14, FW_SEMIBOLD.0 as i32, text_face) },
+            language,
         }
     }
 }
@@ -3753,7 +4064,7 @@ unsafe fn create_edit(parent: HWND, id: u16) -> Result<HWND, String> {
         create_control(
             parent,
             w!("EDIT"),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | WinWindowStyle(ES_AUTOHSCROLL as u32),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WinWindowStyle(ES_AUTOHSCROLL as u32),
             id,
         )
     }
@@ -3771,7 +4082,6 @@ unsafe fn create_multiline_edit(parent: HWND, id: u16) -> Result<HWND, String> {
             WS_CHILD
                 | WS_VISIBLE
                 | WS_TABSTOP
-                | WS_BORDER
                 | WS_VSCROLL
                 | WinWindowStyle((ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN) as u32),
             id,
@@ -3786,7 +4096,6 @@ unsafe fn create_readonly_multiline_edit(parent: HWND, id: u16) -> Result<HWND, 
             w!("EDIT"),
             WS_CHILD
                 | WS_VISIBLE
-                | WS_BORDER
                 | WS_VSCROLL
                 | WinWindowStyle((ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY) as u32),
             id,
@@ -3985,7 +4294,63 @@ unsafe fn move_control(control: HWND, x: i32, y: i32, width: i32, height: i32) {
     }
 }
 
-unsafe fn create_font(dpi: u32, logical_pixels: i32, weight: i32) -> HFONT {
+unsafe fn control_bounds_in_parent(control: HWND, parent: HWND) -> RECT {
+    let mut bounds = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(control, &mut bounds);
+    }
+    let mut points = [
+        POINT {
+            x: bounds.left,
+            y: bounds.top,
+        },
+        POINT {
+            x: bounds.right,
+            y: bounds.bottom,
+        },
+    ];
+    unsafe {
+        MapWindowPoints(None, Some(parent), &mut points);
+    }
+    RECT {
+        left: points[0].x,
+        top: points[0].y,
+        right: points[1].x,
+        bottom: points[1].y,
+    }
+}
+
+const fn ui_font_face(language: UiLanguage, display: bool) -> PCWSTR {
+    match language {
+        UiLanguage::SimplifiedChinese => FONT_YAHEI_UI,
+        UiLanguage::English if display => FONT_SEGOE_DISPLAY,
+        UiLanguage::English => FONT_SEGOE_TEXT,
+    }
+}
+
+unsafe fn create_hud_fonts(dpi: u32, language: UiLanguage) -> (HFONT, HFONT) {
+    let face = ui_font_face(language, false);
+    (
+        unsafe { create_font(dpi, HUD_PRIMARY_FONT_SIZE, FW_SEMIBOLD.0 as i32, face) },
+        unsafe { create_font(dpi, HUD_SECONDARY_FONT_SIZE, FW_NORMAL.0 as i32, face) },
+    )
+}
+
+unsafe fn replace_hud_fonts(paint: &mut HudPaintState, dpi: u32, language: UiLanguage) {
+    let (primary, secondary) = unsafe { create_hud_fonts(dpi, language) };
+    let old_primary = std::mem::replace(&mut paint.primary_font, primary);
+    let old_secondary = std::mem::replace(&mut paint.secondary_font, secondary);
+    for font in [old_primary, old_secondary] {
+        if !font.0.is_null() {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(font.0));
+            }
+        }
+    }
+    paint.font_language = language;
+}
+
+unsafe fn create_font(dpi: u32, logical_pixels: i32, weight: i32, face: PCWSTR) -> HFONT {
     unsafe {
         CreateFontW(
             -scale(logical_pixels, dpi),
@@ -4001,7 +4366,7 @@ unsafe fn create_font(dpi: u32, logical_pixels: i32, weight: i32) -> HFONT {
             CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
             0,
-            w!("Segoe UI"),
+            face,
         )
     }
 }
@@ -4185,34 +4550,21 @@ unsafe fn apply_native_window_theme(window: HWND) {
             size_of_val(&corner_preference) as u32,
         );
         let backdrop: DWM_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW;
-        let backdrop_enabled = DwmSetWindowAttribute(
+        let _ = DwmSetWindowAttribute(
             window,
             DWMWA_SYSTEMBACKDROP_TYPE,
             (&backdrop as *const DWM_SYSTEMBACKDROP_TYPE).cast(),
             size_of_val(&backdrop) as u32,
-        )
-        .is_ok();
-        let margins = MARGINS {
-            cxLeftWidth: -1,
-            cxRightWidth: -1,
-            cyTopHeight: -1,
-            cyBottomHeight: -1,
-        };
-        if backdrop_enabled {
-            // Painting still starts with an opaque fog-white fallback. On Windows 11 the
-            // backdrop remains available to the non-client frame; older systems simply
-            // ignore the request without risking an unpainted black client area.
-            let _ = DwmExtendFrameIntoClientArea(window, &margins);
-        }
+        );
+        // Never extend DWM glass into this GDI client area. Classic EDIT, COMBOBOX and
+        // owner-drawn controls do not publish a valid premultiplied alpha channel there; DWM
+        // consequently interprets dark glyph pixels as transparency and drops strokes and
+        // borders. The client stays fully opaque and paints the sea-glass look explicitly.
     }
 }
 
 const fn theme_color(color: Rgb) -> COLORREF {
     COLORREF(color.colorref())
-}
-
-fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
-    COLORREF(u32::from(red) | (u32::from(green) << 8) | (u32::from(blue) << 16))
 }
 
 fn win_error(error: windows::core::Error) -> String {
