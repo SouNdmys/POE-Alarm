@@ -38,6 +38,7 @@ pub struct Palette {
     pub hover: Rgb,
     pub pressed: Rgb,
     pub divider: Rgb,
+    pub shadow: Rgb,
     pub border: Rgb,
     pub border_emphasis: Rgb,
     pub text_primary: Rgb,
@@ -55,32 +56,34 @@ pub struct Palette {
     pub info: Rgb,
 }
 
-/// A restrained graphite-and-warm-gold palette inspired by the game rather
-/// than copying its highly decorated chrome.
-pub const DARK_PALETTE: Palette = Palette {
-    canvas: Rgb::new(17, 19, 22),
-    header: Rgb::new(13, 15, 18),
-    card: Rgb::new(27, 31, 36),
-    card_raised: Rgb::new(34, 39, 45),
-    input: Rgb::new(18, 21, 25),
-    hover: Rgb::new(43, 49, 56),
-    pressed: Rgb::new(22, 26, 31),
-    divider: Rgb::new(48, 54, 62),
-    border: Rgb::new(74, 81, 91),
-    border_emphasis: Rgb::new(105, 113, 124),
-    text_primary: Rgb::new(245, 241, 232),
-    text_secondary: Rgb::new(202, 195, 181),
-    text_muted: Rgb::new(166, 160, 150),
-    text_disabled: Rgb::new(137, 139, 136),
-    accent: Rgb::new(210, 169, 79),
-    accent_hover: Rgb::new(228, 191, 105),
-    accent_pressed: Rgb::new(174, 132, 54),
-    on_accent: Rgb::new(22, 18, 11),
-    focus: Rgb::new(241, 203, 120),
-    success: Rgb::new(105, 210, 155),
-    warning: Rgb::new(240, 196, 106),
-    danger: Rgb::new(255, 140, 142),
-    info: Rgb::new(121, 196, 242),
+/// A bright sea-glass palette: quiet blue-green surfaces, dark ink text, and
+/// a restrained teal accent. Opaque colours also provide a complete fallback
+/// on systems where the Windows backdrop material is unavailable.
+pub const SEA_GLASS_PALETTE: Palette = Palette {
+    canvas: Rgb::new(239, 246, 246),
+    header: Rgb::new(249, 252, 252),
+    card: Rgb::new(247, 251, 251),
+    card_raised: Rgb::new(255, 255, 255),
+    input: Rgb::new(255, 255, 255),
+    hover: Rgb::new(226, 240, 239),
+    pressed: Rgb::new(211, 231, 229),
+    divider: Rgb::new(216, 229, 228),
+    shadow: Rgb::new(201, 216, 215),
+    border: Rgb::new(188, 209, 207),
+    border_emphasis: Rgb::new(132, 165, 162),
+    text_primary: Rgb::new(23, 48, 47),
+    text_secondary: Rgb::new(53, 84, 82),
+    text_muted: Rgb::new(91, 119, 116),
+    text_disabled: Rgb::new(128, 145, 143),
+    accent: Rgb::new(11, 117, 111),
+    accent_hover: Rgb::new(8, 101, 95),
+    accent_pressed: Rgb::new(7, 83, 78),
+    on_accent: Rgb::new(255, 255, 255),
+    focus: Rgb::new(0, 105, 100),
+    success: Rgb::new(20, 119, 80),
+    warning: Rgb::new(145, 94, 12),
+    danger: Rgb::new(169, 58, 73),
+    info: Rgb::new(36, 105, 148),
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,7 +108,7 @@ impl Palette {
 
     pub const fn control_colors(self, role: ControlRole, state: ControlState) -> ControlColors {
         let disabled = ControlColors {
-            background: self.pressed,
+            background: Rgb::new(234, 240, 239),
             border: self.divider,
             foreground: self.text_disabled,
             focus_ring: None,
@@ -140,12 +143,12 @@ impl Palette {
             ),
             ControlRole::Destructive => (
                 match state {
-                    ControlState::Hovered => Rgb::new(119, 52, 58),
-                    ControlState::Pressed => Rgb::new(76, 35, 40),
-                    _ => Rgb::new(96, 43, 48),
+                    ControlState::Hovered => Rgb::new(145, 45, 59),
+                    ControlState::Pressed => Rgb::new(124, 37, 50),
+                    _ => Rgb::new(169, 58, 73),
                 },
                 self.danger,
-                self.text_primary,
+                Rgb::new(255, 255, 255),
             ),
             ControlRole::Input => (
                 match state {
@@ -337,13 +340,13 @@ mod tests {
     #[test]
     fn core_text_hierarchy_meets_normal_text_contrast() {
         for foreground in [
-            DARK_PALETTE.text_primary,
-            DARK_PALETTE.text_secondary,
-            DARK_PALETTE.text_muted,
+            SEA_GLASS_PALETTE.text_primary,
+            SEA_GLASS_PALETTE.text_secondary,
+            SEA_GLASS_PALETTE.text_muted,
         ] {
             assert!(meets_contrast(
                 foreground,
-                DARK_PALETTE.card,
+                SEA_GLASS_PALETTE.card,
                 ContrastTarget::NormalText
             ));
         }
@@ -357,7 +360,7 @@ mod tests {
             ControlState::Pressed,
             ControlState::Focused,
         ] {
-            let colors = DARK_PALETTE.control_colors(ControlRole::Primary, state);
+            let colors = SEA_GLASS_PALETTE.control_colors(ControlRole::Primary, state);
             assert!(meets_contrast(
                 colors.foreground,
                 colors.background,
@@ -371,8 +374,8 @@ mod tests {
             StatusTone::Info,
         ] {
             assert!(meets_contrast(
-                DARK_PALETTE.status_color(tone),
-                DARK_PALETTE.card,
+                SEA_GLASS_PALETTE.status_color(tone),
+                SEA_GLASS_PALETTE.card,
                 ContrastTarget::NormalText
             ));
         }
@@ -387,11 +390,11 @@ mod tests {
             ControlRole::Input,
             ControlRole::Quiet,
         ] {
-            let colors = DARK_PALETTE.control_colors(role, ControlState::Focused);
-            assert_eq!(colors.focus_ring, Some(DARK_PALETTE.focus));
+            let colors = SEA_GLASS_PALETTE.control_colors(role, ControlState::Focused);
+            assert_eq!(colors.focus_ring, Some(SEA_GLASS_PALETTE.focus));
             assert!(meets_contrast(
-                DARK_PALETTE.focus,
-                DARK_PALETTE.canvas,
+                SEA_GLASS_PALETTE.focus,
+                SEA_GLASS_PALETTE.canvas,
                 ContrastTarget::UiComponent
             ));
         }
