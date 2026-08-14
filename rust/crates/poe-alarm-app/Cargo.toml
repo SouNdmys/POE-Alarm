@@ -1,16 +1,30 @@
 [package]
 name = "poe-alarm-app"
 description = "POE Alarm GPUI frontend (Ledger design)"
+default-run = "poe-alarm-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "poe-alarm-gpui-spike"
+name = "poe-alarm-ui-preview"
+path = "src/preview.rs"
+
+[[bin]]
+name = "poe-alarm-app"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
 gpui = "0.2"
 gpui-component = "0.5"
+poe-alarm-core = { path = "../poe-alarm-core" }
+poe-alarm-settings = { path = "../poe-alarm-settings" }
+
+[target.'cfg(windows)'.dependencies]
+poe-alarm-runtime = { path = "../poe-alarm-runtime" }
+windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+poe-alarm-alert-win = { path = "../poe-alarm-alert-win" }
+poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
+poe-alarm-app-win = { path = "../poe-alarm-app-win" }

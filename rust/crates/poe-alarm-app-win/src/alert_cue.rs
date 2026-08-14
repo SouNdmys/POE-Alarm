@@ -9,7 +9,7 @@ const DURATION_SECONDS: f64 = 2.15;
 
 /// Generates the same original, self-contained cue shipped by the .NET 1.0 release.
 /// No game audio or network asset is used.
-pub(crate) fn built_in_alert_wave() -> Result<ValidatedWave, WaveValidationError> {
+pub fn built_in_alert_wave() -> Result<ValidatedWave, WaveValidationError> {
     ValidatedWave::from_bytes("built-in-alert.wav", built_in_alert_wave_bytes())
 }
 
