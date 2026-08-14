@@ -337,7 +337,6 @@ enum SafetyCall {
 #[derive(Default)]
 struct FakeProtection {
     calls: Mutex<Vec<SafetyCall>>,
-    fail_prepare: AtomicBool,
     fail_latch: AtomicBool,
     events: Mutex<VecDeque<ProtectionEvent>>,
     active_generation: Mutex<Option<RuntimeGeneration>>,
@@ -362,11 +361,7 @@ impl ProtectionService for FakeProtection {
             .lock()
             .unwrap()
             .push(SafetyCall::Prepare(generation));
-        if self.fail_prepare.load(Ordering::Acquire) {
-            Err(ProtectionError("injected prepare failure".to_owned()))
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     fn arm_pending(&self, generation: RuntimeGeneration) -> Result<(), ProtectionError> {
@@ -448,7 +443,7 @@ fn quick_settings() -> AppSettings {
     settings
 }
 
-fn protected_quick_settings() -> AppSettings {
+fn poe2_quick_settings() -> AppSettings {
     let mut settings = quick_settings();
     settings.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
     settings.profiles.poe2 = settings.profiles.poe1.clone();
@@ -497,7 +492,7 @@ fn at_least_two_settings() -> AppSettings {
     settings
 }
 
-fn protected_structured_settings() -> AppSettings {
+fn poe2_structured_settings() -> AppSettings {
     let mut settings = structured_settings();
     settings.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
     settings.profiles.poe2 = settings.profiles.poe1.clone();
@@ -637,37 +632,33 @@ fn unchanged_fingerprint_skips_ocr() {
 }
 
 #[test]
-fn changed_frame_match_latches_alert_before_guard_release() {
+fn fast_match_latches_alert_without_a_pending_mouse_guard() {
     let factory = FakeFactory::new(
         vec![frame(1, 64, 64)],
         vec![result(&["+3.73% to Critical Hit Chance"])],
     );
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&factory, &protection);
-    handle.start(protected_quick_settings()).unwrap();
+    handle.start(poe2_quick_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(event, RuntimeEvent::MatchFound { .. })
     });
     let calls = protection.calls.lock().unwrap().clone();
-    let prepare = calls
-        .iter()
-        .position(|call| matches!(call, SafetyCall::Prepare(_)))
-        .unwrap();
-    let arm = calls
-        .iter()
-        .position(|call| matches!(call, SafetyCall::Arm(_)))
-        .unwrap();
     let latch = calls
         .iter()
         .position(|call| matches!(call, SafetyCall::Latch(_)))
         .unwrap();
-    let release = calls
+    let begin = calls
         .iter()
-        .rposition(|call| matches!(call, SafetyCall::Release(_)))
+        .position(|call| matches!(call, SafetyCall::Begin(_)))
         .unwrap();
+    assert!(begin < latch, "calls: {calls:?}");
     assert!(
-        prepare < arm && arm < latch && latch < release,
-        "calls: {calls:?}"
+        !calls.iter().any(|call| matches!(
+            call,
+            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
+        )),
+        "fast mode must not touch the pending mouse guard: {calls:?}"
     );
     shutdown(&handle);
 }
@@ -684,7 +675,7 @@ fn stop_cancels_blocked_live_ocr_without_late_match() {
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&factory, &protection);
-    handle.start(protected_quick_settings()).unwrap();
+    handle.start(poe2_quick_settings()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     while factory.state.live_calls.load(Ordering::Acquire) == 0 {
         assert!(Instant::now() < deadline);
@@ -703,15 +694,17 @@ fn stop_cancels_blocked_live_ocr_without_late_match() {
         thread::sleep(Duration::from_millis(2));
     }
     let calls = protection.calls.lock().unwrap().clone();
-    let arm = calls
-        .iter()
-        .rposition(|call| matches!(call, SafetyCall::Arm(_)))
-        .expect("changed frame arms the pending hook");
     let terminal_stop = calls
         .iter()
         .rposition(|call| matches!(call, SafetyCall::StopPending(_)))
-        .expect("runtime stop terminally removes the pending hook");
-    assert!(arm < terminal_stop, "calls: {calls:?}");
+        .expect("runtime stop still closes the alert ownership session");
+    assert!(
+        !calls[..terminal_stop].iter().any(|call| matches!(
+            call,
+            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
+        )),
+        "stopping fast mode must not reveal a hidden pending guard: {calls:?}"
+    );
     thread::sleep(Duration::from_millis(30));
     while let Some(event) = handle.try_next_event() {
         assert!(!matches!(event, RuntimeEvent::MatchFound { .. }));
@@ -1007,7 +1000,7 @@ fn out_of_bounds_screenshot_crop_falls_back_to_full_image() {
 }
 
 #[test]
-fn alert_failure_releases_guard_and_emits_explicit_fault() {
+fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
     let factory = FakeFactory::new(
         vec![frame(1, 64, 64)],
         vec![result(&["+3.73% to Critical Hit Chance"])],
@@ -1015,7 +1008,7 @@ fn alert_failure_releases_guard_and_emits_explicit_fault() {
     let protection = Arc::new(FakeProtection::default());
     protection.fail_latch.store(true, Ordering::Release);
     let handle = runtime(&factory, &protection);
-    handle.start(protected_quick_settings()).unwrap();
+    handle.start(poe2_quick_settings()).unwrap();
     let event = wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
             event,
@@ -1027,11 +1020,10 @@ fn alert_failure_releases_guard_and_emits_explicit_fault() {
     });
     assert!(matches!(event, RuntimeEvent::Fault { .. }));
     let calls = protection.calls.lock().unwrap().clone();
-    assert!(
-        calls
-            .iter()
-            .any(|call| matches!(call, SafetyCall::Release(_)))
-    );
+    assert!(!calls.iter().any(|call| matches!(
+        call,
+        SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
+    )));
     shutdown(&handle);
 }
 
@@ -1081,45 +1073,37 @@ fn sound_failure_is_non_fatal_while_red_alert_remains_latched() {
 }
 
 #[test]
-fn input_guard_prepare_failure_prevents_monitor_start() {
+fn poe2_fast_monitoring_never_prepares_the_dormant_guard() {
     let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not it"])]);
     let protection = Arc::new(FakeProtection::default());
-    protection.fail_prepare.store(true, Ordering::Release);
     let handle = runtime(&factory, &protection);
-    handle.start(protected_quick_settings()).unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+    handle.start(poe2_quick_settings()).unwrap();
+    wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
             event,
-            RuntimeEvent::Fault {
-                operation: RuntimeOperation::Start,
+            RuntimeEvent::StateChanged {
+                state: RuntimeState::Monitoring,
                 ..
             }
         )
     });
-    let RuntimeEvent::Fault { detail, .. } = event else {
-        unreachable!()
-    };
-    assert!(detail.contains("prepare input protection"));
-    assert_eq!(factory.state.live_calls.load(Ordering::Acquire), 0);
     assert!(
-        protection
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|call| matches!(call, SafetyCall::StopPending(_))),
-        "a failed prepare must still terminally unhook"
+        !protection.calls.lock().unwrap().iter().any(|call| matches!(
+            call,
+            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
+        )),
+        "POE2 fast monitoring must not prepare the dormant pending guard"
     );
     shutdown(&handle);
 }
 
 #[test]
-fn monitor_start_failure_after_prepare_terminally_unhooks() {
+fn monitor_start_failure_does_not_prepare_the_dormant_guard() {
     let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not it"])]);
     factory.state.structured_support.store(0, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&factory, &protection);
-    handle.start(protected_structured_settings()).unwrap();
+    handle.start(poe2_structured_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
             event,
@@ -1130,15 +1114,17 @@ fn monitor_start_failure_after_prepare_terminally_unhooks() {
         )
     });
     let calls = protection.calls.lock().unwrap().clone();
-    let prepare = calls
-        .iter()
-        .position(|call| matches!(call, SafetyCall::Prepare(_)))
-        .unwrap();
     let stop = calls
         .iter()
         .position(|call| matches!(call, SafetyCall::StopPending(_)))
         .unwrap();
-    assert!(prepare < stop, "calls: {calls:?}");
+    assert!(
+        !calls[..stop].iter().any(|call| matches!(
+            call,
+            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
+        )),
+        "calls: {calls:?}"
+    );
     assert_eq!(factory.state.live_calls.load(Ordering::Acquire), 0);
     shutdown(&handle);
 }
@@ -1239,7 +1225,7 @@ fn shutdown_is_bounded_when_native_ocr_ignores_cancellation_in_flight() {
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&factory, &protection);
-    handle.start(protected_quick_settings()).unwrap();
+    handle.start(poe2_quick_settings()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     while factory.state.live_calls.load(Ordering::Acquire) == 0 {
         assert!(Instant::now() < deadline);
