@@ -4174,7 +4174,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "gpui",
@@ -4190,7 +4190,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-app-win"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "embed-resource",
  "poe-alarm-alert-win",
@@ -4205,7 +4205,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-monitoring"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "poe-alarm-core",
  "poe-alarm-vision",
@@ -4232,7 +4232,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-ocr-win"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "poe-alarm-core",
  "poe-alarm-vision",
@@ -4261,7 +4261,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "poe-alarm-alert-win",
  "poe-alarm-core",
@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-settings"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "poe-alarm-core",
  "serde",
@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-vision"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "windows 0.61.3",
 ]

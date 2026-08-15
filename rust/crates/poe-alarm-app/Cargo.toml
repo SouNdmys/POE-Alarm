@@ -3,6 +3,7 @@ name = "poe-alarm-app"
 description = "POE Alarm GPUI frontend (Ledger design)"
 default-run = "poe-alarm-app"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

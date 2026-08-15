@@ -181,6 +181,8 @@ mod tests {
     fn fast_mode_never_suppresses_crafting_clicks_before_a_match() {
         let mut settings = valid_settings();
         settings.profiles.poe1.ocr_language = "zh-TW".to_owned();
+        // 规则按语言隔离:繁中档需要自己的目标词缀才能编译 Quick 计划。
+        settings.profiles.poe1.selected_rules_mut().target_affix = "+#% 暴擊率".to_owned();
         assert!(!compile_settings(&settings).unwrap().input_guard_enabled);
 
         settings.profiles.poe1.ocr_language = "en".to_owned();
