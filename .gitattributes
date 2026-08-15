@@ -1,6 +1,6 @@
 # OCR production assets must be byte-for-byte reproducible; the packaged self-test verifies
 # their fixed SHA-256 hashes, so Git must never rewrite dictionary line endings.
-src/PoeAlarm.App/Assets/Ocr/PP-OCRv5_mobile_rec.onnx binary
-src/PoeAlarm.App/Assets/Ocr/ppocrv5_dict.txt binary
+rust/assets/ocr/PP-OCRv5_mobile_rec.onnx binary
+rust/assets/ocr/ppocrv5_dict.txt binary
 tests/screenshots/*.png binary
 tests/screenshots/*.jpg binary
