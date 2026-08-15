@@ -1,6 +1,9 @@
 //! POE Alarm GPUI 前端(Ledger v1)。
 //!
 //! Phase 5:单一 1180×620 规则台窗口;轻量查看由可拖动 HUD 浮窗承担。
+// GUI 子系统:发布 exe 不再附带控制台窗口(stderr 诊断随之丢弃,
+// 用户可见错误一律走界面通知,不依赖控制台)。
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod backend;
 #[cfg(windows)]
