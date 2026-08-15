@@ -36,8 +36,8 @@ impl PaddleAssetPaths {
 
     /// Resolves the checked-in official assets when running from this repository.
     pub fn source_tree() -> Self {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let asset_root = root.join("src/PoeAlarm.App/Assets/Ocr");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let asset_root = root.join("assets/ocr");
         Self::new(
             asset_root.join(MODEL_FILE_NAME),
             asset_root.join(DICTIONARY_FILE_NAME),

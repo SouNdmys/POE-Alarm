@@ -3107,7 +3107,7 @@ impl WindowState {
                     s(168),
                     s(1020),
                 );
-                let show_required_count = unsafe { combo_selection(self.controls.group_mode) }
+                let show_required_count = combo_selection(self.controls.group_mode)
                     .is_some_and(|index| index == 2);
                 if show_option_layer {
                     draw_label(

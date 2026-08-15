@@ -34,6 +34,13 @@ impl NativeHudWindow {
         unreachable!("a native HUD cannot be created outside Windows")
     }
 
+    pub(crate) fn set_content(
+        &mut self,
+        _content: crate::hud::HudContent,
+    ) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
     pub(crate) fn apply_policy(&mut self, _policy: HudWindowPolicy) -> Result<(), PlatformError> {
         Err(PlatformError::unsupported("status HUD window"))
     }
@@ -59,6 +66,10 @@ impl NativeHudWindow {
 
     pub(crate) fn hide(&mut self) -> Result<(), PlatformError> {
         Err(PlatformError::unsupported("status HUD window"))
+    }
+
+    pub(crate) fn take_user_move(&mut self) -> Option<(i32, i32)> {
+        None
     }
 }
 

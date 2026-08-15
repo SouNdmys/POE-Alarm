@@ -12,9 +12,9 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use poe_alarm_settings::{AppSettings, RuleEditorMode, ScreenRegion, SettingsStore};
+use poe_alarm_settings::{AppSettings, ScreenRegion, SettingsStore};
 
-/// 平台事件(全局热键 / 框选结果),由后台线程投递、UI 轮询消费。
+/// 平台事件(全局热键 / 框选结果 / 浮窗拖动),由后台线程投递、UI 轮询消费。
 #[derive(Clone, Copy, Debug)]
 pub enum PlatformEvent {
     HotKeyStart,
@@ -23,6 +23,8 @@ pub enum PlatformEvent {
     RegionSelected(ScreenRegion),
     RegionSelectionCancelled,
     RegionSelectionFailed,
+    /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
+    HudMoved(f64, f64),
 }
 
 /// 运行时状态镜像(非 Windows 平台没有 runtime crate,因此桥接层自带一份)。
@@ -73,6 +75,11 @@ pub enum BridgeEvent {
         lines: Vec<String>,
         matched_group: Option<String>,
     },
+    ScreenshotReport {
+        lines: Vec<String>,
+        matched: bool,
+        detail: String,
+    },
     AlertPresented,
     AlertAcknowledged,
     Fault(String),
@@ -86,6 +93,8 @@ pub struct Backend {
     platform_rx: Receiver<PlatformEvent>,
     platform_tx: Sender<PlatformEvent>,
     selecting_region: bool,
+    #[cfg(windows)]
+    hud: Option<crate::hud_service::HudService>,
     #[cfg(windows)]
     runtime: Option<poe_alarm_runtime::RuntimeHandle>,
     #[cfg(windows)]
@@ -106,6 +115,13 @@ impl Backend {
             platform_tx.clone(),
             settings.start_monitoring_hot_key.clone(),
         );
+        #[cfg(windows)]
+        let hud = Some(crate::hud_service::HudService::start(
+            settings.allow_overlay_capture,
+            settings.keep_hud_visible,
+            settings.hud_placement.clone(),
+            platform_tx.clone(),
+        ));
         Ok(Self {
             store,
             settings,
@@ -113,6 +129,8 @@ impl Backend {
             platform_rx,
             platform_tx,
             selecting_region: false,
+            #[cfg(windows)]
+            hud,
             #[cfg(windows)]
             runtime: None,
             #[cfg(windows)]
@@ -182,6 +200,15 @@ impl Backend {
         Ok(())
     }
 
+    pub fn set_game(&mut self, profile: poe_alarm_settings::GameProfile) {
+        self.settings.selected_game_profile = profile;
+    }
+
+    pub fn set_ocr_language(&mut self, language: &str) {
+        self.settings.selected_profile_mut().ocr_language =
+            poe_alarm_settings::normalize_ocr_language(language).to_owned();
+    }
+
     pub fn set_region(&mut self, region: ScreenRegion) {
         self.settings.selected_profile_mut().capture_region = Some(region);
     }
@@ -207,16 +234,59 @@ impl Backend {
         }
     }
 
+    /// 更新状态浮窗内容(非 Windows 为空操作)。
+    #[cfg(windows)]
+    pub fn hud_update(&self, monitoring: bool, status_text: &str, elapsed: &str, target: &str) {
+        if let Some(hud) = &self.hud {
+            hud.update(crate::hud_service::HudContent {
+                monitoring,
+                status_text: status_text.to_owned(),
+                elapsed: elapsed.to_owned(),
+                target: target.to_owned(),
+            });
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn hud_update(&self, _monitoring: bool, _status_text: &str, _elapsed: &str, _target: &str) {
+    }
+
+    /// 状态浮窗显隐:跟随"持续显示"设置,命中弹窗期间让位隐藏。
+    #[cfg(windows)]
+    pub fn hud_set_visible(&self, visible: bool) {
+        if let Some(hud) = &self.hud {
+            hud.set_visible(visible);
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn hud_set_visible(&self, _visible: bool) {}
+
     pub fn hotkey_label(&self) -> String {
         self.settings.start_monitoring_hot_key.clone()
     }
 
-    /// 把 UI 编辑写回设置对象(单条模式;结构化编辑器 Phase 4b 接入)。
-    pub fn apply_single_target(&mut self, template: &str) {
-        let rules = self.settings.selected_rules_mut();
-        rules.rule_editor_mode = RuleEditorMode::Quick;
-        rules.target_affix = template.trim().to_owned();
+    /// 状态浮窗交互:未监控时可拖动(Placement),监控中点击穿透(Passive)。
+    #[cfg(windows)]
+    pub fn hud_set_interactive(&self, interactive: bool) {
+        if let Some(hud) = &self.hud {
+            hud.set_interactive(interactive);
+        }
     }
+
+    #[cfg(not(windows))]
+    pub fn hud_set_interactive(&self, _interactive: bool) {}
+
+    /// 状态浮窗的录屏可见性(即时生效)。
+    #[cfg(windows)]
+    pub fn hud_set_capture(&self, allow: bool) {
+        if let Some(hud) = &self.hud {
+            hud.set_capture(allow);
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn hud_set_capture(&self, _allow: bool) {}
 
     pub fn save(&mut self) -> Result<(), String> {
         let normalized = self.settings.clone().normalize();
@@ -300,6 +370,28 @@ impl Backend {
         }
     }
 
+    /// 识别截图:用当前设置在 runtime 里回放存档截图。
+    #[cfg(windows)]
+    pub fn test_screenshot(&mut self, path: std::path::PathBuf) -> Result<(), String> {
+        self.ensure_runtime()?;
+        let settings = self.settings.clone().normalize();
+        let request = poe_alarm_runtime::ScreenshotRequest::new(
+            poe_alarm_runtime::RuntimeRequestId(1),
+            settings,
+            path,
+        );
+        self.runtime
+            .as_ref()
+            .expect("runtime just ensured")
+            .test_screenshot(request)
+            .map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(windows))]
+    pub fn test_screenshot(&mut self, _path: std::path::PathBuf) -> Result<(), String> {
+        Ok(())
+    }
+
     #[cfg(windows)]
     pub fn poll(&mut self) -> Vec<BridgeEvent> {
         use poe_alarm_runtime::RuntimeEvent as E;
@@ -335,9 +427,17 @@ impl Backend {
                 E::Fault {
                     operation, detail, ..
                 } => out.push(BridgeEvent::Fault(format!("{operation:?}: {detail}"))),
+                E::ScreenshotCompleted(report) => {
+                    let matched = report.evaluation.is_match;
+                    let detail = report.evaluation.detail.clone().unwrap_or_default();
+                    out.push(BridgeEvent::ScreenshotReport {
+                        lines: report.lines.clone(),
+                        matched,
+                        detail,
+                    });
+                }
                 E::Ready
                 | E::SettingsCompiled { .. }
-                | E::ScreenshotCompleted(_)
                 | E::ScreenshotCancelled { .. }
                 | E::ShutdownComplete { .. } => {}
             }
