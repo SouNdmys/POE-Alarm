@@ -27,29 +27,15 @@ impl RunPhase {
         }
     }
 
-    pub fn status_text(self) -> &'static str {
-        match self {
-            RunPhase::Idle => "可以开始",
-            RunPhase::Monitoring => "正在监控词缀",
-            RunPhase::Hit => "已命中,请确认",
-        }
-    }
-
-    pub fn primary_label(self) -> &'static str {
-        match self {
-            RunPhase::Idle => "开始监控",
-            RunPhase::Monitoring => "停止监控",
-            RunPhase::Hit => "解除鼠标锁定",
-        }
-    }
 }
 
-/// 中央编辑区 tab(词缀条件 / 识别区域 / 提醒与显示)。
+/// 中央编辑区 tab(词缀条件 / 识别区域 / 提醒与显示 / 使用说明)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EditorTab {
     Conditions,
     Region,
     Alerts,
+    Help,
 }
 
 /// 树节点指向的设置对象。

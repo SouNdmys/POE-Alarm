@@ -597,6 +597,35 @@ impl SettingsStore {
         preview_settings_path().map(Self::new)
     }
 
+    /// 正式版入口:`%LOCALAPPDATA%/PoeAlarm/settings.json`。
+    /// Rust 预览目录仍有设置时做一次性迁移(预览线是更活跃的配置,覆盖旧 .NET
+    /// 文件并把 .NET 设置留档为 `settings.json.dotnet-1.0.bak`);迁移完成后
+    /// 预览文件改名为 `settings.json.migrated`,保证不会重复迁移。
+    pub fn release_default() -> io::Result<Self> {
+        let local_app_data = local_app_data_path()?;
+        Self::release_default_from(local_app_data)
+    }
+
+    /// 与 [`Self::release_default`] 相同,但注入 `%LOCALAPPDATA%` 以便测试。
+    pub fn release_default_from(local_app_data: impl AsRef<Path>) -> io::Result<Self> {
+        let release = release_settings_path_from(&local_app_data);
+        let preview = preview_settings_path_from(&local_app_data);
+        if preview.is_file() {
+            if let Some(parent) = release.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let dotnet_backup = release.with_extension("json.dotnet-1.0.bak");
+            if release.is_file() && !dotnet_backup.exists() {
+                let _ = fs::copy(&release, &dotnet_backup);
+            }
+            fs::copy(&preview, &release)?;
+            let migrated = preview.with_extension("json.migrated");
+            let _ = fs::remove_file(&migrated);
+            fs::rename(&preview, &migrated).or_else(|_| fs::remove_file(&preview))?;
+        }
+        Ok(Self::new(release))
+    }
+
     pub fn path(&self) -> &Path {
         &self.settings_path
     }
@@ -1173,6 +1202,43 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn release_default_migrates_preview_settings_once_and_backs_up_dotnet_file() {
+        let directory = TestDirectory::new();
+        let local_app_data = &directory.0;
+        let preview = preview_settings_path_from(local_app_data);
+        let release = release_settings_path_from(local_app_data);
+        fs::create_dir_all(preview.parent().unwrap()).unwrap();
+        fs::create_dir_all(release.parent().unwrap()).unwrap();
+        fs::write(&preview, br#"{ "SchemaVersion": 4, "UiLanguage": "zh-CN" }"#).unwrap();
+        fs::write(&release, br#"{ "SchemaVersion": 3 }"#).unwrap();
+
+        let store = SettingsStore::release_default_from(local_app_data).unwrap();
+        assert_eq!(store.path(), release.as_path());
+        // 预览设置覆盖正式路径,旧 .NET 文件留档,预览文件改名防止重复迁移。
+        assert!(
+            fs::read_to_string(&release)
+                .unwrap()
+                .contains("\"SchemaVersion\": 4")
+        );
+        assert!(
+            fs::read_to_string(release.with_extension("json.dotnet-1.0.bak"))
+                .unwrap()
+                .contains("\"SchemaVersion\": 3")
+        );
+        assert!(!preview.exists());
+        assert!(preview.with_extension("json.migrated").is_file());
+
+        // 第二次启动:没有预览文件,不再迁移,正式文件保持不变。
+        fs::write(&release, br#"{ "SchemaVersion": 4, "UiLanguage": "en" }"#).unwrap();
+        let _ = SettingsStore::release_default_from(local_app_data).unwrap();
+        assert!(
+            fs::read_to_string(&release)
+                .unwrap()
+                .contains("\"UiLanguage\": \"en\"")
+        );
     }
 
     #[test]

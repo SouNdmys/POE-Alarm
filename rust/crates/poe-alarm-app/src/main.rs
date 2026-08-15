@@ -5,6 +5,7 @@
 mod backend;
 #[cfg(windows)]
 mod hud_service;
+mod i18n;
 mod shell;
 mod state;
 mod theme;

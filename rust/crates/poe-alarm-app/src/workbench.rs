@@ -48,7 +48,7 @@ impl AppShell {
                 .child("›")
         };
 
-        let primary_label = self.s.run.primary_label();
+        let primary_label = self.t().primary_label(self.s.run);
         let game_crumb = match self.backend.as_ref().map(|b| b.settings.selected_game_profile) {
             Some(poe_alarm_settings::GameProfile::Poe1) => "POE1",
             _ => "POE2",
@@ -106,11 +106,7 @@ impl AppShell {
                 expander: node.expandable.then_some(node.expanded),
                 label: node.label.as_ref(),
                 trailing: node.trailing.as_ref(),
-                trailing_color: if node.label.as_ref() == "流放之路二" {
-                    Some(ACCENT_TEXT)
-                } else {
-                    None
-                },
+                trailing_color: (node.depth == 0).then_some(ACCENT_TEXT),
             });
             list = list.child(
                 div()
@@ -140,7 +136,7 @@ impl AppShell {
                     .px(px(11.))
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(micro_title_sm("规则")),
+                    .child(micro_title_sm(self.t().rules_title)),
             )
             .child(list)
             .child(
@@ -167,7 +163,7 @@ impl AppShell {
                                 this.add_group(window, cx);
                             }))
                             .child(div().text_color(c(ACCENT)).child("+"))
-                            .child("方案"),
+                            .child(self.t().add_result),
                     )
                     .child(
                         div()
@@ -185,7 +181,7 @@ impl AppShell {
                                 this.add_condition(window, cx);
                             }))
                             .child(div().text_color(c(ACCENT)).child("+"))
-                            .child("词缀"),
+                            .child(self.t().add_condition),
                     ),
             )
     }
@@ -203,6 +199,7 @@ impl AppShell {
                 EditorTab::Conditions => self.wb_tab_conditions(cx),
                 EditorTab::Region => self.wb_tab_region(cx),
                 EditorTab::Alerts => self.wb_tab_alerts(cx),
+                EditorTab::Help => self.wb_tab_help(cx),
             })
     }
 
@@ -235,6 +232,7 @@ impl AppShell {
             t.child(label)
         };
 
+        let text = self.t();
         div()
             .h(px(H_TITLEBAR))
             .flex_none()
@@ -244,22 +242,29 @@ impl AppShell {
             .border_color(c(HAIRLINE))
             .child(tab(
                 "tab-cond",
-                "词缀条件",
+                text.tab_conditions,
                 EditorTab::Conditions,
                 self.s.editor_tab,
                 cx,
             ))
             .child(tab(
                 "tab-region",
-                "识别区域",
+                text.tab_region,
                 EditorTab::Region,
                 self.s.editor_tab,
                 cx,
             ))
             .child(tab(
                 "tab-alert",
-                "提醒与显示",
+                text.tab_alerts,
                 EditorTab::Alerts,
+                self.s.editor_tab,
+                cx,
+            ))
+            .child(tab(
+                "tab-help",
+                text.tab_help,
+                EditorTab::Help,
                 self.s.editor_tab,
                 cx,
             ))
@@ -276,34 +281,250 @@ impl AppShell {
                     .text_color(c(TEXT_META))
                     .child("settings.json")
                     .child(match &self.notice {
-                        Some((kind, text)) => div()
+                        Some((kind, notice)) => div()
                             .text_color(c(kind.text()))
                             .whitespace_nowrap()
-                            .child(text.clone()),
-                        None => div().text_color(c(TEXT_META)).child("未改动"),
+                            .child(notice.clone()),
+                        None => div().text_color(c(TEXT_META)).child(text.unchanged),
                     }),
             )
     }
 
-    /// 提醒与显示:浮窗显隐、录屏可见性、提示音、热键。改动即保存。
+    /// 使用说明:上手流程、热键、规则语义、繁中 OCR 安装建议与作者信息。
+    fn wb_tab_help(&mut self, cx: &mut Context<Self>) -> Div {
+        const OCR_INSTALL_COMMAND: &str =
+            r#"Add-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
+        const OCR_VERIFY_COMMAND: &str =
+            r#"Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
+        const OCR_DOC_URL: &str =
+            "https://learn.microsoft.com/zh-cn/windows-hardware/manufacture/desktop/add-language-packs-to-windows";
+        const REPO_URL: &str = "https://github.com/SouNdmys/POE-Alarm";
+        const CONTACT: &str = "soundmys1994@gmail.com";
+
+        let section = |title: &'static str| {
+            div()
+                .v_flex()
+                .gap(px(6.))
+                .child(micro_title_sm(title))
+                .child(div().h(px(1.)).bg(c(HAIRLINE_SOFT)))
+        };
+        let line = |text: &'static str| {
+            div()
+                .text_size(fs(FS_11_5))
+                .text_color(c(TEXT_SECONDARY))
+                .child(text)
+        };
+        let hotkey_row = |keys: &'static str, what: &'static str| {
+            div()
+                .h_flex()
+                .items_center()
+                .gap(px(10.))
+                .child(
+                    div()
+                        .w(px(104.))
+                        .flex_none()
+                        .font_family(FONT_MONO)
+                        .text_size(fs(FS_11_5))
+                        .text_color(c(TEXT_PRIMARY))
+                        .child(keys),
+                )
+                .child(
+                    div()
+                        .text_size(fs(FS_11_5))
+                        .text_color(c(TEXT_SECONDARY))
+                        .child(what),
+                )
+        };
+        let mono_block = |text: &'static str| {
+            div()
+                .px(px(10.))
+                .py(px(6.))
+                .bg(c(WELL))
+                .border_1()
+                .border_color(c(HAIRLINE))
+                .font_family(FONT_MONO)
+                .text_size(fs(FS_11_5))
+                .text_color(c(TEXT_PRIMARY))
+                .child(text)
+        };
+        let link = |id: &'static str, label: &'static str, url: &'static str, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .text_size(fs(FS_11_5))
+                .text_color(c(ACCENT_TEXT))
+                .hover(|s| s.bg(c(HOVER)))
+                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(url)))
+                .child(label)
+        };
+
+        let t = self.t();
+        let steps = {
+            let mut column = div().v_flex().gap(px(4.));
+            for step in t.help_steps {
+                column = column.child(line(step));
+            }
+            column
+        };
+        let rules = {
+            let mut column = div().v_flex().gap(px(4.));
+            for item in t.help_rules {
+                column = column.child(line(item));
+            }
+            column
+        };
+        let hud = {
+            let mut column = div().v_flex().gap(px(4.));
+            for item in t.help_hud {
+                column = column.child(line(item));
+            }
+            column
+        };
+        div().flex_1().min_h_0().child(
+            div()
+                .id("wb-help-scroll")
+                .size_full()
+                .overflow_y_scroll()
+                .child(
+                    div()
+                        .v_flex()
+                        .gap(px(14.))
+                        .p_4()
+                        .child(section(t.help_quick_start))
+                        .child(steps)
+                        .child(section(t.help_hotkeys))
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap(px(3.))
+                                .child(hotkey_row("Ctrl⇧F10", t.help_hotkey_start))
+                                .child(hotkey_row("Ctrl⇧F11", t.help_hotkey_select))
+                                .child(hotkey_row("Ctrl⇧F12", t.help_hotkey_stop)),
+                        )
+                        .child(section(t.help_rules_title))
+                        .child(rules)
+                        .child(section(t.help_hud_title))
+                        .child(hud)
+                        .child(section(t.help_ocr_title))
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap(px(6.))
+                                .child(line(t.help_ocr_intro))
+                                .child(
+                                    div()
+                                        .h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(mono_block(OCR_INSTALL_COMMAND))
+                                        .child(
+                                            button(
+                                                "help-copy-install",
+                                                LedgerButton::Quiet,
+                                                t.help_copy,
+                                                cx,
+                                            )
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.write_to_clipboard(
+                                                    gpui::ClipboardItem::new_string(
+                                                        OCR_INSTALL_COMMAND.to_owned(),
+                                                    ),
+                                                );
+                                            })),
+                                        ),
+                                )
+                                .child(line(t.help_ocr_verify))
+                                .child(
+                                    div()
+                                        .h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(mono_block(OCR_VERIFY_COMMAND))
+                                        .child(
+                                            button(
+                                                "help-copy-verify",
+                                                LedgerButton::Quiet,
+                                                t.help_copy,
+                                                cx,
+                                            )
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.write_to_clipboard(
+                                                    gpui::ClipboardItem::new_string(
+                                                        OCR_VERIFY_COMMAND.to_owned(),
+                                                    ),
+                                                );
+                                            })),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(line(t.help_ocr_settings_path))
+                                        .child(link("help-ms-doc", t.help_ocr_doc_link, OCR_DOC_URL, cx)),
+                                ),
+                        )
+                        .child(section(t.help_about_title))
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap(px(4.))
+                                .child(
+                                    div()
+                                        .text_size(fs(FS_11_5))
+                                        .text_color(c(TEXT_SECONDARY))
+                                        .child(SharedString::from(
+                                            t.help_about_fmt
+                                                .replacen("{}", env!("CARGO_PKG_VERSION"), 1),
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(line(t.help_contact))
+                                        .child(link(
+                                            "help-mail",
+                                            CONTACT,
+                                            "mailto:soundmys1994@gmail.com",
+                                            cx,
+                                        ))
+                                        .child(line(t.help_homepage))
+                                        .child(link(
+                                            "help-repo",
+                                            "github.com/SouNdmys/POE-Alarm",
+                                            REPO_URL,
+                                            cx,
+                                        )),
+                                )
+                                .child(line(t.help_notice)),
+                        ),
+                ),
+        )
+    }
+
+    /// 提醒与显示:浮窗显隐、录屏可见性、提示音、界面语言、热键。改动即保存。
     fn wb_tab_alerts(&mut self, cx: &mut Context<Self>) -> Div {
-        let (keep_hud, allow_capture, sound, hotkey) = match &self.backend {
+        let t = self.t();
+        let (keep_hud, allow_capture, sound, hotkey, english_ui) = match &self.backend {
             Some(b) => (
                 b.settings.keep_hud_visible,
                 b.settings.allow_overlay_capture,
-                b.sound_label(),
+                b.sound_label().unwrap_or_else(|| t.sound_builtin.to_owned()),
                 b.hotkey_label(),
+                b.settings.ui_language.starts_with("en"),
             ),
-            None => (true, true, "—".to_owned(), "—".to_owned()),
+            None => (true, true, "—".to_owned(), "—".to_owned(), false),
         };
-        let label = |text: &'static str| {
+        let label = |caption: &'static str| {
             div()
                 .w(px(LABEL_COL))
                 .flex_none()
                 .text_size(fs(FS_11_5))
                 .text_color(c(TEXT_META))
                 .whitespace_nowrap()
-                .child(text)
+                .child(caption)
         };
         // 两态分段开关(与比较方式分段同一形制)。
         let toggle = |id_on: &'static str,
@@ -369,37 +590,50 @@ impl AppShell {
             .gap(px(12.))
             .p_4()
             .child(row(
-                label("状态浮窗"),
+                label(t.hud_row),
                 toggle(
                     "al-hud-on",
                     "al-hud-off",
-                    "保持显示",
-                    "隐藏",
+                    t.hud_keep,
+                    t.hud_hide,
                     keep_hud,
                     cx,
-                    |t, v, cx| t.set_keep_hud_visible(v, cx),
+                    |this, v, cx| this.set_keep_hud_visible(v, cx),
                 ),
-                "未监控时可拖动;命中弹窗期间自动让位",
+                t.hud_row_hint,
             ))
             .child(row(
-                label("录屏可见性"),
+                label(t.capture_row),
                 toggle(
                     "al-cap-on",
                     "al-cap-off",
-                    "录屏可见",
-                    "对录屏隐藏",
+                    t.capture_visible,
+                    t.capture_hidden,
                     allow_capture,
                     cx,
-                    |t, v, cx| t.set_allow_overlay_capture(v, cx),
+                    |this, v, cx| this.set_allow_overlay_capture(v, cx),
                 ),
-                "浮窗即时生效;红色拦截窗自下次启动生效",
+                t.capture_row_hint,
+            ))
+            .child(row(
+                label(t.ui_language_row),
+                toggle(
+                    "al-ui-zh",
+                    "al-ui-en",
+                    t.ui_language_zh,
+                    t.ui_language_en,
+                    !english_ui,
+                    cx,
+                    |this, v, cx| this.set_ui_language(if v { "zh-CN" } else { "en" }, cx),
+                ),
+                t.ui_language_hint,
             ))
             .child(
                 div()
                     .h_flex()
                     .items_center()
                     .gap(px(10.))
-                    .child(label("提示音"))
+                    .child(label(t.sound_row))
                     .child(
                         div()
                             .font_family(FONT_MONO)
@@ -409,33 +643,34 @@ impl AppShell {
                             .child(SharedString::from(sound)),
                     )
                     .child(
-                        button("al-sound-pick", LedgerButton::Secondary, "选择 WAV", cx)
+                        button("al-sound-pick", LedgerButton::Secondary, t.sound_pick, cx)
                             .on_click(cx.listener(|this, _, _, cx| this.choose_alert_sound(cx))),
                     )
                     .child(
-                        button("al-sound-reset", LedgerButton::Quiet, "恢复内置", cx)
+                        button("al-sound-reset", LedgerButton::Quiet, t.sound_reset, cx)
                             .on_click(cx.listener(|this, _, _, cx| this.clear_alert_sound(cx))),
                     ),
             )
             .child(row(
-                label("启动热键"),
+                label(t.hotkey_row),
                 div()
                     .font_family(FONT_MONO)
                     .text_size(fs(FS_12))
                     .text_color(c(TEXT_PRIMARY))
                     .whitespace_nowrap()
                     .child(SharedString::from(hotkey)),
-                "F11 框选 · F12 停止;热键组合在设置文件中修改",
+                t.hotkey_row_hint,
             ))
-            .child(warning_band(
-                "说明",
-                "本页改动即时保存。自定义提示音需为 WAV;文件无效时启动会自动回退内置音效并提示。",
-            ))
+            .child(warning_band(t.alerts_note_tag, t.alerts_note))
     }
 
     fn wb_tab_region(&mut self, cx: &mut Context<Self>) -> Div {
+        let t = self.t();
         let (region, ocr) = match &self.backend {
-            Some(b) => (b.region_label(), b.ocr_language_label()),
+            Some(b) => (
+                b.region_label().unwrap_or_else(|| t.region_unset.to_owned()),
+                b.ocr_language_label(),
+            ),
             None => ("—".to_owned(), "—".to_owned()),
         };
         div()
@@ -455,7 +690,7 @@ impl AppShell {
                             .flex_none()
                             .text_size(fs(FS_11_5))
                             .text_color(c(TEXT_META))
-                            .child("当前区域"),
+                            .child(t.current_region),
                     )
                     .child(
                         div()
@@ -465,10 +700,13 @@ impl AppShell {
                             .child(SharedString::from(region)),
                     )
                     .child(
-                        button("wb-select-region", LedgerButton::Secondary, "框选区域", cx)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.begin_region_selection(cx)),
-                            ),
+                        button(
+                            "wb-select-region",
+                            LedgerButton::Secondary,
+                            t.select_region_button,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.begin_region_selection(cx))),
                     )
                     .child(hotkey_chips(&["Ctrl", "⇧", "F11"])),
             )
@@ -483,7 +721,7 @@ impl AppShell {
                             .flex_none()
                             .text_size(fs(FS_11_5))
                             .text_color(c(TEXT_META))
-                            .child("OCR 语言"),
+                            .child(t.ocr_language_row),
                     )
                     .child(
                         div()
@@ -493,13 +731,11 @@ impl AppShell {
                             .child(SharedString::from(ocr)),
                     ),
             )
-            .child(warning_band(
-                "提示",
-                "框选时只圈装备提示框中的词缀区域;区域越小,识别越快。框选完成后自动保存。",
-            ))
+            .child(warning_band(t.hint_tag, t.region_hint))
     }
 
     fn wb_tab_conditions(&mut self, cx: &mut Context<Self>) -> Div {
+        let t = self.t();
         let error = self.range_error(cx);
 
         // 条件名称 + 什么时候提醒
@@ -514,7 +750,7 @@ impl AppShell {
                     .text_size(fs(FS_11_5))
                     .text_color(c(TEXT_META))
                     .whitespace_nowrap()
-                    .child("条件名称"),
+                    .child(t.condition_name),
             )
             .child(
                 div()
@@ -528,7 +764,7 @@ impl AppShell {
                     .text_size(fs(FS_11_5))
                     .text_color(c(TEXT_META))
                     .whitespace_nowrap()
-                    .child("什么时候提醒"),
+                    .child(t.group_rule),
             )
             .child({
                 use poe_alarm_core::ResultGroupMode as G;
@@ -544,10 +780,13 @@ impl AppShell {
                     .flex_none()
                     .border_1()
                     .border_color(c(HAIRLINE));
-                for (i, (label, mode)) in
-                    [("任意", G::Any), ("全部", G::All), ("指定条数", G::AtLeast)]
-                        .into_iter()
-                        .enumerate()
+                for (i, (label, mode)) in [
+                    (t.group_any, G::Any),
+                    (t.group_all, G::All),
+                    (t.group_at_least, G::AtLeast),
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     let mut cell = div()
                         .id(("wb-gmode", i))
@@ -610,7 +849,7 @@ impl AppShell {
                     .whitespace_nowrap();
                 if let Some((poe_alarm_core::ResultGroupMode::AtLeast, required, _)) = summary {
                     wrap = wrap
-                        .child("命中")
+                        .child(t.hit_of)
                         .child(stepper("wb-req-dec", "−", -1, cx))
                         .child(
                             div()
@@ -619,7 +858,9 @@ impl AppShell {
                         )
                         .child(stepper("wb-req-inc", "+", 1, cx));
                 }
-                wrap.child(SharedString::from(format!("/ 共 {total} 条")))
+                wrap.child(SharedString::from(
+                    t.total_conditions_fmt.replacen("{}", &total.to_string(), 1),
+                ))
             });
 
         // 完整词缀模板(左 2px accent 竖条 = 「这是被匹配的原文」)
@@ -634,7 +875,7 @@ impl AppShell {
                     .pt(px(6.))
                     .text_size(fs(FS_11_5))
                     .text_color(c(TEXT_META))
-                    .child("完整词缀模板"),
+                    .child(t.condition_template),
             )
             .child(
                 div()
@@ -655,9 +896,9 @@ impl AppShell {
         // 数值条件表:72 / 比较方式(1fr 分段) / 110 / 110。
         // 行数由模板占位数决定(自动生成,默认不限制),无手动增删。
         use poe_alarm_core::NumericConstraintMode as M;
-        const MODES: [(&str, M); 5] = [
-            ("不限制", M::Ignore),
-            ("范围", M::RangeInclusive),
+        let modes: [(&str, M); 5] = [
+            (t.numeric_ignore, M::Ignore),
+            (t.numeric_range, M::RangeInclusive),
             ("≥", M::AtLeast),
             ("≤", M::AtMost),
             ("=", M::Exactly),
@@ -678,16 +919,16 @@ impl AppShell {
                         .flex_none()
                         .px(px(10.))
                         .py(px(6.))
-                        .child("数值"),
+                        .child(t.numeric_column),
                 )
-                .child(div().flex_1().px(px(10.)).py(px(6.)).child("比较方式"))
+                .child(div().flex_1().px(px(10.)).py(px(6.)).child(t.comparison_column))
                 .child(
                     div()
                         .w(px(110.))
                         .flex_none()
                         .px(px(10.))
                         .py(px(6.))
-                        .child("下限 / 值"),
+                        .child(t.lower_column),
                 )
                 .child(
                     div()
@@ -695,7 +936,7 @@ impl AppShell {
                         .flex_none()
                         .px(px(10.))
                         .py(px(6.))
-                        .child("上限"),
+                        .child(t.upper_column),
                 ),
         );
         if self.s.value_rows.is_empty() {
@@ -708,7 +949,7 @@ impl AppShell {
                     .bg(c(WELL))
                     .text_size(fs(FS_11_5))
                     .text_color(c(TEXT_META))
-                    .child("模板没有数值占位;粘贴带数值的词缀后此处自动出现对应行"),
+                    .child(t.no_numeric_slots),
             );
         }
         for (ix, row) in self.s.value_rows.iter().enumerate() {
@@ -726,9 +967,9 @@ impl AppShell {
                 .flex_none()
                 .border_1()
                 .border_color(c(HAIRLINE));
-            for (i, (label, m)) in MODES.into_iter().enumerate() {
+            for (i, (label, m)) in modes.into_iter().enumerate() {
                 let mut cell = div()
-                    .id(("wb-cmp", ix * MODES.len() + i))
+                    .id(("wb-cmp", ix * modes.len() + i))
                     .h(px(22.))
                     .px(px(8.))
                     .flex()
@@ -780,7 +1021,9 @@ impl AppShell {
                         .text_size(fs(FS_12))
                         .text_color(c(TEXT_META))
                         .whitespace_nowrap()
-                        .child(SharedString::from(format!("数值 {}", ix + 1))),
+                        .child(SharedString::from(
+                            t.numeric_slot_fmt.replacen("{}", &(ix + 1).to_string(), 1),
+                        )),
                 )
                 .child(div().flex_1().px(px(10.)).py(px(4.)).child(picker))
                 .child(bound_cell(&row.min, uses_min))
@@ -808,40 +1051,41 @@ impl AppShell {
                     .h_flex()
                     .items_center()
                     .gap(px(10.))
-                    .child(micro_title_sm("数值条件"))
+                    .child(micro_title_sm(t.numeric_rules_label))
                     .child(
                         div()
                             .text_size(fs(FS_10))
                             .text_color(c(TEXT_META))
                             .whitespace_nowrap()
-                            .child("默认不限制,只在需要卡数值时改比较方式"),
+                            .child(t.numeric_rules_hint),
                     )
                     .child(div().flex_1().h(px(1.)).bg(c(HAIRLINE_SOFT)))
                     .child(
-                        button("wb-del-cond", LedgerButton::Destructive, "删除词缀", cx).on_click(
-                            cx.listener(|this, _, window, cx| {
+                        button("wb-del-cond", LedgerButton::Destructive, t.delete_condition, cx)
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.remove_selected_condition(window, cx)
-                            }),
-                        ),
+                            })),
                     )
                     .child(
-                        button("wb-del-group", LedgerButton::Destructive, "删除方案", cx).on_click(
-                            cx.listener(|this, _, window, cx| {
+                        button("wb-del-group", LedgerButton::Destructive, t.delete_result, cx)
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.remove_selected_group(window, cx)
-                            }),
-                        ),
+                            })),
                     ),
             )
             .child(table)
-            .child(warning_band(
-                "注意",
-                "催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值,不推算基础值。",
-            ))
+            .child(warning_band(t.notice_tag, t.numeric_value_help))
     }
 
     // -- 右运行栏 318 -------------------------------------------------------
 
     fn wb_run_rail(&self, cx: &mut Context<Self>) -> Div {
+        let t = self.t();
+        let ocr_label = match &self.backend {
+            Some(b) if b.ocr_language_label().starts_with("zh") => t.ocr_zh,
+            _ => t.ocr_en,
+        };
+        let engine = t.engine_fmt.replacen("{}", ocr_label, 1);
         div()
             .w(px(318.))
             .flex_none()
@@ -858,14 +1102,14 @@ impl AppShell {
                     .px_3()
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(micro_title_sm("运行"))
+                    .child(micro_title_sm(t.run_title))
                     .child(
                         div()
                             .ml_auto()
                             .font_family(FONT_MONO)
                             .text_size(fs(FS_9_5))
                             .text_color(c(TEXT_META))
-                            .child("繁中 · Windows OCR"),
+                            .child(SharedString::from(engine)),
                     ),
             )
             .child(
@@ -888,7 +1132,7 @@ impl AppShell {
                     .px_3()
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(micro_title_sm("截图识别结果"))
+                    .child(micro_title_sm(t.screenshot_title))
                     .child(
                         div()
                             .id("wb-shot")
@@ -897,7 +1141,7 @@ impl AppShell {
                             .text_color(c(ACCENT))
                             .hover(|s| s.bg(c(HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| this.test_screenshot(cx)))
-                            .child("识别截图"),
+                            .child(t.screenshot_button),
                     ),
             )
             .child(div().flex_1().min_h_0().child(self.log_block(15)))

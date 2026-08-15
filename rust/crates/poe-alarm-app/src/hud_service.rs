@@ -37,6 +37,7 @@ impl HudService {
         allow_overlay_capture: bool,
         visible: bool,
         placement: poe_alarm_settings::HudPlacement,
+        initial_status: String,
         events: Sender<PlatformEvent>,
     ) -> Self {
         let (tx, rx) = channel::<HudCommand>();
@@ -75,7 +76,7 @@ impl HudService {
             };
             let _ = window.set_content(HudContent {
                 monitoring: false,
-                status_text: "未监控".to_owned(),
+                status_text: initial_status,
                 elapsed: "--:--".to_owned(),
                 target: String::new(),
             });

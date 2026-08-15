@@ -4,8 +4,9 @@
 //! 与提示音都由 runtime 内部完成;UI 只发命令、收事件)。非 Windows 平台
 //! 提供模拟器,保证云端 Linux 开发环境可编译、可迭代布局。
 //!
-//! 设置继续使用 Rust 预览独立目录(`SettingsStore::preview_default`),
-//! 不接管 .NET 正式配置。
+//! 设置使用正式路径(`SettingsStore::release_default`,
+//! `%LOCALAPPDATA%/PoeAlarm/settings.json`);首次启动会把 Rust 预览目录的
+//! 设置一次性迁移过来,旧 .NET 设置自动留档。
 
 // 非 Windows 平台下部分事件变体只由 Windows 路径构造。
 #![allow(dead_code)]
@@ -106,7 +107,7 @@ pub struct Backend {
 impl Backend {
     pub fn new() -> Result<Self, String> {
         let mut store =
-            SettingsStore::preview_default().map_err(|e| format!("settings path: {e}"))?;
+            SettingsStore::release_default().map_err(|e| format!("settings path: {e}"))?;
         let settings = store.load();
         let read_only = store.is_read_only();
         let (platform_tx, platform_rx) = channel();
@@ -120,6 +121,12 @@ impl Backend {
             settings.allow_overlay_capture,
             settings.keep_hud_visible,
             settings.hud_placement.clone(),
+            if settings.ui_language.starts_with("en") {
+                crate::i18n::EN.hud_idle
+            } else {
+                crate::i18n::ZH.hud_idle
+            }
+            .to_owned(),
             platform_tx.clone(),
         ));
         Ok(Self {
@@ -213,25 +220,26 @@ impl Backend {
         self.settings.selected_profile_mut().capture_region = Some(region);
     }
 
-    pub fn region_label(&self) -> String {
-        match self.settings.selected_profile().capture_region {
-            Some(r) => format!("{}×{} @ {},{}", r.width, r.height, r.x, r.y),
-            None => "未框选".to_owned(),
-        }
+    /// 已框选区域的展示文本;未框选时为 None(占位文案由界面按语言提供)。
+    pub fn region_label(&self) -> Option<String> {
+        self.settings
+            .selected_profile()
+            .capture_region
+            .map(|r| format!("{}×{} @ {},{}", r.width, r.height, r.x, r.y))
     }
 
     pub fn ocr_language_label(&self) -> String {
         self.settings.selected_profile().ocr_language.clone()
     }
 
-    pub fn sound_label(&self) -> String {
-        match self.settings.custom_alert_sound_path.as_deref() {
-            Some(path) => std::path::Path::new(path)
+    /// 自定义提示音文件名;使用内置音效时为 None(占位文案由界面按语言提供)。
+    pub fn sound_label(&self) -> Option<String> {
+        self.settings.custom_alert_sound_path.as_deref().map(|path| {
+            std::path::Path::new(path)
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_owned()),
-            None => "内置提示音".to_owned(),
-        }
+                .unwrap_or_else(|| path.to_owned())
+        })
     }
 
     /// 更新状态浮窗内容(非 Windows 为空操作)。

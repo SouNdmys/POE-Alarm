@@ -12,6 +12,7 @@ use poe_alarm_core::{NumericConstraint, NumericConstraintMode, ResultGroupMode};
 use poe_alarm_settings::GameProfile;
 
 use crate::backend::{Backend, BridgeEvent, BridgeState, PlatformEvent};
+use crate::i18n;
 use crate::state::*;
 use crate::theme::*;
 use crate::ui::*;
@@ -50,6 +51,31 @@ pub struct AppShell {
 }
 
 impl AppShell {
+    /// 当前界面语言的文案目录。
+    pub fn t(&self) -> &'static i18n::Text {
+        let english = self
+            .backend
+            .as_ref()
+            .map(|b| b.settings.ui_language.starts_with("en"))
+            .unwrap_or(false);
+        if english { &i18n::EN } else { &i18n::ZH }
+    }
+
+    /// 切换界面语言(即时生效,树标签整体刷新,选中与输入不动)。
+    pub fn set_ui_language(&mut self, language: &str, cx: &mut Context<Self>) {
+        if let Some(backend) = &mut self.backend {
+            backend.settings.ui_language =
+                poe_alarm_settings::normalize_ui_language(language).to_owned();
+        }
+        self.persist();
+        let node = self.selected_node();
+        self.s.tree = Self::tree_from_settings(self.backend.as_ref());
+        if let Some(ix) = self.s.tree.iter().position(|n| n.node == node) {
+            self.s.selected = ix;
+        }
+        cx.notify();
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut backend = match Backend::new() {
             Ok(b) => Some(b),
@@ -62,11 +88,10 @@ impl AppShell {
             Self::ensure_structured_rules(backend);
         }
 
+        let text = Self::text_for(backend.as_ref());
         let name_input = cx.new(|cx| InputState::new(window, cx));
-        let template_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("粘贴完整词缀,例如:若近期有造成暴擊,增加 (6—8)% 攻擊速度")
-        });
+        let template_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(text.template_placeholder));
 
         let tree = Self::tree_from_settings(backend.as_ref());
         let selected = tree
@@ -74,11 +99,8 @@ impl AppShell {
             .position(|n| matches!(n.node, NodeRef::Condition(..)))
             .unwrap_or(0);
         let notice = match &backend {
-            Some(b) if b.read_only => Some((
-                StatusKind::Warning,
-                "设置文件由更新版本写入,当前会话只读".into(),
-            )),
-            None => Some((StatusKind::Error, "运行时后端初始化失败,详见控制台".into())),
+            Some(b) if b.read_only => Some((StatusKind::Warning, text.notice_read_only.into())),
+            None => Some((StatusKind::Error, text.notice_backend_failed.into())),
             _ => None,
         };
 
@@ -112,7 +134,7 @@ impl AppShell {
             },
             backend,
             focus_handle: cx.focus_handle(),
-            log: vec![(LogKind::Meta, "就绪 · 等待开始监控".into())],
+            log: vec![(LogKind::Meta, text.log_ready.into())],
             notice,
             monitor_since: None,
             auto_restart_budget: 2,
@@ -154,22 +176,31 @@ impl AppShell {
         }
     }
 
+    /// 当前后端对应的文案目录(构造期 self 尚不存在时用)。
+    fn text_for(backend: Option<&Backend>) -> &'static i18n::Text {
+        let english = backend
+            .map(|b| b.settings.ui_language.starts_with("en"))
+            .unwrap_or(false);
+        if english { &i18n::EN } else { &i18n::ZH }
+    }
+
     /// 从设置里的结构化规则集合成树显示。
     fn tree_from_settings(backend: Option<&Backend>) -> Vec<RuleNode> {
+        let text = Self::text_for(backend);
         let mut tree = Vec::new();
         let Some(backend) = backend else {
             return tree;
         };
         let settings = &backend.settings;
         let game_label = match settings.selected_game_profile {
-            GameProfile::Poe1 => "流放之路一",
-            GameProfile::Poe2 => "流放之路二",
+            GameProfile::Poe1 => text.game_poe1,
+            GameProfile::Poe2 => text.game_poe2,
         };
         tree.push(RuleNode {
             node: NodeRef::Game,
             depth: 0,
             label: game_label.into(),
-            trailing: "活动".into(),
+            trailing: text.tree_active.into(),
             expandable: true,
             expanded: true,
             warning: false,
@@ -179,14 +210,14 @@ impl AppShell {
         if let Some(set) = &rules.structured_rule_set {
             for (g_ix, group) in set.groups.iter().enumerate() {
                 let mode = match group.mode {
-                    ResultGroupMode::Any => "任意".to_owned(),
-                    ResultGroupMode::All => "全部".to_owned(),
+                    ResultGroupMode::Any => text.tree_any.to_owned(),
+                    ResultGroupMode::All => text.tree_all.to_owned(),
                     ResultGroupMode::AtLeast => {
                         format!("≥{}/{}", group.required_count, group.conditions.len())
                     }
                 };
                 let group_name = if group.name.trim().is_empty() {
-                    format!("可接受结果 {}", g_ix + 1)
+                    format!("{} {}", text.default_result_name, g_ix + 1)
                 } else {
                     group.name.clone()
                 };
@@ -195,7 +226,11 @@ impl AppShell {
                     node: NodeRef::Group(g_ix),
                     depth: 1,
                     label: group_name.into(),
-                    trailing: if group_empty { "空".into() } else { mode.into() },
+                    trailing: if group_empty {
+                        text.tree_empty_group.into()
+                    } else {
+                        mode.into()
+                    },
                     expandable: true,
                     expanded: true,
                     warning: group_empty,
@@ -206,7 +241,7 @@ impl AppShell {
                     let label = if !cond.name.trim().is_empty() {
                         cond.name.clone()
                     } else if missing {
-                        "新词缀 · 粘贴模板".to_owned()
+                        text.tree_new_condition.to_owned()
                     } else {
                         cond.template.clone()
                     };
@@ -214,7 +249,7 @@ impl AppShell {
                         node: NodeRef::Condition(g_ix, c_ix),
                         depth: 2,
                         label: label.into(),
-                        trailing: if missing { "待补" } else { "" }.into(),
+                        trailing: if missing { text.tree_pending } else { "" }.into(),
                         expandable: false,
                         expanded: false,
                         warning: missing,
@@ -243,7 +278,7 @@ impl AppShell {
                     if self.s.run == RunPhase::Idle && self.pending_start_at.is_none() {
                         // 去抖 350ms:等热键按键抬起、IME 切换弹窗散场后再首帧截屏。
                         self.pending_start_at = Some(Instant::now() + Duration::from_millis(350));
-                        self.push_log(LogKind::Meta, "热键触发 · 即将开始监控…".to_owned());
+                        self.push_log(LogKind::Meta, self.t().log_hotkey_start.to_owned());
                     }
                 }
                 PlatformEvent::HotKeySelectRegion => self.begin_region_selection(cx),
@@ -254,29 +289,35 @@ impl AppShell {
                     }
                 }
                 PlatformEvent::RegionSelected(region) => {
+                    let text = self.t();
                     if let Some(backend) = &mut self.backend {
                         backend.set_region(region);
-                        let label = backend.region_label();
+                        let label = backend.region_label().unwrap_or_default();
                         match backend.save() {
                             Ok(()) => {
                                 self.notice = Some((
                                     StatusKind::Monitoring,
-                                    format!("区域已保存 · {label}").into(),
+                                    format!("{} · {label}", text.notice_region_saved).into(),
                                 ));
-                                self.push_log(LogKind::Meta, format!("识别区域已更新 · {label}"));
+                                self.push_log(
+                                    LogKind::Meta,
+                                    format!("{} · {label}", text.log_region_updated),
+                                );
                             }
                             Err(e) => {
-                                self.notice =
-                                    Some((StatusKind::Error, format!("区域保存失败:{e}").into()));
+                                self.notice = Some((
+                                    StatusKind::Error,
+                                    format!("{}:{e}", text.notice_region_save_failed).into(),
+                                ));
                             }
                         }
                     }
                 }
                 PlatformEvent::RegionSelectionCancelled => {
-                    self.push_log(LogKind::Meta, "框选已取消".to_owned());
+                    self.push_log(LogKind::Meta, self.t().log_selection_cancelled.to_owned());
                 }
                 PlatformEvent::RegionSelectionFailed => {
-                    self.notice = Some((StatusKind::Error, "框选失败,详见控制台".into()));
+                    self.notice = Some((StatusKind::Error, self.t().notice_selection_failed.into()));
                 }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
@@ -286,7 +327,7 @@ impl AppShell {
                             relative_y: Some(ry),
                         };
                         if backend.save().is_ok() {
-                            self.push_log(LogKind::Meta, "浮窗位置已保存".to_owned());
+                            self.push_log(LogKind::Meta, self.t().log_hud_moved.to_owned());
                         }
                     }
                 }
@@ -328,8 +369,12 @@ impl AppShell {
                     for line in lines.into_iter().take(4) {
                         self.push_log(LogKind::Match, line);
                     }
-                    let group = matched_group.unwrap_or_else(|| "目标".to_owned());
-                    self.push_log(LogKind::Hit, format!("规则命中 · {group} · {detail}"));
+                    let group =
+                        matched_group.unwrap_or_else(|| self.t().log_target_fallback.to_owned());
+                    self.push_log(
+                        LogKind::Hit,
+                        format!("{} · {group} · {detail}", self.t().log_rule_hit_prefix),
+                    );
                 }
                 BridgeEvent::ScreenshotReport {
                     lines,
@@ -340,25 +385,28 @@ impl AppShell {
                         self.push_log(LogKind::Text, line);
                     }
                     if matched {
-                        self.push_log(LogKind::Hit, format!("截图命中 · {detail}"));
+                        self.push_log(
+                            LogKind::Hit,
+                            format!("{} · {detail}", self.t().log_shot_hit_prefix),
+                        );
                     } else {
-                        self.push_log(LogKind::Meta, "截图未命中目标词缀".to_owned());
+                        self.push_log(LogKind::Meta, self.t().log_shot_miss.to_owned());
                     }
                 }
                 BridgeEvent::AlertPresented => {
                     self.s.run = RunPhase::Hit;
-                    self.push_log(
-                        LogKind::Hit,
-                        "红色拦截窗已接管输入 · Ctrl⇧F12 解除".to_owned(),
-                    );
+                    self.push_log(LogKind::Hit, self.t().log_alert_presented.to_owned());
                 }
                 BridgeEvent::AlertAcknowledged => {
                     self.apply_runtime_state(BridgeState::Idle);
-                    self.push_log(LogKind::Meta, "已确认 · 下一轮需重新启动".to_owned());
+                    self.push_log(LogKind::Meta, self.t().log_acknowledged.to_owned());
                 }
                 BridgeEvent::Fault(detail) => {
                     self.notice = Some((StatusKind::Error, detail.clone().into()));
-                    self.push_log(LogKind::Meta, format!("错误:{detail}"));
+                    self.push_log(
+                        LogKind::Meta,
+                        format!("{}:{detail}", self.t().log_error_prefix),
+                    );
                     self.apply_runtime_state(BridgeState::Idle);
                     reset_runtime = true;
                     if detail.contains("BitBlt") && self.auto_restart_budget > 0 {
@@ -367,21 +415,19 @@ impl AppShell {
                     }
                 }
                 BridgeEvent::SoundFallback => {
-                    self.notice = Some((
-                        StatusKind::Warning,
-                        "自定义提示音无效,已回退内置音效".into(),
-                    ));
+                    self.notice =
+                        Some((StatusKind::Warning, self.t().notice_sound_fallback.into()));
                 }
             }
         }
         if reset_runtime && let Some(backend) = &mut self.backend {
             backend.reset_runtime();
-            self.push_log(LogKind::Meta, "运行时已重建".to_owned());
+            self.push_log(LogKind::Meta, self.t().log_runtime_rebuilt.to_owned());
         }
         if auto_restart {
             // 重建后的警报服务线程需要时间释放进程单例,延迟 700ms 再启动。
             self.pending_start_at = Some(Instant::now() + Duration::from_millis(700));
-            self.push_log(LogKind::Meta, "截屏一次性故障,稍后自动重试启动…".to_owned());
+            self.push_log(LogKind::Meta, self.t().log_auto_restart.to_owned());
         }
         if let Some(at) = self.pending_start_at
             && Instant::now() >= at
@@ -394,13 +440,14 @@ impl AppShell {
         }
         // 编辑器 → 树标签实时同步:粘贴模板后左树与面包屑立即刷新,不等切换选中。
         if let NodeRef::Condition(..) = self.selected_node() {
+            let text = self.t();
             let name = self.s.name_input.read(cx).value().trim().to_string();
             let template = self.s.template_input.read(cx).value().trim().to_string();
             let missing = template.is_empty();
             let label = if !name.is_empty() {
                 name
             } else if missing {
-                "新词缀 · 粘贴模板".to_owned()
+                text.tree_new_condition.to_owned()
             } else {
                 template
             };
@@ -409,7 +456,7 @@ impl AppShell {
                 && row.label.as_ref() != label
             {
                 row.label = label.into();
-                row.trailing = if missing { "待补" } else { "" }.into();
+                row.trailing = if missing { text.tree_pending } else { "" }.into();
                 row.warning = missing;
                 changed = true;
             }
@@ -428,7 +475,7 @@ impl AppShell {
             if let Some(backend) = &self.backend {
                 backend.hud_update(
                     self.s.run == RunPhase::Monitoring,
-                    self.s.run.status_text(),
+                    self.t().status_text(self.s.run),
                     self.s.elapsed.as_ref(),
                     &target,
                 );
@@ -509,8 +556,9 @@ impl AppShell {
         if self.s.run == RunPhase::Idle {
             self.apply_editor_to_selection(cx);
         }
+        let text = self.t();
         let Some(backend) = &mut self.backend else {
-            self.notice = Some((StatusKind::Error, "后端未初始化".into()));
+            self.notice = Some((StatusKind::Error, text.notice_backend_missing.into()));
             cx.notify();
             return;
         };
@@ -529,11 +577,11 @@ impl AppShell {
             RunPhase::Hit => backend.acknowledge_alert(),
         };
         if starting && result.is_ok() {
-            self.push_log(LogKind::Meta, "启动监控…".to_owned());
+            self.push_log(LogKind::Meta, text.log_starting.to_owned());
         }
         if let Err(e) = result {
             self.notice = Some((StatusKind::Error, e.clone().into()));
-            self.push_log(LogKind::Meta, format!("错误:{e}"));
+            self.push_log(LogKind::Meta, format!("{}:{e}", text.log_error_prefix));
         }
         cx.notify();
     }
@@ -646,10 +694,14 @@ impl AppShell {
 
     /// 静默落盘(自动保存,无手动按钮);失败才提示。
     fn persist(&mut self) {
+        let text = self.t();
         if let Some(backend) = &mut self.backend
             && let Err(e) = backend.save()
         {
-            self.notice = Some((StatusKind::Error, format!("保存失败:{e}").into()));
+            self.notice = Some((
+                StatusKind::Error,
+                format!("{}:{e}", text.notice_save_failed_prefix).into(),
+            ));
         }
     }
 
@@ -961,14 +1013,19 @@ impl AppShell {
                 && let Some(path) = paths.pop()
             {
                 let _ = this.update(cx, |this: &mut AppShell, cx| {
+                    let text = this.t();
                     if let Some(backend) = &mut this.backend {
                         match backend.test_screenshot(path.clone()) {
-                            Ok(()) => {
-                                this.push_log(LogKind::Meta, format!("识别截图:{}", path.display()))
-                            }
+                            Ok(()) => this.push_log(
+                                LogKind::Meta,
+                                format!("{}:{}", text.log_shot_prefix, path.display()),
+                            ),
                             Err(e) => {
                                 this.notice = Some((StatusKind::Error, e.clone().into()));
-                                this.push_log(LogKind::Meta, format!("识别截图失败:{e}"));
+                                this.push_log(
+                                    LogKind::Meta,
+                                    format!("{}:{e}", text.log_shot_failed_prefix),
+                                );
                             }
                         }
                         cx.notify();
@@ -998,9 +1055,13 @@ impl AppShell {
             backend.set_ocr_language(language);
         }
         Self::ensure_structured_rules(backend);
+        let text = Self::text_for(Some(backend));
         self.notice = Some(match backend.save() {
-            Ok(()) => (StatusKind::Monitoring, "配置已切换并保存".into()),
-            Err(e) => (StatusKind::Error, format!("切换保存失败:{e}").into()),
+            Ok(()) => (StatusKind::Monitoring, text.notice_profile_switched.into()),
+            Err(e) => (
+                StatusKind::Error,
+                format!("{}:{e}", text.notice_profile_switch_failed_prefix).into(),
+            ),
         });
         self.s.tree = Self::tree_from_settings(self.backend.as_ref());
         self.s.selected = self
@@ -1033,10 +1094,7 @@ impl AppShell {
         }
         self.invalidate_runtime();
         self.persist();
-        self.push_log(
-            LogKind::Meta,
-            "录屏可见性已更新;红色拦截窗自下次启动生效".to_owned(),
-        );
+        self.push_log(LogKind::Meta, self.t().log_capture_updated.to_owned());
         cx.notify();
     }
 
@@ -1059,10 +1117,11 @@ impl AppShell {
                     }
                     this.invalidate_runtime();
                     this.persist();
-                    this.push_log(
-                        LogKind::Meta,
-                        format!("提示音已切换 · {}(无效 WAV 会在启动时回退内置)", path.display()),
-                    );
+                    let message = this
+                        .t()
+                        .log_sound_changed_fmt
+                        .replacen("{}", &path.display().to_string(), 1);
+                    this.push_log(LogKind::Meta, message);
                     cx.notify();
                 });
             }
@@ -1076,17 +1135,18 @@ impl AppShell {
         }
         self.invalidate_runtime();
         self.persist();
-        self.push_log(LogKind::Meta, "提示音已恢复内置音效".to_owned());
+        self.push_log(LogKind::Meta, self.t().log_sound_reset.to_owned());
         cx.notify();
     }
 
     /// 触发框选(热键 Ctrl⇧F11 或界面按钮)。
     pub fn begin_region_selection(&mut self, cx: &mut Context<Self>) {
+        let text = self.t();
         if let Some(backend) = &mut self.backend {
             if let Err(e) = backend.begin_region_selection() {
                 self.notice = Some((StatusKind::Error, e.into()));
             } else {
-                self.push_log(LogKind::Meta, "框选中:拖拽圈出词缀区域,Esc 取消".to_owned());
+                self.push_log(LogKind::Meta, text.log_selecting.to_owned());
             }
             cx.notify();
         }
@@ -1105,7 +1165,7 @@ impl AppShell {
             if let (Some(a), Some(b)) = (min, max)
                 && a > b
             {
-                return Some("数值范围的最小值不能大于最大值");
+                return Some(self.t().range_error);
             }
         }
         None
@@ -1121,18 +1181,19 @@ impl AppShell {
 
     /// 底部状态栏(状态点+文字+计时坐标恒定)。
     pub fn shell_status_bar(&self, compact: bool) -> Div {
+        let text = self.t();
         let kind_color = match self.s.run {
             RunPhase::Idle => TEXT_SECONDARY,
             RunPhase::Monitoring => ACCENT_TEXT,
             RunPhase::Hit => DANGER_TEXT,
         };
-        let ocr = format!("判定 {}", self.ocr_ms_text());
-        let scans = format!("扫描 {}", self.scan_count);
+        let ocr = format!("{} {}", text.bar_ocr_prefix, self.ocr_ms_text());
+        let scans = format!("{} {}", text.bar_scan_prefix, self.scan_count);
         if compact {
             status_bar(
                 &[
                     StatusSegment {
-                        text: self.s.run.status_text(),
+                        text: text.status_text(self.s.run),
                         color: Some(kind_color),
                     },
                     StatusSegment {
@@ -1151,11 +1212,11 @@ impl AppShell {
                 .notice
                 .as_ref()
                 .map(|(_, t)| t.to_string())
-                .unwrap_or_else(|| "Ctrl⇧F10 开始 · F11 框选 · F12 停止监控".to_owned());
+                .unwrap_or_else(|| text.bar_hint.to_owned());
             status_bar(
                 &[
                     StatusSegment {
-                        text: self.s.run.status_text(),
+                        text: text.status_text(self.s.run),
                         color: Some(kind_color),
                     },
                     StatusSegment {
@@ -1174,23 +1235,24 @@ impl AppShell {
 
     /// 真实归一化预览:用 core 的 canonicalize 展示模板归一化结果与数值占位数。
     pub fn normalized_preview(&self, cx: &Context<Self>) -> SharedString {
+        let text = self.t();
         let template = self.s.template_input.read(cx).value();
         let trimmed = template.trim();
         if trimmed.is_empty() {
-            return "归一化 — · 粘贴完整词缀后在此预览".into();
+            return text.normalized_empty.into();
         }
         let canonical = poe_alarm_core::canonicalize(trimmed);
         let values = poe_alarm_core::extract_values(trimmed).len();
-        format!(
-            "归一化 {} · {} 个数值占位 · 只比屏幕显示值",
-            canonical.text, values
-        )
-        .into()
+        text.normalized_fmt
+            .replacen("{}", &canonical.text, 1)
+            .replacen("{}", &values.to_string(), 1)
+            .into()
     }
 
     /// 标题栏的游戏/OCR 语言切换(带说明标签,一眼可见)。
     pub fn profile_switcher(&self, cx: &mut Context<Self>) -> Div {
         use poe_alarm_settings::GameProfile;
+        let text = self.t();
         let (game, ocr) = match &self.backend {
             Some(b) => (b.settings.selected_game_profile, b.ocr_language_label()),
             None => (GameProfile::Poe2, String::new()),
@@ -1219,19 +1281,19 @@ impl AppShell {
             };
             cell.child(label)
         };
-        let caption = |text: &'static str| {
+        let caption = |label: &'static str| {
             div()
                 .text_size(fs(FS_10))
                 .text_color(c(TEXT_META))
                 .whitespace_nowrap()
-                .child(text)
+                .child(label)
         };
         let seg = |cells: Div| cells.h_flex().border_1().border_color(c(HAIRLINE));
         div()
             .h_flex()
             .items_center()
             .gap_2()
-            .child(caption("游戏"))
+            .child(caption(text.game_label))
             .child(
                 seg(div())
                     .child(chip("pf-poe1", "POE 1", game == GameProfile::Poe1, cx, |t, w, cx| {
@@ -1245,14 +1307,14 @@ impl AppShell {
                         .border_color(c(HAIRLINE)),
                     ),
             )
-            .child(caption("识别语言"))
+            .child(caption(text.ocr_language_label))
             .child(
                 seg(div())
-                    .child(chip("pf-zh", "繁体中文", traditional, cx, |t, w, cx| {
+                    .child(chip("pf-zh", text.ocr_zh, traditional, cx, |t, w, cx| {
                         t.switch_profile(None, Some("zh-TW"), w, cx)
                     }))
                     .child(
-                        chip("pf-en", "English", !traditional, cx, |t, w, cx| {
+                        chip("pf-en", text.ocr_en, !traditional, cx, |t, w, cx| {
                             t.switch_profile(None, Some("en"), w, cx)
                         })
                         .border_l_1()
@@ -1274,7 +1336,7 @@ impl AppShell {
                     .text_size(fs(FS_13))
                     .font_semibold()
                     .text_color(c(kind.text()))
-                    .child(SharedString::from(self.s.run.status_text())),
+                    .child(SharedString::from(self.t().status_text(self.s.run))),
             )
             .child(
                 div()
@@ -1288,6 +1350,7 @@ impl AppShell {
 
     /// 指标行组(真实运行数据)。
     pub fn metrics_block(&self) -> Div {
+        let text = self.t();
         let dash = |v: &str| {
             if self.scan_count == 0 {
                 "—".to_owned()
@@ -1298,21 +1361,25 @@ impl AppShell {
         div()
             .v_flex()
             .child(metric_row(
-                "判定耗时",
+                text.metric_ocr,
                 &dash(&format!("{:.1} ms", self.ocr_ms)),
                 false,
             ))
             .child(metric_row(
-                "截屏耗时",
+                text.metric_capture,
                 &dash(&format!("{:.1} ms", self.capture_ms)),
                 false,
             ))
             .child(metric_row(
-                "扫描轮数",
+                text.metric_scans,
                 &dash(&self.scan_count.to_string()),
                 false,
             ))
-            .child(metric_row("本轮命中", &self.s.hit_count.to_string(), true))
+            .child(metric_row(
+                text.metric_hits,
+                &self.s.hit_count.to_string(),
+                true,
+            ))
     }
 
     /// 日志面板(真实事件流;最新在下)。
