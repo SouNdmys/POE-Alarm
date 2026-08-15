@@ -20,7 +20,6 @@ use poe_alarm_settings::{AppSettings, ScreenRegion, SettingsStore};
 pub enum PlatformEvent {
     HotKeyStart,
     HotKeySelectRegion,
-    HotKeyStopOrAcknowledge,
     RegionSelected(ScreenRegion),
     RegionSelectionCancelled,
     RegionSelectionFailed,
@@ -97,6 +96,8 @@ pub struct Backend {
     #[cfg(windows)]
     hud: Option<crate::hud_service::HudService>,
     #[cfg(windows)]
+    hotkey_thread: Option<u32>,
+    #[cfg(windows)]
     runtime: Option<poe_alarm_runtime::RuntimeHandle>,
     #[cfg(windows)]
     sound_fell_back: bool,
@@ -112,7 +113,7 @@ impl Backend {
         let read_only = store.is_read_only();
         let (platform_tx, platform_rx) = channel();
         #[cfg(windows)]
-        spawn_hotkey_thread(
+        let hotkey_thread = spawn_hotkey_thread(
             platform_tx.clone(),
             settings.start_monitoring_hot_key.clone(),
         );
@@ -138,6 +139,8 @@ impl Backend {
             selecting_region: false,
             #[cfg(windows)]
             hud,
+            #[cfg(windows)]
+            hotkey_thread,
             #[cfg(windows)]
             runtime: None,
             #[cfg(windows)]
@@ -273,6 +276,44 @@ impl Backend {
     pub fn hotkey_label(&self) -> String {
         self.settings.start_monitoring_hot_key.clone()
     }
+
+    /// 当前启动热键在三个可选项中的下标。
+    #[cfg(windows)]
+    pub fn start_hotkey_index(&self) -> usize {
+        use poe_alarm_platform_win::StartMonitoringHotKey;
+        let current =
+            StartMonitoringHotKey::parse_or_default(Some(&self.settings.start_monitoring_hot_key));
+        StartMonitoringHotKey::OPTIONS
+            .iter()
+            .position(|option| *option == current)
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(windows))]
+    pub fn start_hotkey_index(&self) -> usize {
+        0
+    }
+
+    /// 切换启动热键(三选一):写设置并即时通知热键线程重注册。
+    #[cfg(windows)]
+    pub fn set_start_hotkey_index(&mut self, index: usize) {
+        use poe_alarm_platform_win::StartMonitoringHotKey;
+        let Some(option) = StartMonitoringHotKey::OPTIONS.get(index).copied() else {
+            return;
+        };
+        self.settings.start_monitoring_hot_key = option.setting_value().to_owned();
+        if let Some(thread) = self.hotkey_thread {
+            use windows::Win32::Foundation::{LPARAM, WPARAM};
+            use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+            // SAFETY: 向自有热键线程投递重配消息;线程随进程存活。
+            let _ = unsafe {
+                PostThreadMessageW(thread, WM_APP_SET_START_HOTKEY, WPARAM(index), LPARAM(0))
+            };
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn set_start_hotkey_index(&mut self, _index: usize) {}
 
     /// 状态浮窗交互:未监控时可拖动(Placement),监控中点击穿透(Passive)。
     #[cfg(windows)]
@@ -481,36 +522,55 @@ impl Backend {
     }
 }
 
-/// 全局热键线程:注册 Ctrl⇧F10/F11/F12(以设置里的启动热键为准),
-/// 独立消息循环把 WM_HOTKEY 翻译成 PlatformEvent。
+/// 热键线程的自定义消息:wParam = StartMonitoringHotKey::OPTIONS 下标。
 #[cfg(windows)]
-fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) {
+const WM_APP_SET_START_HOTKEY: u32 = 0x8000 + 0x41; // WM_APP + 0x41
+
+/// 全局热键线程:注册 Ctrl⇧F10(可配)与 Ctrl⇧F11 框选,独立消息循环把
+/// WM_HOTKEY 翻译成 PlatformEvent。F12 全局停止热键已按用户裁定移除;
+/// 命中解除由红窗按钮与其内部按键检测负责。返回线程 id 供运行时重配热键。
+#[cfg(windows)]
+fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Option<u32> {
+    let (id_tx, id_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         use poe_alarm_platform_win::{
             HotKeyAction, HotKeyConfig, HotKeyManager, StartMonitoringHotKey,
         };
+        use windows::Win32::System::Threading::GetCurrentThreadId;
         use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
 
         let config = HotKeyConfig {
             start: StartMonitoringHotKey::parse_or_default(Some(&start_hot_key)),
         };
-        let manager = match HotKeyManager::register_for_current_thread(config) {
+        let mut manager = match HotKeyManager::register_for_current_thread(config) {
             Ok(manager) => manager,
             Err(error) => {
                 eprintln!("global hotkey registration failed: {error}");
                 return;
             }
         };
+        manager.unregister(HotKeyAction::StopOrAcknowledge);
+        // 建立消息队列后再公布线程 id(GetMessageW 首次调用前队列已由注册创建)。
+        let _ = id_tx.send(unsafe { GetCurrentThreadId() });
         let mut message = MSG::default();
         // SAFETY: standard thread message loop; the manager lives for the loop's duration.
         while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
+            if message.message == WM_APP_SET_START_HOTKEY {
+                if let Some(option) =
+                    StartMonitoringHotKey::OPTIONS.get(message.wParam.0).copied()
+                    && let Err(error) = manager.reconfigure_start(option)
+                {
+                    eprintln!("start hotkey reconfiguration failed: {error}");
+                }
+                continue;
+            }
             if message.message == WM_HOTKEY
                 && let Some(action) = manager.action_for_message(message.message, message.wParam.0)
             {
                 let event = match action {
                     HotKeyAction::StartMonitoring => PlatformEvent::HotKeyStart,
                     HotKeyAction::SelectRegion => PlatformEvent::HotKeySelectRegion,
-                    HotKeyAction::StopOrAcknowledge => PlatformEvent::HotKeyStopOrAcknowledge,
+                    HotKeyAction::StopOrAcknowledge => continue,
                 };
                 if tx.send(event).is_err() {
                     break;
@@ -518,6 +578,7 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) {
             }
         }
     });
+    id_rx.recv().ok()
 }
 
 #[cfg(windows)]

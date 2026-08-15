@@ -37,8 +37,7 @@ pub struct Text {
 
     // -- 编辑区 tab --
     pub tab_conditions: &'static str,
-    pub tab_region: &'static str,
-    pub tab_alerts: &'static str,
+    pub tab_settings: &'static str,
     pub tab_help: &'static str,
     pub unchanged: &'static str,
 
@@ -75,7 +74,6 @@ pub struct Text {
     pub region_unset: &'static str,
     pub select_region_button: &'static str,
     pub ocr_language_row: &'static str,
-    pub hint_tag: &'static str,
     pub region_hint: &'static str,
 
     // -- 提醒与显示页 --
@@ -93,6 +91,8 @@ pub struct Text {
     pub sound_reset: &'static str,
     pub hotkey_row: &'static str,
     pub hotkey_row_hint: &'static str,
+    pub section_region: &'static str,
+    pub section_alerts: &'static str,
     pub ui_language_row: &'static str,
     pub ui_language_zh: &'static str,
     pub ui_language_en: &'static str,
@@ -218,8 +218,7 @@ pub static ZH: Text = Text {
     default_result_name: "可接受结果",
 
     tab_conditions: "词缀条件",
-    tab_region: "识别区域",
-    tab_alerts: "提醒与显示",
+    tab_settings: "设置",
     tab_help: "使用说明",
     unchanged: "未改动",
 
@@ -254,8 +253,7 @@ pub static ZH: Text = Text {
     region_unset: "未框选",
     select_region_button: "框选区域",
     ocr_language_row: "OCR 语言",
-    hint_tag: "提示",
-    region_hint: "框选时只圈装备提示框中的词缀区域;区域越小,识别越快。框选完成后自动保存。",
+    region_hint: "只圈装备提示框中的词缀区域;区域越小识别越快,框选后自动保存",
 
     hud_row: "状态浮窗",
     hud_keep: "保持显示",
@@ -270,7 +268,9 @@ pub static ZH: Text = Text {
     sound_pick: "选择 WAV",
     sound_reset: "恢复内置",
     hotkey_row: "启动热键",
-    hotkey_row_hint: "F11 框选 · F12 停止;热键组合在设置文件中修改",
+    hotkey_row_hint: "框选固定为 Ctrl⇧F11;停止监控请点界面按钮",
+    section_region: "识别区域",
+    section_alerts: "提醒与显示",
     ui_language_row: "界面语言",
     ui_language_zh: "中文",
     ui_language_en: "English",
@@ -289,7 +289,7 @@ pub static ZH: Text = Text {
 
     bar_ocr_prefix: "判定",
     bar_scan_prefix: "扫描",
-    bar_hint: "Ctrl⇧F10 开始 · F11 框选 · F12 停止监控",
+    bar_hint: "Ctrl⇧F10 开始 · Ctrl⇧F11 框选",
 
     log_ready: "就绪 · 等待开始监控",
     log_hotkey_start: "热键触发 · 即将开始监控…",
@@ -335,7 +335,7 @@ pub static ZH: Text = Text {
     help_hotkeys: "全局热键",
     help_hotkey_start: "开始监控(命中或停止后需重新按)",
     help_hotkey_select: "框选识别区域(Esc 取消)",
-    help_hotkey_stop: "停止监控 / 解除命中锁定",
+    help_hotkey_stop: "解除命中锁定(红窗内快捷键,也可直接点红窗按钮);停止监控用界面\"停止监控\"按钮",
     help_rules_title: "规则与数值",
     help_rules: [
         "· 匹配按整行词缀严格判定,不做关键词模糊匹配;OCR 偶发掉字的行不会误报,下一帧重扫会自动补上。",
@@ -349,7 +349,7 @@ pub static ZH: Text = Text {
         "· 浮窗显隐、录屏可见性与提示音在\"提醒与显示\"页设置。",
     ],
     help_ocr_title: "繁中识别加速(强烈建议)",
-    help_ocr_intro: "繁体中文客户端建议安装 Windows 的 zh-TW OCR 能力,识别会走更快更准的系统路径;未安装时程序自动退回内置离线引擎,速度与覆盖会略低。安装方法:管理员身份打开 PowerShell 执行:",
+    help_ocr_intro: "繁体中文客户端建议安装 Windows 的 zh-TW OCR 能力,识别会走更快更准的系统路径;未安装时程序自动退回内置离线引擎,速度与覆盖会略低。安装方法:管理员身份打开 PowerShell 执行(如果安装不了,请检查 Windows 系统更新功能是否已关闭):",
     help_ocr_verify: "安装后可用下面的命令验证,看到 State : Installed 即成功,然后重启 POE Alarm:",
     help_ocr_settings_path: "也可以走系统设置:设置 → 时间和语言 → 语言和区域 → 添加\"中文(台灣)\"并勾选语言功能。参考:",
     help_ocr_doc_link: "微软语言包说明",
@@ -358,7 +358,7 @@ pub static ZH: Text = Text {
     help_about_fmt: "POE Alarm {} · 原生 Rust 版 · 作者 SouNd",
     help_contact: "联系:",
     help_homepage: "· 项目主页:",
-    help_notice: "公开包内置原创提示音,不含游戏音频素材;自定义提示音路径只保存在本机。附带的 THIRD-PARTY-NOTICES 与 licenses 为内置离线 OCR 的许可文件,请勿删除。",
+    help_notice: "本软件按 PolyForm Noncommercial 1.0.0 开源:可自由非商业使用、修改与分享,禁止商业使用。附带的 THIRD-PARTY-NOTICES 与 licenses 为内置离线 OCR 的许可文件,请勿删除。",
 };
 
 pub static EN: Text = Text {
@@ -389,8 +389,7 @@ pub static EN: Text = Text {
     default_result_name: "Match option",
 
     tab_conditions: "Affix conditions",
-    tab_region: "Capture area",
-    tab_alerts: "Alerts & display",
+    tab_settings: "Settings",
     tab_help: "User guide",
     unchanged: "unchanged",
 
@@ -425,8 +424,7 @@ pub static EN: Text = Text {
     region_unset: "not selected",
     select_region_button: "Select area",
     ocr_language_row: "OCR language",
-    hint_tag: "TIP",
-    region_hint: "Select only the affix block inside the item tooltip; a smaller area recognizes faster. The selection is saved automatically.",
+    region_hint: "Select only the affix block of the tooltip; smaller is faster, saved automatically",
 
     hud_row: "Status overlay",
     hud_keep: "Keep visible",
@@ -441,7 +439,9 @@ pub static EN: Text = Text {
     sound_pick: "Choose WAV",
     sound_reset: "Use built-in",
     hotkey_row: "Start shortcut",
-    hotkey_row_hint: "F11 select area · F12 stop; edit the combination in the settings file",
+    hotkey_row_hint: "Select-area is fixed to Ctrl⇧F11; stop monitoring via the UI button",
+    section_region: "CAPTURE AREA",
+    section_alerts: "ALERTS & DISPLAY",
     ui_language_row: "UI language",
     ui_language_zh: "中文",
     ui_language_en: "English",
@@ -460,7 +460,7 @@ pub static EN: Text = Text {
 
     bar_ocr_prefix: "ocr",
     bar_scan_prefix: "scans",
-    bar_hint: "Ctrl⇧F10 start · F11 select · F12 stop",
+    bar_hint: "Ctrl⇧F10 start · Ctrl⇧F11 select",
 
     log_ready: "Ready · waiting to start",
     log_hotkey_start: "Hotkey pressed · starting soon…",
@@ -506,7 +506,7 @@ pub static EN: Text = Text {
     help_hotkeys: "GLOBAL HOTKEYS",
     help_hotkey_start: "Start monitoring (press again after a match or stop)",
     help_hotkey_select: "Select the capture area (Esc cancels)",
-    help_hotkey_stop: "Stop monitoring / release the match lock",
+    help_hotkey_stop: "Release the match lock (works on the red card; the card button does the same); stop monitoring via the UI button",
     help_rules_title: "RULES & VALUES",
     help_rules: [
         "· Matching is strict on the whole affix line — no keyword fuzziness. A line with an OCR dropout never false-alarms; the next scan recovers it.",
@@ -520,7 +520,7 @@ pub static EN: Text = Text {
         "· Overlay visibility, capture visibility, and the alert sound live in \"Alerts & display\".",
     ],
     help_ocr_title: "TRADITIONAL CHINESE OCR (RECOMMENDED)",
-    help_ocr_intro: "For Traditional Chinese clients, install the Windows zh-TW OCR capability for the fastest, most accurate path; without it the app falls back to the built-in offline engine. Run in an elevated PowerShell:",
+    help_ocr_intro: "For Traditional Chinese clients, install the Windows zh-TW OCR capability for the fastest, most accurate path; without it the app falls back to the built-in offline engine. Run in an elevated PowerShell (if installation fails, check that Windows Update has not been disabled):",
     help_ocr_verify: "Verify with the command below — State : Installed means success; then restart POE Alarm:",
     help_ocr_settings_path: "Or via Settings → Time & Language → Language & Region → add \"中文(台灣)\" with language features. Reference:",
     help_ocr_doc_link: "Microsoft language pack docs",
@@ -529,5 +529,5 @@ pub static EN: Text = Text {
     help_about_fmt: "POE Alarm {} · native Rust build · by SouNd",
     help_contact: "Contact:",
     help_homepage: "· Homepage:",
-    help_notice: "The public package ships an original synthesized alert sound and no game audio assets; custom sound paths stay on this machine. THIRD-PARTY-NOTICES and licenses/ cover the bundled offline OCR — do not remove them.",
+    help_notice: "Open source under PolyForm Noncommercial 1.0.0: free to use, modify, and share for noncommercial purposes; commercial use is not permitted. THIRD-PARTY-NOTICES and licenses/ cover the bundled offline OCR — do not remove them.",
 };

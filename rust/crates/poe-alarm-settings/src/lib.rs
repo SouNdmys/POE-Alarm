@@ -21,7 +21,7 @@ use serde_json::{Map, Value};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 const RULE_SET_SCHEMA_VERSION: u32 = 1;
-pub const DEFAULT_UI_LANGUAGE: &str = "zh-CN";
+pub const DEFAULT_UI_LANGUAGE: &str = "en";
 pub const DEFAULT_OCR_LANGUAGE: &str = "en";
 pub const TRADITIONAL_CHINESE_OCR_LANGUAGE: &str = "zh-TW";
 pub const DEFAULT_START_MONITORING_HOTKEY: &str = "Ctrl+Shift+F10";
@@ -535,7 +535,10 @@ impl<'de> Deserialize<'de> for AppSettings {
 }
 
 pub fn normalize_ui_language(language: &str) -> &'static str {
-    if language.trim().to_ascii_lowercase().starts_with("en") {
+    let lower = language.trim().to_ascii_lowercase();
+    if lower.starts_with("zh") {
+        "zh-CN"
+    } else if lower.starts_with("en") {
         "en"
     } else {
         DEFAULT_UI_LANGUAGE
@@ -1568,7 +1571,9 @@ mod tests {
         let mut store = SettingsStore::new(&path);
         let settings = store.load();
         assert_eq!(settings.selected_game_profile, GameProfile::Poe1);
-        assert_eq!(settings.ui_language, "zh-CN");
+        // 未知界面语言回退默认(英文优先);zh* 前缀仍归一化为 zh-CN。
+        assert_eq!(settings.ui_language, "en");
+        assert_eq!(normalize_ui_language("zh-TW"), "zh-CN");
         assert_eq!(settings.start_monitoring_hot_key, "Ctrl+Shift+F10");
         assert_eq!(settings.hud_placement, HudPlacement::default());
         assert_eq!(settings.profiles.poe1.selected_rules().target_affix, "one");
