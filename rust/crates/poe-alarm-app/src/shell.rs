@@ -477,14 +477,18 @@ impl AppShell {
                 backend.hud_set_visible(
                     backend.settings.keep_hud_visible && self.s.run != RunPhase::Hit,
                 );
-                // 仅未监控时允许拖动浮窗;监控中保持点击穿透。
-                let interactive = self.s.run == RunPhase::Idle;
-                if self.hud_interactive != Some(interactive) {
-                    backend.hud_set_interactive(interactive);
-                    self.hud_interactive = Some(interactive);
-                }
             }
             cx.notify();
+        }
+        // 仅未监控时允许拖动浮窗;监控中保持点击穿透。
+        // 不依赖 changed:启动后哪怕没有任何事件也要下发一次 Placement,
+        // 否则浮窗保持点击穿透、无法拖动。
+        if let Some(backend) = &self.backend {
+            let interactive = self.s.run == RunPhase::Idle;
+            if self.hud_interactive != Some(interactive) {
+                backend.hud_set_interactive(interactive);
+                self.hud_interactive = Some(interactive);
+            }
         }
     }
 
