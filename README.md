@@ -1,98 +1,100 @@
 # POE Alarm
 
-POE 制作(Craft)时的本地 OCR 告警工具。它持续读取你框选的屏幕区域,识别装备提示框中的蓝色词缀;命中你设定的目标词缀组合后立即停止扫描、循环播放提示音,并弹出会阻挡后续鼠标点击的红色锁定窗——防止手速把刚洗出来的词缀点掉。
+A local OCR crafting alarm for Path of Exile 1 & 2. It watches a screen region you select, reads the blue affix lines inside the item tooltip, and the moment your target affix combination appears it stops scanning, loops an alert sound, and throws up a red lock screen that blocks further mouse clicks — so a fast crafting hand cannot click away the roll you just hit.
 
-当前正式版本:**1.0.0(纯原生 Rust 版)**。目标环境为 Windows 10/11 x64,支持 POE1 / POE2 的 English 与繁體中文客户端。不使用 .NET、Tauri 或 WebView;不联网、无账号、无遥测,只读取屏幕像素,绝不向游戏合成或补发任何输入。
+Current release: **1.0.0**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry: the app only reads screen pixels and never synthesizes or replays any input into the game.
 
-> 本仓库曾以 .NET (WPF) 实现 1.0;该实现已退役并被本 Rust 版完整替代,历史可在 git 记录中查阅。
+The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix OCR language.
 
-## 下载与运行
+> This repository previously hosted a .NET (WPF) implementation of 1.0. It has been retired and fully replaced by this Rust build; the history remains in git.
 
-从 [Releases](https://github.com/SouNdmys/POE-Alarm/releases) 下载 ZIP,解压后直接运行 `poe-alarm-app.exe`,无需安装任何运行时。首次运行 Windows 可能显示未签名安全提醒。
+## Download & run
 
-从源码构建:
+Grab the ZIP from [Releases](https://github.com/SouNdmys/POE-Alarm/releases), extract, and run `poe-alarm-app.exe`. No runtime installation required. Windows may show an unsigned-binary warning on first run.
+
+Build from source:
 
 ```powershell
 cargo build --manifest-path rust\Cargo.toml --release -p poe-alarm-app
 ```
 
-产物在 `rust\target\release\poe-alarm-app.exe`。
+The binary lands in `rust\target\release\poe-alarm-app.exe`.
 
-## 使用流程
+## How to use
 
-1. 在标题栏选择游戏(POE 1 / POE 2)和与客户端一致的识别语言(繁体中文 / English)。两款游戏分别保存词缀规则、框选区域和语言。
-2. 从游戏或 PoEDB / PoE2DB 复制完整词缀,粘贴到"完整词缀模板"。数值自动识别为占位,数值条件默认**不限制**;需要卡数值时把该行比较方式改成 范围 / ≥ / ≤ / =。
-3. 需要多个可接受结果时用"+方案"(方案之间是"或者"),同方案内用"+词缀"添加多条,配合"什么时候提醒"选择 任意 / 全部 / 指定条数。所有编辑即时自动保存。
-4. 回到游戏,按 `Ctrl+Shift+F11` 只框选装备提示框中的词缀区域——区域越小,识别越快。
-5. 按 `Ctrl+Shift+F10` 开始监控,正常洗装备。状态浮窗显示监控状态与计时;识别未出结果时鼠标完全直通,不会打断制作点击。
-6. 命中后红色锁定窗接管全部鼠标点击(外围透明、不遮挡画面),先检查装备,再点"确认"或按 `Ctrl+Shift+F12` 解除;确认后约 300ms 仍会吸收双击尾击。下一轮需重新按 F10。
+1. In the title bar, pick the game (POE 1 / POE 2) and the affix language matching your client (Traditional Chinese / English). Rules, capture regions, and languages are stored per game.
+2. Copy a complete affix from the game or PoEDB / PoE2DB and paste it into **Complete affix template**. Numbers become value slots automatically; numeric rules default to **unlimited** — switch a row to Range / ≥ / ≤ / = only when the value matters.
+3. Need multiple acceptable outcomes? Use **+Option** (options are alternatives — any one of them triggers the alert), add affixes within an option with **+Affix**, and choose **Alert when**: any / all / a chosen count. Every edit saves automatically.
+4. Back in game, press `Ctrl+Shift+F11` and select only the affix block of the item tooltip — the smaller the region, the faster the recognition.
+5. Press `Ctrl+Shift+F10` (configurable in Settings) and craft normally. While recognition is undecided your mouse stays fully passed-through — no clicks are delayed or eaten.
+6. On a match, the red lock screen takes over the mouse: everything outside the center card is transparent but still intercepts clicks. Check the item, then click **Confirm** (or press `Ctrl+Shift+F12` while the card is up). Clicks within ~300 ms after confirming are absorbed too. Press F10 again for the next round.
 
-程序内"使用说明"页包含同样的引导、繁中 OCR 安装方法与作者联系方式。"识别截图"可用存档截图回放整套识别与规则管线,适合进游戏前验证模板。
+The in-app **User guide** tab carries the same walkthrough, the Traditional Chinese OCR setup, and contact info. **Analyze screenshot** replays the whole pipeline on a saved screenshot — useful for validating templates before you play.
 
-### 全局热键
+### Global hotkeys
 
-| 热键 | 作用 |
+| Hotkey | Action |
 | --- | --- |
-| `Ctrl+Shift+F10` | 开始监控(命中或停止后需重新按) |
-| `Ctrl+Shift+F11` | 框选识别区域(Esc 取消) |
-| `Ctrl+Shift+F12` | 停止监控 / 解除命中锁定 |
+| `Ctrl+Shift+F10` | Start monitoring (three combinations selectable in Settings) |
+| `Ctrl+Shift+F11` | Select the capture region (Esc cancels) |
 
-### 状态浮窗与提醒
+Stopping is deliberate: use the **Stop monitoring** button in the UI, and release a match via the red card. There is no global stop hotkey to fat-finger.
 
-- 浮窗未监控时可直接拖动,位置自动保存;监控中变为点击穿透、不抢焦点。冷灰=未监控,墨青=监控中。
-- "提醒与显示"页可设置浮窗显隐、程序浮层是否出现在录屏中(默认可见),以及自定义命中提示音(本地 PCM WAV,路径只保存在本机)。内置音效为程序原创合成,不含游戏音频素材。
+### Status overlay
 
-## 繁中识别加速(强烈建议)
+A small always-on-top card shows the monitoring state and elapsed time. Drag it anywhere while idle (the position is remembered); while monitoring it becomes click-through and never steals focus. Overlay visibility, screen-capture visibility (OBS etc.), the alert sound (local WAV), and the UI language live in **Settings**.
 
-繁体中文客户端建议安装 Windows 的 `zh-TW` OCR 能力,识别走更快更准的系统路径。管理员身份打开 PowerShell:
+## Traditional Chinese OCR (recommended)
+
+For Traditional Chinese clients, install the Windows `zh-TW` OCR capability so recognition takes the fastest, most accurate system path. In an elevated PowerShell:
 
 ```powershell
 Add-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0"
 ```
 
-验证(看到 `State : Installed` 即成功,然后重启 POE Alarm):
+Verify — `State : Installed` means success, then restart POE Alarm:
 
 ```powershell
 Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0"
 ```
 
-也可以走系统设置:设置 → 时间和语言 → 语言和区域 → 添加"中文(台灣)"。未安装时程序自动退回 EXE 内置的 PP-OCRv5 离线兼容引擎,功能完整但速度与覆盖略低。两种路径都不需要 Python、Paddle 框架或联网。实测数据与边界见[繁體中文 OCR 生产说明](docs/traditional-chinese-ocr.md)。
+If installation fails, check that Windows Update has not been disabled. Alternatively: Settings → Time & Language → Language & Region → add "中文(台灣)" with its language features. Without the capability the app automatically falls back to the bundled offline PP-OCRv5 engine — fully functional, somewhat slower. Neither path needs Python, a Paddle installation, or the internet. Production details and measurements: [Traditional Chinese OCR notes](docs/traditional-chinese-ocr.md).
 
-## 匹配规则
+## Matching rules
 
-程序不猜关键词,也不需要内置全量词缀库。你粘贴的完整词缀就是本次监控的临时记录。例如:
+The app does not guess keywords and needs no built-in affix database. The complete affix you paste *is* the rule. For example:
 
 ```text
 (6—8)% increased Attack Speed if you've dealt a Critical Strike Recently
 ```
 
-归一化为:
+normalizes to:
 
 ```text
 <PCT> increased attack speed if you've dealt a critical strike recently
 ```
 
-`#`、实际数值、固定数字、数值区间以及高级描述中的 `8(6-8)%` 都映射为带类型的数值占位符;百分比/普通数与正/负作为结构保留。除数值外,所有文字及顺序必须完整一致,Attack/Cast、Cold/Fire、dealt/killed 等语义近邻不会互相命中;OCR 掉字的行单帧不判命中(防误报),监控中靠下一帧重扫自愈。数值条件只比较屏幕上实际显示的值(催化剂、品质或特殊效果会改变显示值),不推算基础值。POE1 逻辑词缀可跨 1–4 条相邻物理行,POE2 支持最多 8 行以覆盖长碑牌词缀。同一条实际词缀在一种结果内最多计数一次。
+`#`, actual rolls, fixed numbers, ranges, and advanced-description forms like `8(6-8)%` all map to typed value slots; percent-vs-plain and sign are kept as structure. Everything else must match the whole line exactly — semantic neighbours like Attack/Cast, Cold/Fire, dealt/killed never cross-match, and a line with an OCR dropout never false-alarms (the next scan recovers it). Numeric rules compare the value **shown on screen** — catalysts, quality, and special effects change shown values, so configure what you see. A logical affix may span 1–4 physical lines in POE 1 and up to 8 in POE 2 (long tablet mods). One physical affix line counts at most once per match option.
 
-## 安全边界
+## Safety boundaries
 
-- 只读取屏幕像素;绝不合成、补发、重放或排队任何输入。
-- 命中前不安装任何低级鼠标闸门,识别期间所有点击直通游戏——这保证手感,也意味着极快连点可能在几十毫秒识别窗口内点过目标。
-- 严格命中后,程序先呈现并验证红色锁定层确实可见、可点击且覆盖整个虚拟桌面,才开始拦截输入;无法可靠显示时明确报错并停止,不把隐藏窗口当保护。
-- 设置保存在 `%LOCALAPPDATA%/PoeAlarm/settings.json`。从 Rust 预览版升级时首次启动自动迁移预览设置;旧 .NET 设置留档为同目录 `settings.json.dotnet-1.0.bak`。
+- Screen pixels in, nothing out: no input synthesis, replay, or queuing — ever.
+- No low-level mouse guard is armed before a confirmed match; every click passes straight to the game while recognition runs.
+- After a strict match the app first presents and *verifies* that the red lock layer is visible, clickable, and covers the whole virtual desktop before it intercepts input. If it cannot present reliably, it reports the error and stops instead of pretending a hidden window protects you.
+- Settings live at `%LOCALAPPDATA%/PoeAlarm/settings.json`. Upgrading from the Rust preview migrates its settings automatically on first launch; a .NET-era file is kept as `settings.json.dotnet-1.0.bak`.
 
-## 工程结构
+## Project layout
 
-`rust/` 工作区按层拆分:
+The `rust/` workspace is layered:
 
-- `poe-alarm-core` — 词缀归一化、整句匹配、结构化规则引擎与数值约束。
-- `poe-alarm-vision` / `poe-alarm-ocr-win` / `poe-alarm-ocr-paddle` — 截屏解码、蓝字掩膜与分行、Windows OCR 与内置 PP-OCRv5 兼容路径。
-- `poe-alarm-recognition` / `poe-alarm-monitoring` / `poe-alarm-runtime` — 识别编排、监控循环、生产运行时。
-- `poe-alarm-platform-win` / `poe-alarm-alert-win` — 热键、HUD 浮窗、框选、WAV 播放、红色锁定层与鼠标防护。
-- `poe-alarm-app` — GPUI 前端(Ledger 设计),规则台单窗口。
-- `poe-alarm-settings` — 设置模型、schema 兼容与迁移。
+- `poe-alarm-core` — affix normalization, whole-line matching, the structured rule engine, and numeric constraints.
+- `poe-alarm-vision` / `poe-alarm-ocr-win` / `poe-alarm-ocr-paddle` — screenshot decoding, blue-mask banding, Windows OCR, and the bundled PP-OCRv5 fallback.
+- `poe-alarm-recognition` / `poe-alarm-monitoring` / `poe-alarm-runtime` — recognition orchestration, the monitor loop, and the production runtime.
+- `poe-alarm-platform-win` / `poe-alarm-alert-win` — hotkeys, the status overlay, region selection, WAV playback, the red lock layer, and the mouse guard.
+- `poe-alarm-app` — the GPUI front end (Ledger design), a single workbench window.
+- `poe-alarm-settings` — the settings model, schema compatibility, and migration.
 
-验证入口:
+Verification entry points:
 
 ```powershell
 cargo fmt --manifest-path rust\Cargo.toml --all -- --check
@@ -100,12 +102,16 @@ cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --locked 
 cargo test --manifest-path rust\Cargo.toml --workspace --all-targets --locked --release --no-fail-fast
 ```
 
-截图回归工具(`recognition-manifest-probe` / `recognition-screenshot-probe`)可对真实游戏截图批量验证正例与语义近邻负例;公开仓库只保存 JSON manifest,原始截图因体积与隐私不入库。
+Screenshot regression tools (`recognition-manifest-probe`, `recognition-screenshot-probe`) batch-verify positives and semantic-neighbour negatives against real game screenshots; the repository only carries the JSON manifests — raw screenshots stay out of git for size and privacy.
 
-发布 ZIP 附带 `THIRD-PARTY-NOTICES.md` 与 `licenses/`,是内置离线 OCR 运行时和模型的许可文件,请勿从二次分发包中删除。
+Release ZIPs include `THIRD-PARTY-NOTICES.md` and `licenses/` covering the bundled offline OCR runtime and model; do not strip them from redistributed packages.
 
-## 作者与支持
+## License
 
-- 作者:SouNd
-- 联系邮箱:[soundmys1994@gmail.com](mailto:soundmys1994@gmail.com)
-- 项目主页:[SouNdmys/POE-Alarm](https://github.com/SouNdmys/POE-Alarm)
+**PolyForm Noncommercial 1.0.0** — see [LICENSE.md](LICENSE.md). You may use, modify, and share this software for any **noncommercial** purpose; **commercial use is not permitted**. Third-party components (ONNX Runtime, the PP-OCRv5 model, and vendored Rust crates) remain under their own licenses in `THIRD-PARTY-NOTICES.md` and `licenses/`.
+
+## Author & support
+
+- Author: **SouNd**
+- Contact: [soundmys1994@gmail.com](mailto:soundmys1994@gmail.com)
+- Project home: [SouNdmys/POE-Alarm](https://github.com/SouNdmys/POE-Alarm)

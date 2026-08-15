@@ -29,12 +29,11 @@ impl RunPhase {
 
 }
 
-/// 中央编辑区 tab(词缀条件 / 识别区域 / 提醒与显示 / 使用说明)。
+/// 中央编辑区 tab(词缀条件 / 设置 / 使用说明)。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EditorTab {
     Conditions,
-    Region,
-    Alerts,
+    Settings,
     Help,
 }
 

@@ -147,7 +147,7 @@ impl AppShell {
                     .border_color(c(HAIRLINE_SOFT))
                     .child(
                         div()
-                            .id("tree-add-plan")
+                            .id("tree-add-affix")
                             .flex_1()
                             .h(px(H_BUTTON))
                             .flex()
@@ -160,14 +160,14 @@ impl AppShell {
                             .border_color(c(HAIRLINE_SOFT))
                             .hover(|s| s.bg(c(PRESSED)))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_group(window, cx);
+                                this.add_condition(window, cx);
                             }))
                             .child(div().text_color(c(ACCENT)).child("+"))
-                            .child(self.t().add_result),
+                            .child(self.t().add_condition),
                     )
                     .child(
                         div()
-                            .id("tree-add-affix")
+                            .id("tree-add-plan")
                             .flex_1()
                             .h(px(H_BUTTON))
                             .flex()
@@ -178,10 +178,10 @@ impl AppShell {
                             .text_color(c(TEXT_SECONDARY))
                             .hover(|s| s.bg(c(PRESSED)))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_condition(window, cx);
+                                this.add_group(window, cx);
                             }))
                             .child(div().text_color(c(ACCENT)).child("+"))
-                            .child(self.t().add_condition),
+                            .child(self.t().add_result),
                     ),
             )
     }
@@ -197,8 +197,7 @@ impl AppShell {
             .child(self.wb_editor_tabs(cx))
             .child(match self.s.editor_tab {
                 EditorTab::Conditions => self.wb_tab_conditions(cx),
-                EditorTab::Region => self.wb_tab_region(cx),
-                EditorTab::Alerts => self.wb_tab_alerts(cx),
+                EditorTab::Settings => self.wb_tab_settings(cx),
                 EditorTab::Help => self.wb_tab_help(cx),
             })
     }
@@ -248,16 +247,9 @@ impl AppShell {
                 cx,
             ))
             .child(tab(
-                "tab-region",
-                text.tab_region,
-                EditorTab::Region,
-                self.s.editor_tab,
-                cx,
-            ))
-            .child(tab(
-                "tab-alert",
-                text.tab_alerts,
-                EditorTab::Alerts,
+                "tab-settings",
+                text.tab_settings,
+                EditorTab::Settings,
                 self.s.editor_tab,
                 cx,
             ))
@@ -504,19 +496,27 @@ impl AppShell {
         )
     }
 
-    /// 提醒与显示:浮窗显隐、录屏可见性、提示音、界面语言、热键。改动即保存。
-    fn wb_tab_alerts(&mut self, cx: &mut Context<Self>) -> Div {
+    /// 设置:识别区域 + 提醒与显示(浮窗、录屏、界面语言、提示音、启动热键)。
+    /// 改动即保存。
+    fn wb_tab_settings(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.t();
-        let (keep_hud, allow_capture, sound, hotkey, english_ui) = match &self.backend {
+        let (keep_hud, allow_capture, sound, english_ui) = match &self.backend {
             Some(b) => (
                 b.settings.keep_hud_visible,
                 b.settings.allow_overlay_capture,
                 b.sound_label().unwrap_or_else(|| t.sound_builtin.to_owned()),
-                b.hotkey_label(),
                 b.settings.ui_language.starts_with("en"),
             ),
-            None => (true, true, "—".to_owned(), "—".to_owned(), false),
+            None => (true, true, "—".to_owned(), false),
         };
+        let (region, ocr) = match &self.backend {
+            Some(b) => (
+                b.region_label().unwrap_or_else(|| t.region_unset.to_owned()),
+                b.ocr_language_label(),
+            ),
+            None => ("—".to_owned(), "—".to_owned()),
+        };
+        let hotkey_index = self.backend.as_ref().map(|b| b.start_hotkey_index()).unwrap_or(0);
         let label = |caption: &'static str| {
             div()
                 .w(px(LABEL_COL))
@@ -583,12 +583,91 @@ impl AppShell {
                         .child(hint),
                 )
         };
+        // 启动热键三选一(标签为组合本身,语言无关)。
+        let hotkey_picker = {
+            use poe_alarm_platform_win::StartMonitoringHotKey;
+            let mut picker = div()
+                .h_flex()
+                .flex_none()
+                .border_1()
+                .border_color(c(HAIRLINE));
+            for (i, option) in StartMonitoringHotKey::OPTIONS.into_iter().enumerate() {
+                let mut cell = div()
+                    .id(("set-hotkey", i))
+                    .h(px(24.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .font_family(FONT_MONO)
+                    .text_size(fs(FS_11_5))
+                    .whitespace_nowrap()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_start_hotkey(i, cx);
+                    }));
+                if i > 0 {
+                    cell = cell.border_l_1().border_color(c(HAIRLINE));
+                }
+                cell = if i == hotkey_index {
+                    cell.bg(c(ACCENT_WASH)).text_color(c(ACCENT_TEXT))
+                } else {
+                    cell.bg(c(PANEL))
+                        .text_color(c(TEXT_SECONDARY))
+                        .hover(|s| s.bg(c(HOVER)))
+                };
+                picker = picker.child(cell.child(option.setting_value()));
+            }
+            picker
+        };
+        let section = |title: &'static str| {
+            div()
+                .h_flex()
+                .items_center()
+                .gap(px(10.))
+                .child(micro_title_sm(title))
+                .child(div().flex_1().h(px(1.)).bg(c(HAIRLINE_SOFT)))
+        };
         div()
             .flex_1()
             .min_h_0()
             .v_flex()
             .gap(px(12.))
             .p_4()
+            .child(section(t.section_region))
+            .child(
+                div()
+                    .h_flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(label(t.current_region))
+                    .child(
+                        div()
+                            .font_family(FONT_MONO)
+                            .text_size(fs(FS_12))
+                            .text_color(c(TEXT_PRIMARY))
+                            .child(SharedString::from(region)),
+                    )
+                    .child(
+                        button(
+                            "wb-select-region",
+                            LedgerButton::Secondary,
+                            t.select_region_button,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.begin_region_selection(cx))),
+                    )
+                    .child(hotkey_chips(&["Ctrl", "⇧", "F11"])),
+            )
+            .child(row(
+                label(t.ocr_language_row),
+                div()
+                    .font_family(FONT_MONO)
+                    .text_size(fs(FS_12))
+                    .text_color(c(TEXT_PRIMARY))
+                    .whitespace_nowrap()
+                    .child(SharedString::from(ocr)),
+                t.region_hint,
+            ))
+            .child(section(t.section_alerts))
             .child(row(
                 label(t.hud_row),
                 toggle(
@@ -651,87 +730,8 @@ impl AppShell {
                             .on_click(cx.listener(|this, _, _, cx| this.clear_alert_sound(cx))),
                     ),
             )
-            .child(row(
-                label(t.hotkey_row),
-                div()
-                    .font_family(FONT_MONO)
-                    .text_size(fs(FS_12))
-                    .text_color(c(TEXT_PRIMARY))
-                    .whitespace_nowrap()
-                    .child(SharedString::from(hotkey)),
-                t.hotkey_row_hint,
-            ))
+            .child(row(label(t.hotkey_row), hotkey_picker, t.hotkey_row_hint))
             .child(warning_band(t.alerts_note_tag, t.alerts_note))
-    }
-
-    fn wb_tab_region(&mut self, cx: &mut Context<Self>) -> Div {
-        let t = self.t();
-        let (region, ocr) = match &self.backend {
-            Some(b) => (
-                b.region_label().unwrap_or_else(|| t.region_unset.to_owned()),
-                b.ocr_language_label(),
-            ),
-            None => ("—".to_owned(), "—".to_owned()),
-        };
-        div()
-            .flex_1()
-            .min_h_0()
-            .v_flex()
-            .gap(px(10.))
-            .p_4()
-            .child(
-                div()
-                    .h_flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        div()
-                            .w(px(LABEL_COL))
-                            .flex_none()
-                            .text_size(fs(FS_11_5))
-                            .text_color(c(TEXT_META))
-                            .child(t.current_region),
-                    )
-                    .child(
-                        div()
-                            .font_family(FONT_MONO)
-                            .text_size(fs(FS_12))
-                            .text_color(c(TEXT_PRIMARY))
-                            .child(SharedString::from(region)),
-                    )
-                    .child(
-                        button(
-                            "wb-select-region",
-                            LedgerButton::Secondary,
-                            t.select_region_button,
-                            cx,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.begin_region_selection(cx))),
-                    )
-                    .child(hotkey_chips(&["Ctrl", "⇧", "F11"])),
-            )
-            .child(
-                div()
-                    .h_flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(
-                        div()
-                            .w(px(LABEL_COL))
-                            .flex_none()
-                            .text_size(fs(FS_11_5))
-                            .text_color(c(TEXT_META))
-                            .child(t.ocr_language_row),
-                    )
-                    .child(
-                        div()
-                            .font_family(FONT_MONO)
-                            .text_size(fs(FS_12))
-                            .text_color(c(TEXT_PRIMARY))
-                            .child(SharedString::from(ocr)),
-                    ),
-            )
-            .child(warning_band(t.hint_tag, t.region_hint))
     }
 
     fn wb_tab_conditions(&mut self, cx: &mut Context<Self>) -> Div {

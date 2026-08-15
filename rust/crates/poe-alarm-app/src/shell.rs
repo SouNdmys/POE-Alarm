@@ -282,12 +282,6 @@ impl AppShell {
                     }
                 }
                 PlatformEvent::HotKeySelectRegion => self.begin_region_selection(cx),
-                PlatformEvent::HotKeyStopOrAcknowledge => {
-                    // 用户裁定:F12 只停止监控;命中锁定由红窗按钮解除。
-                    if self.s.run == RunPhase::Monitoring {
-                        self.toggle_run(cx);
-                    }
-                }
                 PlatformEvent::RegionSelected(region) => {
                     let text = self.t();
                     if let Some(backend) = &mut self.backend {
@@ -1082,6 +1076,15 @@ impl AppShell {
         }
         if let Some(backend) = &self.backend {
             backend.hud_set_visible(keep && self.s.run != RunPhase::Hit);
+        }
+        self.persist();
+        cx.notify();
+    }
+
+    /// 切换启动热键(三选一,即时生效并保存)。
+    pub fn set_start_hotkey(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(backend) = &mut self.backend {
+            backend.set_start_hotkey_index(index);
         }
         self.persist();
         cx.notify();
