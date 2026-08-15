@@ -2,24 +2,31 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::num::NonZeroIsize;
 use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
+use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, COLOR_WINDOW, EndPaint, GetSysColorBrush, PAINTSTRUCT,
+    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, COLOR_WINDOW, CreateFontW,
+    CreateSolidBrush, DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
+    DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect, FrameRect,
+    GetSysColorBrush, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE,
-    GetWindowLongPtrW, HTTRANSPARENT, HWND_TOPMOST, IsWindow, MA_NOACTIVATE, RegisterClassExW,
-    SET_WINDOW_POS_FLAGS, SW_HIDE, SWP_FRAMECHANGED, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowDisplayAffinity, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WINDOW_EX_STYLE, WM_MOUSEACTIVATE,
-    WM_NCHITTEST, WM_PAINT, WNDCLASSEXW, WS_POPUP,
+    GetWindowLongPtrW, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST, IsWindow, MA_NOACTIVATE,
+    RegisterClassExW, SET_WINDOW_POS_FLAGS, SW_HIDE, SWP_FRAMECHANGED, SWP_HIDEWINDOW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow, WDA_EXCLUDEFROMCAPTURE,
+    WDA_NONE, WINDOW_EX_STYLE, WM_EXITSIZEMOVE, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_PAINT,
+    WNDCLASSEXW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
-use crate::hud::{CaptureAffinity, HudWindowConfig, HudWindowPolicy};
+use crate::hud::{CaptureAffinity, HudContent, HudWindowConfig, HudWindowPolicy};
 use crate::{NativeWindowHandle, PlatformError, RectI};
 
 use super::error_from_windows;
@@ -28,6 +35,165 @@ const HUD_CLASS: PCWSTR = w!("PoeAlarmPlatformStatusHud");
 const PASSIVE_STYLE_BITS: isize = 0x0800_0020; // WS_EX_NOACTIVATE | WS_EX_TRANSPARENT
 
 static HUD_CLASS_READY: OnceLock<Result<(), PlatformError>> = OnceLock::new();
+
+/// 单实例 HUD 的当前内容;wndproc 在 WM_PAINT 里读取。
+static HUD_CONTENT: Mutex<Option<HudContent>> = Mutex::new(None);
+
+/// 用户拖动结束后的窗口左上角(屏幕坐标);服务线程轮询取走。
+static HUD_USER_MOVE: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+
+const fn hud_rgb(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+}
+
+fn hud_font(height: i32, weight: i32) -> HFONT {
+    // SAFETY: CreateFontW with a fixed family name; caller deletes via DeleteObject.
+    unsafe {
+        CreateFontW(
+            -height,
+            0,
+            0,
+            0,
+            weight,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            w!("Microsoft YaHei UI"),
+        )
+    }
+}
+
+unsafe fn hud_text(
+    dc: windows::Win32::Graphics::Gdi::HDC,
+    font: HFONT,
+    color: COLORREF,
+    text: &str,
+    mut rect: RECT,
+    flags: windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let mut wide: Vec<u16> = text.encode_utf16().collect();
+    // SAFETY: dc/font live for this paint; DrawTextW bounds by rect.
+    unsafe {
+        let previous = SelectObject(dc, HGDIOBJ(font.0));
+        SetTextColor(dc, color);
+        DrawTextW(dc, &mut wide, &mut rect, flags);
+        SelectObject(dc, previous);
+    }
+}
+
+/// Ledger 两态状态卡绘制。
+unsafe fn paint_hud(hwnd: HWND) {
+    let mut paint = PAINTSTRUCT::default();
+    // SAFETY: balanced Begin/EndPaint on our HWND.
+    let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+    let mut client = RECT::default();
+    let _ = unsafe { GetClientRect(hwnd, &mut client) };
+    let content = HUD_CONTENT
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default()
+        .unwrap_or_default();
+
+    let (bar, border, dot, status_color, meta) = if content.monitoring {
+        (
+            hud_rgb(0x0E, 0x6A, 0x64),
+            hud_rgb(0xA6, 0xC9, 0xC4),
+            hud_rgb(0x0E, 0x6A, 0x64),
+            hud_rgb(0x0B, 0x53, 0x4E),
+            hud_rgb(0x52, 0x4C, 0x41),
+        )
+    } else {
+        (
+            hud_rgb(0xA7, 0x9E, 0x8E),
+            hud_rgb(0xCB, 0xC2, 0xB2),
+            hud_rgb(0xA7, 0x9E, 0x8E),
+            hud_rgb(0x52, 0x4C, 0x41),
+            hud_rgb(0x6F, 0x67, 0x59),
+        )
+    };
+
+    // SAFETY: brushes/fonts created and released within this scope.
+    unsafe {
+        let canvas = CreateSolidBrush(hud_rgb(0xF5, 0xF2, 0xEC));
+        let border_brush = CreateSolidBrush(border);
+        let bar_brush = CreateSolidBrush(bar);
+        let dot_brush = CreateSolidBrush(dot);
+        FillRect(dc, &client, canvas);
+        FrameRect(dc, &client, border_brush);
+        let left_bar = RECT {
+            left: client.left,
+            top: client.top,
+            right: client.left + 2,
+            bottom: client.bottom,
+        };
+        FillRect(dc, &left_bar, bar_brush);
+        let dot_rect = RECT {
+            left: client.left + 11,
+            top: client.top + 12,
+            right: client.left + 17,
+            bottom: client.top + 18,
+        };
+        FillRect(dc, &dot_rect, dot_brush);
+        SetBkMode(dc, TRANSPARENT);
+
+        let status_font = hud_font(16, FW_SEMIBOLD.0 as i32);
+        let mono_font = hud_font(14, FW_NORMAL.0 as i32);
+        hud_text(
+            dc,
+            status_font,
+            status_color,
+            &content.status_text,
+            RECT {
+                left: client.left + 24,
+                top: client.top + 6,
+                right: client.right - 70,
+                bottom: client.top + 26,
+            },
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
+        hud_text(
+            dc,
+            mono_font,
+            meta,
+            &content.elapsed,
+            RECT {
+                left: client.right - 68,
+                top: client.top + 6,
+                right: client.right - 10,
+                bottom: client.top + 26,
+            },
+            DT_SINGLELINE | DT_VCENTER | DT_RIGHT,
+        );
+        hud_text(
+            dc,
+            mono_font,
+            meta,
+            &content.target,
+            RECT {
+                left: client.left + 11,
+                top: client.top + 28,
+                right: client.right - 10,
+                bottom: client.bottom - 4,
+            },
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
+        let _ = DeleteObject(HGDIOBJ(status_font.0));
+        let _ = DeleteObject(HGDIOBJ(mono_font.0));
+        let _ = DeleteObject(HGDIOBJ(canvas.0));
+        let _ = DeleteObject(HGDIOBJ(border_brush.0));
+        let _ = DeleteObject(HGDIOBJ(bar_brush.0));
+        let _ = DeleteObject(HGDIOBJ(dot_brush.0));
+        let _ = EndPaint(hwnd, &paint);
+    }
+}
 
 /// Thread-bound owner of the native status HUD window.
 pub(crate) struct NativeHudWindow {
@@ -166,6 +332,17 @@ impl NativeHudWindow {
             .map_err(|error| error_from_windows("SetWindowPos(show HUD)", error))
     }
 
+    pub(crate) fn set_content(&mut self, content: HudContent) -> Result<(), PlatformError> {
+        if let Ok(mut slot) = HUD_CONTENT.lock() {
+            *slot = Some(content);
+        }
+        // SAFETY: hwnd is live; invalidation schedules WM_PAINT on its thread.
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, false);
+        }
+        Ok(())
+    }
+
     pub(crate) fn hide(&mut self) -> Result<(), PlatformError> {
         // SAFETY: hwnd is live and SW_HIDE does not activate it.
         unsafe {
@@ -181,6 +358,11 @@ impl NativeHudWindow {
             )
         }
         .map_err(|error| error_from_windows("SetWindowPos(hide HUD)", error))
+    }
+
+    /// 取走用户拖动结束后的窗口左上角(无新拖动时为 None)。
+    pub(crate) fn take_user_move(&mut self) -> Option<(i32, i32)> {
+        HUD_USER_MOVE.lock().ok().and_then(|mut slot| slot.take())
     }
 
     pub(super) fn raw_handle(&self) -> HWND {
@@ -243,9 +425,20 @@ unsafe extern "system" fn hud_window_proc(
             if style & PASSIVE_STYLE_BITS == PASSIVE_STYLE_BITS {
                 LRESULT(HTTRANSPARENT as isize)
             } else {
-                // SAFETY: Forward unhandled hit testing to the system procedure.
-                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+                // Placement 模式:整张卡都是拖动把手。
+                LRESULT(HTCAPTION as isize)
             }
+        }
+        WM_EXITSIZEMOVE => {
+            let mut rect = RECT::default();
+            // SAFETY: hwnd is the live HUD window that just finished a user move.
+            if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok()
+                && let Ok(mut slot) = HUD_USER_MOVE.lock()
+            {
+                *slot = Some((rect.left, rect.top));
+            }
+            // SAFETY: Forward to the system procedure after recording the move.
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_MOUSEACTIVATE => {
             // SAFETY: Querying styles for the window currently dispatching the message.
@@ -258,11 +451,9 @@ unsafe extern "system" fn hud_window_proc(
             }
         }
         WM_PAINT => {
-            let mut paint = PAINTSTRUCT::default();
-            // SAFETY: Standard balanced paint pair for this HWND.
+            // SAFETY: hwnd is the live HUD window being painted.
             unsafe {
-                BeginPaint(hwnd, &mut paint);
-                let _ = EndPaint(hwnd, &paint);
+                paint_hud(hwnd);
             }
             LRESULT(0)
         }

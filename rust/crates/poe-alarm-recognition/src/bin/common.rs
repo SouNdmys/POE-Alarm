@@ -89,8 +89,8 @@ pub fn paddle_configuration(arguments: &Arguments) -> Result<Option<PaddleBacken
     let Some(runtime) = arguments.value("--onnx-runtime") else {
         return Ok(None);
     };
-    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let asset_root = source_root.join("src/PoeAlarm.App/Assets/Ocr");
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let asset_root = source_root.join("assets/ocr");
     let model = arguments
         .value("--model")
         .map(PathBuf::from)

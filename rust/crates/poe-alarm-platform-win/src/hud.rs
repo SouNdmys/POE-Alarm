@@ -192,6 +192,15 @@ const fn contains_rect(outer: RectI, inner: RectI) -> bool {
         && inner.bottom() <= outer.bottom()
 }
 
+/// HUD 卡片内容(Ledger 两态:冷灰未监控 / 墨青监控中)。
+#[derive(Clone, Debug, Default)]
+pub struct HudContent {
+    pub monitoring: bool,
+    pub status_text: String,
+    pub elapsed: String,
+    pub target: String,
+}
+
 /// Native HUD construction parameters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HudWindowConfig {
@@ -250,12 +259,23 @@ impl HudWindow {
         self.native.set_bounds(bounds, self.policy)
     }
 
+    pub fn set_content(&mut self, content: HudContent) -> Result<(), PlatformError> {
+        self.native.set_content(content)
+    }
+
     pub fn show(&mut self) -> Result<(), PlatformError> {
         self.native.show(self.policy)
     }
 
     pub fn hide(&mut self) -> Result<(), PlatformError> {
         self.native.hide()
+    }
+
+    /// 取走最近一次用户拖动结束后的窗口左上角(屏幕坐标)。
+    pub fn take_user_move(&mut self) -> Option<PointI> {
+        self.native
+            .take_user_move()
+            .map(|(x, y)| PointI::new(x, y))
     }
 }
 

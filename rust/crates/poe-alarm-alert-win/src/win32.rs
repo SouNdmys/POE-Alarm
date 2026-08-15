@@ -8,32 +8,32 @@ use std::time::Instant;
 use poe_alarm_platform_win::{LoopingWavePlayer, MouseButtons, RectI};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
-    DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK,
-    DeleteObject, DrawTextW, EndPaint, FW_NORMAL, FW_SEMIBOLD, FillRect, FrameRect,
-    GetMonitorInfoW, HBRUSH, HGDIOBJ, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
-    MonitorFromRect, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor,
-    TRANSPARENT, UpdateWindow,
+    AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+    CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleDC, CreateDIBSection, CreateFontW,
+    CreateSolidBrush, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE,
+    DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, FW_NORMAL, FW_SEMIBOLD, FillRect,
+    FrameRect, GdiFlush, GetDC, GetMonitorInfoW, HBITMAP, HBRUSH, HGDIOBJ,
+    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromRect, OUT_DEFAULT_PRECIS, PtInRect,
+    ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetAsyncKeyState, IsWindowEnabled, VK_CONTROL, VK_F12, VK_LBUTTON, VK_MBUTTON,
-    VK_RBUTTON, VK_SHIFT, VK_XBUTTON1, VK_XBUTTON2,
+    GetAsyncKeyState, IsWindowEnabled, VK_CONTROL, VK_F12, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+    VK_SHIFT, VK_XBUTTON1, VK_XBUTTON2,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_CLICKED, BS_PUSHBUTTON, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW,
-    DefWindowProcW, DestroyWindow, DispatchMessageW, GA_ROOT, GWL_EXSTYLE, GWLP_USERDATA,
-    GetAncestor, GetClientRect, GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
-    HMENU, HTCLIENT, HWND_TOPMOST, IsWindow, IsWindowVisible, KillTimer, MA_NOACTIVATE, MSG,
-    MoveWindow, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, RegisterClassExW,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE,
-    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowDisplayAffinity,
-    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-    WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND,
-    WM_CREATE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NCCREATE,
-    WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_CHILD, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WindowFromPoint,
+    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GA_ROOT, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetMessageW,
+    GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, HTCLIENT, HWND_TOPMOST, IsWindow,
+    IsWindowVisible, KillTimer, MA_NOACTIVATE, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
+    RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer,
+    SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+    ULW_ALPHA, UpdateLayeredWindow, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WINDOW_EX_STYLE, WM_APP,
+    WM_CLOSE, WM_CREATE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONDOWN,
+    WM_MOUSEACTIVATE, WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
 };
 use windows::core::{PCWSTR, w};
 
@@ -45,7 +45,6 @@ use crate::{AlertEvent, AlertFailure, AlertFailureKind, AlertId, AlertServiceCon
 
 const CLASS_NAME: PCWSTR = w!("PoeAlarmNativeBlockingAlert");
 const WINDOW_TITLE: PCWSTR = w!("POE Alarm");
-const BUTTON_ID: u16 = 0x504F;
 const POLL_TIMER_ID: usize = 0x414C_5254;
 const POLL_INTERVAL_MS: u32 = 20;
 const WM_ALERT_COMMANDS: u32 = WM_APP + 0x451;
@@ -56,6 +55,8 @@ const CARD_HEIGHT: i32 = 360;
 const CARD_MARGIN: i32 = 28;
 const BUTTON_WIDTH: i32 = 360;
 const BUTTON_HEIGHT: i32 = 58;
+/// 按钮下方页脚提示条(快捷键说明)的高度。
+const FOOTER_STRIP: i32 = 26;
 
 static CLASS_READY: OnceLock<Result<(), AlertFailure>> = OnceLock::new();
 
@@ -417,7 +418,9 @@ impl AlertWorker {
 
 struct WindowContext {
     native_ownership_claimed: Arc<AtomicBool>,
-    button: HWND,
+    /// 自绘确认键的窗口内(client)矩形;WM_LBUTTONDOWN 据此命中。
+    button_rect: RECT,
+    button_enabled: bool,
     text: AlertText,
     card: RECT,
     acknowledgement_requested: bool,
@@ -429,7 +432,8 @@ impl WindowContext {
     fn placeholder(native_ownership_claimed: Arc<AtomicBool>) -> Self {
         Self {
             native_ownership_claimed,
-            button: HWND::default(),
+            button_rect: RECT::default(),
+            button_enabled: true,
             text: AlertText {
                 title: String::new(),
                 detail: String::new(),
@@ -490,7 +494,10 @@ impl NativeOverlay {
             &native_ownership_claimed,
         )));
         let context_pointer = Box::into_raw(context);
-        let extended = WINDOW_EX_STYLE(WS_EX_TOPMOST.0 | WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0);
+        // WS_EX_LAYERED:逐像素 alpha 让外围视觉透明(alpha≥1 仍拦截点击)。
+        let extended = WINDOW_EX_STYLE(
+            WS_EX_TOPMOST.0 | WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0 | WS_EX_LAYERED.0,
+        );
         // SAFETY: Class is registered, dimensions are validated, and the
         // WindowContext pointer is reclaimed by WM_NCDESTROY or below on failure.
         let created = unsafe {
@@ -575,16 +582,7 @@ impl NativeOverlay {
         context.acknowledgement_requested = false;
         context.acknowledgement_chord_was_down = acknowledgement_chord_is_down();
         context.topology_refresh_requested = false;
-        let button_text = wide(&text.button);
-        unsafe { SetWindowTextW(context.button, PCWSTR(button_text.as_ptr())) }.map_err(
-            |error| {
-                windows_failure(
-                    AlertFailureKind::WindowPresentation,
-                    "SetWindowTextW(alert acknowledgement)",
-                    error,
-                )
-            },
-        )?;
+        context.button_enabled = true;
         self.refresh_topology()
     }
 
@@ -596,34 +594,22 @@ impl NativeOverlay {
         let desktop = virtual_desktop()?;
         let monitor = monitor_bounds(self.anchor)?;
         let geometry = OverlayGeometry::for_topology(desktop, monitor);
+        let hwnd = self.hwnd;
         let context = self.context_mut()?;
         context.card = geometry.card;
         context.topology_refresh_requested = false;
         let button_width = BUTTON_WIDTH.min(geometry.card_width - CARD_MARGIN * 2);
         let button_x = geometry.card.left + (geometry.card_width - button_width) / 2;
-        let button_y = geometry.card.bottom - CARD_MARGIN - BUTTON_HEIGHT;
+        let button_y = geometry.card.bottom - CARD_MARGIN - FOOTER_STRIP - BUTTON_HEIGHT;
+        context.button_rect = RECT {
+            left: button_x,
+            top: button_y,
+            right: button_x + button_width,
+            bottom: button_y + BUTTON_HEIGHT,
+        };
         unsafe {
-            MoveWindow(
-                context.button,
-                button_x,
-                button_y,
-                button_width,
-                BUTTON_HEIGHT,
-                true,
-            )
-        }
-        .map_err(|error| {
-            windows_failure(
-                AlertFailureKind::WindowPresentation,
-                "MoveWindow(alert acknowledgement)",
-                error,
-            )
-        })?;
-        unsafe {
-            let _ = EnableWindow(context.button, true);
-            let _ = InvalidateRect(Some(self.hwnd), None, false);
             SetWindowPos(
-                self.hwnd,
+                hwnd,
                 Some(HWND_TOPMOST),
                 desktop.left,
                 desktop.top,
@@ -638,14 +624,8 @@ impl NativeOverlay {
                     error,
                 )
             })?;
-            let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
-            if !UpdateWindow(self.hwnd).as_bool() {
-                return Err(windows_failure(
-                    AlertFailureKind::WindowPresentation,
-                    "UpdateWindow(blocking alert)",
-                    windows::core::Error::from_win32(),
-                ));
-            }
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            render_layered(hwnd, context)?;
         }
         self.verify_blocking(desktop, geometry.card)
     }
@@ -716,8 +696,10 @@ impl NativeOverlay {
     }
 
     fn set_acknowledgement_pending(&mut self) {
+        let hwnd = self.hwnd;
         if let Ok(context) = self.context_mut() {
-            let _ = unsafe { EnableWindow(context.button, false) };
+            context.button_enabled = false;
+            let _ = unsafe { render_layered(hwnd, context) };
         }
     }
 
@@ -728,7 +710,7 @@ impl NativeOverlay {
         if let Ok(context) = self.context_mut() {
             context.acknowledgement_requested = false;
             context.acknowledgement_chord_was_down = false;
-            let _ = unsafe { EnableWindow(context.button, true) };
+            context.button_enabled = true;
         }
         let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
     }
@@ -815,17 +797,16 @@ unsafe extern "system" fn window_proc(
     }
     let context = unsafe { &mut *pointer };
     match message {
-        WM_CREATE => match unsafe { create_acknowledgement_button(hwnd) } {
-            Ok(button) => {
-                context.button = button;
-                LRESULT(0)
-            }
-            Err(_) => LRESULT(-1),
-        },
-        WM_COMMAND => {
-            let identifier = (wparam.0 & 0xFFFF) as u16;
-            let notification = ((wparam.0 >> 16) & 0xFFFF) as u16;
-            if identifier == BUTTON_ID && notification == BN_CLICKED as u16 {
+        WM_CREATE => LRESULT(0),
+        WM_LBUTTONDOWN => {
+            // 自绘确认键:命中矩形即请求解除(其余点击被窗口吸收)。
+            let point = POINT {
+                x: (lparam.0 & 0xFFFF) as i16 as i32,
+                y: ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
+            };
+            if context.button_enabled
+                && unsafe { PtInRect(&context.button_rect, point) }.as_bool()
+            {
                 context.acknowledgement_requested = true;
             }
             LRESULT(0)
@@ -842,10 +823,8 @@ unsafe extern "system" fn window_proc(
             context.topology_refresh_requested = true;
             LRESULT(0)
         }
-        WM_PAINT => {
-            unsafe { paint(hwnd, context) };
-            LRESULT(0)
-        }
+        // 层叠窗口由 UpdateLayeredWindow 呈现,WM_PAINT 交系统验证即可。
+        WM_PAINT => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
         WM_ERASEBKGND => LRESULT(1),
         WM_NCHITTEST => LRESULT(HTCLIENT as isize),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
@@ -866,47 +845,95 @@ const fn acknowledgement_chord(f12: bool, control: bool, shift: bool) -> bool {
     f12 && control && shift
 }
 
-unsafe fn create_acknowledgement_button(parent: HWND) -> Result<HWND, windows::core::Error> {
-    unsafe {
-        CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            w!("BUTTON"),
-            w!(""),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32),
-            0,
-            0,
-            BUTTON_WIDTH,
-            BUTTON_HEIGHT,
-            Some(parent),
-            Some(control_id(BUTTON_ID)),
-            None,
-            None,
-        )
-    }
-}
+/// 外围区域的 alpha:1 = 视觉上透明,但仍拦截鼠标(0 会点击穿透)。
+const OUTER_ALPHA: u8 = 1;
+/// 全屏砖红边框厚度(接管中的视觉提示)。
+const EDGE: i32 = 8;
 
-unsafe fn paint(hwnd: HWND, context: &WindowContext) {
-    let mut paint = PAINTSTRUCT::default();
-    let dc = unsafe { BeginPaint(hwnd, &mut paint) };
-    let mut client = RECT::default();
-    let _ = unsafe { GetClientRect(hwnd, &mut client) };
-    let red = Brush::new(rgb(165, 18, 28));
-    let card = Brush::new(rgb(40, 18, 22));
-    let border = Brush::new(rgb(255, 218, 225));
-    unsafe {
-        FillRect(dc, &client, red.0);
-        FillRect(dc, &context.card, card.0);
-        FrameRect(dc, &context.card, border.0);
-        SetBkMode(dc, TRANSPARENT);
+/// 逐像素 alpha 呈现命中锁定层:外围近乎透明、8px 砖红边框与中央浅红卡不透明。
+/// 全桌面输入接管、可见性验证与确认逻辑不变;确认键改为卡内自绘。
+unsafe fn render_layered(hwnd: HWND, context: &WindowContext) -> Result<(), AlertFailure> {
+    let mut window_rect = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut window_rect) }.map_err(|error| {
+        windows_failure(
+            AlertFailureKind::WindowPresentation,
+            "GetWindowRect(render alert)",
+            error,
+        )
+    })?;
+    let width = window_rect.right - window_rect.left;
+    let height = window_rect.bottom - window_rect.top;
+    if width <= 0 || height <= 0 {
+        return Err(AlertFailure::new(
+            AlertFailureKind::WindowPresentation,
+            "blocking alert window has an empty surface",
+        ));
     }
-    let title_font = Font::new(34, FW_SEMIBOLD.0 as i32);
-    let detail_font = Font::new(21, FW_NORMAL.0 as i32);
-    let horizontal = 42;
+
+    // SAFETY: DC/DIB 在本函数内配对创建与释放;bits 指向 DIB 的像素存储。
     unsafe {
+        let screen = GetDC(None);
+        let memory = CreateCompatibleDC(Some(screen));
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // top-down,像素行序与窗口坐标一致
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let bitmap: HBITMAP =
+            match CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+                Ok(bitmap) => bitmap,
+                Err(error) => {
+                    let _ = DeleteDC(memory);
+                    ReleaseDC(None, screen);
+                    return Err(windows_failure(
+                        AlertFailureKind::WindowPresentation,
+                        "CreateDIBSection(alert surface)",
+                        error,
+                    ));
+                }
+            };
+        let previous = SelectObject(memory, HGDIOBJ(bitmap.0));
+
+        // ---- GDI 绘制(alpha 字节随后按区域统一覆写) ----
+        let client = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+        let danger = Brush::new(rgb(166, 56, 43));
+        let card = Brush::new(rgb(247, 231, 226));
+        FillRect(memory, &client, danger.0);
+        FillRect(memory, &context.card, card.0);
+        FrameRect(memory, &context.card, danger.0);
+        let inner = RECT {
+            left: context.card.left + 1,
+            top: context.card.top + 1,
+            right: context.card.right - 1,
+            bottom: context.card.bottom - 1,
+        };
+        FrameRect(memory, &inner, danger.0);
+        SetBkMode(memory, TRANSPARENT);
+
+        let title_font = Font::new(34, FW_SEMIBOLD.0 as i32);
+        let detail_font = Font::new(21, FW_NORMAL.0 as i32);
+        let notice_font = Font::new(18, FW_NORMAL.0 as i32);
+        let button_font = Font::new(24, FW_SEMIBOLD.0 as i32);
+        let footer_font = Font::new(15, FW_NORMAL.0 as i32);
+        let horizontal = 42;
+        let button_top = context.button_rect.top;
         draw_text(
-            dc,
+            memory,
             title_font.0,
-            rgb(255, 236, 239),
+            rgb(140, 47, 36),
             &context.text.title,
             RECT {
                 left: context.card.left + horizontal,
@@ -917,19 +944,118 @@ unsafe fn paint(hwnd: HWND, context: &WindowContext) {
             DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
         draw_text(
-            dc,
+            memory,
             detail_font.0,
-            rgb(255, 225, 230),
+            rgb(166, 56, 43),
             &context.text.detail,
             RECT {
                 left: context.card.left + horizontal,
                 top: context.card.top + 118,
                 right: context.card.right - horizontal,
-                bottom: context.card.bottom - 112,
+                bottom: button_top - 52,
             },
             DT_CENTER | DT_WORDBREAK,
         );
-        let _ = EndPaint(hwnd, &paint);
+        // 琥珀色说明:输入已被接管,提醒先检查装备。
+        draw_text(
+            memory,
+            notice_font.0,
+            rgb(106, 74, 10),
+            "后续鼠标点击已被阻挡,请先检查装备",
+            RECT {
+                left: context.card.left + horizontal,
+                top: button_top - 44,
+                right: context.card.right - horizontal,
+                bottom: button_top - 12,
+            },
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+        // 自绘确认键:砖红底、暖白字;等待解除生效时置灰。
+        let button_fill = if context.button_enabled {
+            rgb(166, 56, 43)
+        } else {
+            rgb(167, 158, 142)
+        };
+        let button_brush = Brush::new(button_fill);
+        FillRect(memory, &context.button_rect, button_brush.0);
+        draw_text(
+            memory,
+            button_font.0,
+            rgb(255, 253, 249),
+            &context.text.button,
+            context.button_rect,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+        // 页脚:键盘等效操作与尾击吸收提示。
+        draw_text(
+            memory,
+            footer_font.0,
+            rgb(140, 47, 36),
+            "或 Ctrl ⇧ F12 · 确认后 300ms 吸收尾击",
+            RECT {
+                left: context.card.left + horizontal,
+                top: context.card.bottom - CARD_MARGIN - FOOTER_STRIP + 4,
+                right: context.card.right - horizontal,
+                bottom: context.card.bottom - CARD_MARGIN + 2,
+            },
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        // ---- alpha 通道按区域覆写(GDI 不维护 alpha 字节) ----
+        let _ = GdiFlush();
+        let pixels = bits.cast::<u32>();
+        for y in 0..height {
+            let on_border_row = y < EDGE || y >= height - EDGE;
+            let in_card_row = y >= context.card.top && y < context.card.bottom;
+            for x in 0..width {
+                let index = (y * width + x) as usize;
+                let opaque = on_border_row
+                    || x < EDGE
+                    || x >= width - EDGE
+                    || (in_card_row && x >= context.card.left && x < context.card.right);
+                if opaque {
+                    *pixels.add(index) |= 0xFF00_0000;
+                } else {
+                    // 预乘 alpha:近乎透明的拦截层,RGB 必须同步压到 0。
+                    *pixels.add(index) = u32::from(OUTER_ALPHA) << 24;
+                }
+            }
+        }
+
+        // ---- 呈现 ----
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let source = POINT { x: 0, y: 0 };
+        let size = windows::Win32::Foundation::SIZE {
+            cx: width,
+            cy: height,
+        };
+        let presented = UpdateLayeredWindow(
+            hwnd,
+            Some(screen),
+            None,
+            Some(&size),
+            Some(memory),
+            Some(&source),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+        SelectObject(memory, previous);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(memory);
+        ReleaseDC(None, screen);
+        presented.map_err(|error| {
+            windows_failure(
+                AlertFailureKind::WindowPresentation,
+                "UpdateLayeredWindow(blocking alert)",
+                error,
+            )
+        })
     }
 }
 
@@ -1055,6 +1181,10 @@ unsafe fn draw_text(
     mut bounds: RECT,
     format: windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT,
 ) {
+    // 空字符串的 Vec<u16> 是悬垂指针,DrawTextW 会访问违例;直接跳过。
+    if text.is_empty() {
+        return;
+    }
     let previous = unsafe { SelectObject(dc, HGDIOBJ(font.0)) };
     unsafe {
         SetTextColor(dc, color);
@@ -1064,14 +1194,6 @@ unsafe fn draw_text(
         DrawTextW(dc, &mut utf16, &mut bounds, format);
         SelectObject(dc, previous);
     }
-}
-
-fn control_id(id: u16) -> HMENU {
-    HMENU(id as usize as *mut c_void)
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
