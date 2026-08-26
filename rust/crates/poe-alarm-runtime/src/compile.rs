@@ -5,7 +5,6 @@ use poe_alarm_core::{
     matching::{DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN, MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN},
 };
 use poe_alarm_monitoring::MonitorPlan;
-use poe_alarm_recognition::{GameVersion, RecognitionLanguage, RecognitionProfile};
 use poe_alarm_settings::{AppSettings, CURRENT_SCHEMA_VERSION, GameProfile, RuleEditorMode};
 use poe_alarm_vision::CaptureRegion;
 
@@ -92,24 +91,21 @@ pub fn compile_settings(
     let region = CaptureRegion::new(screen_region.x, screen_region.y, width, height)
         .map_err(|error| SettingsValidationError::one("capture_region", error.to_string()))?;
 
-    let game = match settings.selected_game_profile {
-        GameProfile::Poe1 => GameVersion::Poe1,
-        GameProfile::Poe2 => GameVersion::Poe2,
-    };
-    let language = match selected.ocr_language.trim() {
-        value if value.eq_ignore_ascii_case("en") => RecognitionLanguage::English,
-        value if value.eq_ignore_ascii_case("zh-TW") => RecognitionLanguage::TraditionalChinese,
-        value => {
-            return Err(SettingsValidationError::one(
-                "ocr_language",
-                format!("unsupported recognition language '{value}'"),
-            ));
-        }
-    };
+    // Still validated even though the parser reads both locales: this value
+    // also selects which rule set the profile uses.
+    let language = selected.ocr_language.trim();
+    if !language.eq_ignore_ascii_case("en") && !language.eq_ignore_ascii_case("zh-TW") {
+        return Err(SettingsValidationError::one(
+            "ocr_language",
+            format!("unsupported affix language '{language}'"),
+        ));
+    }
 
-    let maximum_line_span = match game {
-        GameVersion::Poe1 => DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN,
-        GameVersion::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
+    // How many physical lines one modifier may span. Not a recognition
+    // concern — POE2 simply renders wider modifiers than POE1 does.
+    let maximum_line_span = match settings.selected_game_profile {
+        GameProfile::Poe1 => DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN,
+        GameProfile::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
     };
 
     let plan = match selected_rules.rule_editor_mode {
@@ -138,7 +134,6 @@ pub fn compile_settings(
 
     Ok(CompiledRuntimeSettings {
         plan,
-        profile: RecognitionProfile { game, language },
         region,
         ui: CompiledUiBindings::from_settings(settings),
         alert_copy: AlertCopy::for_ui_language(&settings.ui_language),

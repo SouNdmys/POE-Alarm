@@ -9,6 +9,7 @@
 
 mod actor;
 mod backend;
+mod clipboard_source;
 mod compile;
 mod model;
 mod protection;
@@ -21,6 +22,7 @@ pub use backend::{
     BackendError, BackendFactory, CaptureBackend, ProductionBackendFactory, RecognizerBackend,
     ScreenshotBackend,
 };
+pub use clipboard_source::{ClipboardSource, SourceError};
 pub use compile::{
     CompiledRuntimeSettings, SettingsFieldError, SettingsValidationError, compile_settings,
 };

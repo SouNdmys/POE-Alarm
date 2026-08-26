@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use poe_alarm_monitoring::{MonitorSnapshot, MonitorState};
 use poe_alarm_platform_win::{HotKeyConfig, StartMonitoringHotKey};
-use poe_alarm_recognition::RecognitionProfile;
 use poe_alarm_settings::{AppSettings, HudPlacement};
 use poe_alarm_vision::CaptureRegion;
 
@@ -139,7 +138,6 @@ pub struct ScreenshotEvaluation {
 pub struct ScreenshotReport {
     pub request_id: RuntimeRequestId,
     pub generation: RuntimeGeneration,
-    pub profile: RecognitionProfile,
     pub requested_region: CaptureRegion,
     pub used_full_image_fallback: bool,
     pub lines: Vec<String>,
