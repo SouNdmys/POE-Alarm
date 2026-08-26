@@ -116,6 +116,14 @@ mod app {
         pub unlock_after_ms: u64,
         /// Standalone clipboard check: copy this many times and report.
         pub test_copy: Option<usize>,
+        /// Floor on how soon a text change can plausibly be caused by the
+        /// click. Applying currency is server-authoritative, so a change seen
+        /// sooner than this is left over from an earlier craft; adopting it
+        /// would report every roll one behind.
+        pub min_craft_ms: u64,
+        /// Require two consecutive identical reads before judging, so an
+        /// intermediate render is never mistaken for the final roll.
+        pub settle: bool,
     }
 
     impl Default for Options {
@@ -130,6 +138,8 @@ mod app {
                 key_method: KeyMethod::VirtualKey,
                 unlock_after_ms: 4_000,
                 test_copy: None,
+                min_craft_ms: 25,
+                settle: true,
             }
         }
     }
@@ -219,6 +229,8 @@ mod app {
         first_copy: LatencySamples,
         decision: LatencySamples,
         copies_per_roll: Vec<u32>,
+        first_change: LatencySamples,
+        stale_discarded: u64,
         rolls: u64,
         hits: u64,
         fail_closed: u64,
@@ -230,6 +242,8 @@ mod app {
                 first_copy: LatencySamples::with_capacity(512),
                 decision: LatencySamples::with_capacity(512),
                 copies_per_roll: Vec::with_capacity(512),
+                first_change: LatencySamples::with_capacity(512),
+                stale_discarded: 0,
                 rolls: 0,
                 hits: 0,
                 fail_closed: 0,
@@ -290,6 +304,9 @@ mod app {
         let mut first_copy: Option<Duration> = None;
         let mut last_error: Option<ClipboardError> = None;
         let mut gap = options.poll_gap_ms;
+        let mut candidate: Option<String> = None;
+        let mut first_change_at: Option<Duration> = None;
+        let min_craft = Duration::from_millis(options.min_craft_ms);
 
         if options.first_delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(options.first_delay_ms));
@@ -359,6 +376,30 @@ mod app {
                 // The server has not resolved the craft yet. Ask again.
                 Some(true) => back_off(&mut gap, options),
                 Some(false) => {
+                    let seen_at = click_at.elapsed();
+                    if first_change_at.is_none() {
+                        first_change_at = Some(seen_at);
+                        totals.first_change.push(seen_at);
+                    }
+
+                    // Too early to have been caused by this click, so it is a
+                    // leftover from the previous craft. Take it as the new
+                    // baseline and keep waiting for the real one.
+                    if seen_at < min_craft {
+                        totals.stale_discarded += 1;
+                        *baseline = Some(outcome.text);
+                        candidate = None;
+                        back_off(&mut gap, options);
+                        continue;
+                    }
+
+                    // Require the text to stop moving before judging it.
+                    if options.settle && candidate.as_deref() != Some(outcome.text.as_str()) {
+                        candidate = Some(outcome.text);
+                        back_off(&mut gap, options);
+                        continue;
+                    }
+
                     let verdict = evaluate_payload(&profile.rules, &outcome.text);
                     let decided = click_at.elapsed();
                     totals.decision.push(decided);
@@ -556,7 +597,12 @@ mod app {
         }
         println!();
         println!("{}", totals.first_copy.summary("first Ctrl+C round trip"));
+        println!("{}", totals.first_change.summary("click -> text first moved"));
         println!("{}", totals.decision.summary("click -> verdict"));
+        println!(
+            "  stale changes discarded   {} (seen sooner than {}ms, so left over from an earlier craft)",
+            totals.stale_discarded, options.min_craft_ms
+        );
 
         if !totals.copies_per_roll.is_empty() {
             let total: u32 = totals.copies_per_roll.iter().sum();
@@ -691,6 +737,8 @@ mod app {
                 "--unlock-after-ms" => options.unlock_after_ms = value()?,
                 "--test-copy" => options.test_copy = Some(value()? as usize),
                 "--scancode" => options.key_method = KeyMethod::ScanCode,
+                "--min-craft-ms" => options.min_craft_ms = value()?,
+                "--no-settle" => options.settle = false,
                 "--help" | "-h" => {
                     println!(
                         "usage: clip-only-lab [--test-copy N] [--scancode] [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N] [--unlock-after-ms N]"
