@@ -42,7 +42,9 @@ mod app {
         WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
     };
 
-    use poe_alarm_clip_only::clipboard::{self, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground};
+    use poe_alarm_clip_only::clipboard::{
+        self, KeyMethod, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground,
+    };
     use poe_alarm_clip_only::stats::{LatencySamples, format_millis};
     use poe_alarm_clip_only::{LabProfile, Verdict, describes_same_roll, evaluate_payload};
 
@@ -63,6 +65,10 @@ mod app {
     static HOOK_EVENTS: AtomicU64 = AtomicU64::new(0);
     static LBUTTON_DOWNS: AtomicU64 = AtomicU64::new(0);
     static CLICKS_DROPPED: AtomicU64 = AtomicU64::new(0);
+    /// True while the current lock came from a failure rather than a hit. Only
+    /// these auto-release: a diagnostic run must not wedge the mouse after one
+    /// bad copy, but a real hit must stay locked until the user looks at it.
+    static ERROR_LOCKED: AtomicBool = AtomicBool::new(false);
 
     /// Per-message-type counts. "Moves arrive but presses do not" is a real
     /// enough outcome that it needs to be visible rather than inferred: swapped
@@ -93,6 +99,14 @@ mod app {
         pub poll_gap_ms: u64,
         /// Delay before the very first copy, to skip a doomed early attempt.
         pub first_delay_ms: u64,
+        /// How Ctrl+C is synthesized.
+        pub key_method: KeyMethod,
+        /// How long an error lock holds before releasing itself. Hit locks are
+        /// never auto-released; this only stops a diagnostic run from wedging
+        /// the mouse after a single failure.
+        pub unlock_after_ms: u64,
+        /// Standalone clipboard check: copy this many times and report.
+        pub test_copy: Option<usize>,
     }
 
     impl Default for Options {
@@ -103,6 +117,9 @@ mod app {
                 deadline_ms: 1_500,
                 poll_gap_ms: 0,
                 first_delay_ms: 0,
+                key_method: KeyMethod::VirtualKey,
+                unlock_after_ms: 4_000,
+                test_copy: None,
             }
         }
     }
@@ -227,13 +244,15 @@ mod app {
         )
     }
 
-    fn lock(reason: &str) {
+    fn lock(reason: &str, recoverable: bool) {
+        ERROR_LOCKED.store(recoverable, Ordering::Release);
         STATE.store(STATE_LOCKED, Ordering::Release);
         println!("        LOCKED — {reason}");
         println!("        press Ctrl+Shift+F12 to release");
     }
 
     fn release() {
+        ERROR_LOCKED.store(false, Ordering::Release);
         STATE.store(STATE_IDLE, Ordering::Release);
     }
 
@@ -259,19 +278,22 @@ mod app {
         loop {
             if click_at.elapsed() >= deadline {
                 totals.fail_closed += 1;
-                lock(&format!(
-                    "item text never changed within {}ms across {copies} copies",
-                    options.deadline_ms
-                ));
+                lock(
+                    &format!(
+                        "item text never changed within {}ms across {copies} copies",
+                        options.deadline_ms
+                    ),
+                    true,
+                );
                 return;
             }
 
             copies += 1;
-            let outcome = match clipboard::copy_hovered_item(copy_timeout) {
+            let outcome = match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
                 Ok(outcome) => outcome,
                 Err(error) => {
                     totals.fail_closed += 1;
-                    lock(&format!("clipboard round trip failed: {error}"));
+                    lock(&format!("clipboard round trip failed: {error}"), true);
                     return;
                 }
             };
@@ -325,12 +347,12 @@ mod app {
                                 println!("     {line}");
                             }
                             println!("  ==========================================================");
-                            lock("target affix reached");
+                            lock("target affix reached", false);
                         }
                         Verdict::Miss { .. } => release(),
                         Verdict::Unreadable(error) => {
                             totals.fail_closed += 1;
-                            lock(&format!("clipboard payload unreadable: {error}"));
+                            lock(&format!("clipboard payload unreadable: {error}"), true);
                         }
                     }
                     return;
@@ -345,11 +367,15 @@ mod app {
         let mut armed = false;
         let mut last_heartbeat = Instant::now();
         let mut last_events = 0_u64;
+        let mut error_lock_at: Option<Instant> = None;
 
         while RUNNING.load(Ordering::Acquire) {
             match clicks.recv_timeout(IDLE_TICK) {
                 Ok(click_at) => {
                     handle_roll(&profile, &mut baseline, &mut totals, click_at, &options);
+                    error_lock_at = ERROR_LOCKED
+                        .load(Ordering::Acquire)
+                        .then(Instant::now);
                 }
                 Err(_) => {
                     let foreground = game_is_foreground();
@@ -391,6 +417,15 @@ mod app {
                     }
                     if !foreground && STATE.load(Ordering::Acquire) != STATE_IDLE {
                         release();
+                        error_lock_at = None;
+                    } else if ERROR_LOCKED.load(Ordering::Acquire)
+                        && error_lock_at.is_some_and(|at: Instant| {
+                            at.elapsed() >= Duration::from_millis(options.unlock_after_ms)
+                        })
+                    {
+                        release();
+                        error_lock_at = None;
+                        println!("  [auto-released] the failure lock expired — clicks pass again");
                     }
                 }
             }
@@ -562,9 +597,12 @@ mod app {
                 "--deadline-ms" => options.deadline_ms = value()?,
                 "--poll-gap-ms" => options.poll_gap_ms = value()?,
                 "--first-delay-ms" => options.first_delay_ms = value()?,
+                "--unlock-after-ms" => options.unlock_after_ms = value()?,
+                "--test-copy" => options.test_copy = Some(value()? as usize),
+                "--scancode" => options.key_method = KeyMethod::ScanCode,
                 "--help" | "-h" => {
                     println!(
-                        "usage: clip-only-lab [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N]"
+                        "usage: clip-only-lab [--test-copy N] [--scancode] [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N] [--unlock-after-ms N]"
                     );
                     std::process::exit(0);
                 }
@@ -572,6 +610,111 @@ mod app {
             }
         }
         Ok(options)
+    }
+
+    /// Standalone check of the one mechanism everything else depends on: does
+    /// Ctrl+C over a hovered item actually populate the clipboard?
+    ///
+    /// No hook, no clicks, no rules. If this fails there is no point looking at
+    /// anything downstream.
+    fn test_copy(options: &Options, samples: usize) {
+        println!("  clipboard check — {samples} copies, {} keys", options.key_method);
+        println!();
+        println!("  Switch to the game and hover the item you are rolling.");
+        println!("  Do not hold a currency orb on the cursor for this test.");
+        println!();
+        for remaining in (1..=5).rev() {
+            println!("  starting in {remaining}...");
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        if !game_is_foreground() {
+            let (title, class) = clipboard::foreground_window_description();
+            println!();
+            println!("  The foreground window is \"{title}\" ({class}), not the game.");
+            println!("  Nothing was sent. Switch to the game and run this again.");
+            return;
+        }
+
+        let timeout = Duration::from_millis(options.copy_timeout_ms);
+        let mut latencies = LatencySamples::with_capacity(samples);
+        let mut failures: Vec<String> = Vec::new();
+        let mut first_text: Option<String> = None;
+
+        for index in 0..samples {
+            if !game_is_foreground() {
+                failures.push(format!("sample {index}: game lost focus"));
+                break;
+            }
+            match clipboard::copy_hovered_item(timeout, options.key_method) {
+                Ok(outcome) => {
+                    if first_text.is_none() {
+                        first_text = Some(outcome.text.clone());
+                    }
+                    latencies.push(outcome.total());
+                }
+                Err(error) => {
+                    if failures.len() < 8 {
+                        failures.push(format!("sample {index}: {error}"));
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(120));
+        }
+
+        println!();
+        println!("=== clipboard check ===");
+        println!("  succeeded  {}/{samples}", latencies.len());
+        println!("  failed     {}", failures.len());
+        println!("{}", latencies.summary("round trip"));
+        for failure in &failures {
+            println!("    {failure}");
+        }
+
+        if let Some(text) = &first_text {
+            println!();
+            println!("  first payload (confirm this is the item you meant):");
+            for line in text.lines().take(14) {
+                println!("    | {line}");
+            }
+            let parsed = poe_alarm_clip_only::item_text::parse(text);
+            println!();
+            match parsed {
+                Ok(item) => {
+                    println!("  parsed {} affix lines:", item.affix_lines.len());
+                    for line in &item.affix_lines {
+                        println!("    {line}");
+                    }
+                }
+                Err(error) => println!("  NOTE: could not parse that payload: {error}"),
+            }
+        }
+
+        println!();
+        if latencies.is_empty() {
+            println!("=== verdict === the client never answered a single Ctrl+C.");
+            println!("  Work through these in order:");
+            println!("    1. Was the cursor resting on an item with its tooltip visible?");
+            println!("       Ctrl+C copies whatever is under the pointer and nothing else.");
+            if options.key_method == KeyMethod::VirtualKey {
+                println!("    2. The client may ignore virtual-key synthetic input. Retry with:");
+                println!("         clip-only-lab.exe --test-copy {samples} --scancode");
+            } else {
+                println!("    2. Scan codes did not work either, so the client is likely");
+                println!("       ignoring synthetic keys altogether. Press Ctrl+C by hand over");
+                println!("       the item — if that fills the clipboard but this does not, the");
+                println!("       clipboard path cannot be driven and this whole approach dies.");
+            }
+            println!("    3. Confirm Ctrl+C works manually: hover the item, press it, paste");
+            println!("       into Notepad. If nothing pastes, the client has it disabled.");
+        } else if failures.is_empty() {
+            println!("=== verdict === Ctrl+C works reliably. Run the full loop.");
+        } else {
+            println!(
+                "=== verdict === Ctrl+C works but {} of {samples} attempts failed.",
+                failures.len()
+            );
+            println!("  Usually that means the cursor drifted off the item.");
+        }
     }
 
     pub fn run() {
@@ -615,6 +758,11 @@ mod app {
         println!();
         println!("  NOTE: every roll overwrites your clipboard. That is inherent here.");
         println!();
+
+        if let Some(samples) = options.test_copy {
+            test_copy(&options, samples.max(1));
+            return;
+        }
 
         let (sender, receiver) = sync_channel::<Instant>(64);
         let _ = CLICK_TX.set(sender);

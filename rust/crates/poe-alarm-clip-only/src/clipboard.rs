@@ -19,7 +19,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    KEYBD_EVENT_FLAGS, SendInput, VK_C, VK_CONTROL, VK_MENU, VK_SHIFT,
+    KEYEVENTF_SCANCODE, KEYBD_EVENT_FLAGS, SendInput, VK_C, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowTextW};
 
@@ -108,29 +108,68 @@ pub fn sequence_number() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
+/// How the synthetic Ctrl+C is delivered.
+///
+/// Some games read the keyboard through raw input and only recognise hardware
+/// scan codes, ignoring virtual-key-only synthetic events entirely. Which one
+/// Path of Exile honours is a question for measurement, not assumption.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KeyMethod {
+    /// Virtual key codes.
+    #[default]
+    VirtualKey,
+    /// Hardware scan codes with `KEYEVENTF_SCANCODE`.
+    ScanCode,
+}
+
+impl std::fmt::Display for KeyMethod {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::VirtualKey => formatter.write_str("virtual-key"),
+            Self::ScanCode => formatter.write_str("scan-code"),
+        }
+    }
+}
+
+/// Set 1 scan codes for the two keys involved.
+const SCAN_LCONTROL: u16 = 0x1D;
+const SCAN_C: u16 = 0x2E;
+
 /// Sends a synthetic Ctrl+C to the foreground window.
-pub fn send_ctrl_c() -> Result<(), ClipboardError> {
-    let key = |vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY, up: bool| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk,
-                wScan: 0,
-                dwFlags: if up {
-                    KEYEVENTF_KEYUP
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
+pub fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
+    let key = |vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
+               scan: u16,
+               up: bool| {
+        let mut flags = if up {
+            KEYEVENTF_KEYUP
+        } else {
+            KEYBD_EVENT_FLAGS(0)
+        };
+        if method == KeyMethod::ScanCode {
+            flags |= KEYEVENTF_SCANCODE;
+        }
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: if method == KeyMethod::ScanCode {
+                        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0)
+                    } else {
+                        vk
+                    },
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: SYNTHETIC_INPUT_SIGNATURE,
                 },
-                time: 0,
-                dwExtraInfo: SYNTHETIC_INPUT_SIGNATURE,
             },
-        },
+        }
     };
     let inputs = [
-        key(VK_CONTROL, false),
-        key(VK_C, false),
-        key(VK_C, true),
-        key(VK_CONTROL, true),
+        key(VK_CONTROL, SCAN_LCONTROL, false),
+        key(VK_C, SCAN_C, false),
+        key(VK_C, SCAN_C, true),
+        key(VK_CONTROL, SCAN_LCONTROL, true),
     ];
     let expected = inputs.len() as u32;
     // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
@@ -211,10 +250,13 @@ fn read_open_clipboard() -> Result<String, ClipboardError> {
 /// Nothing is written to the clipboard first. The sequence number already tells
 /// us whether the client responded, and skipping the clear saves an
 /// open/close pair on the hot path.
-pub fn copy_hovered_item(timeout: Duration) -> Result<CopyOutcome, ClipboardError> {
+pub fn copy_hovered_item(
+    timeout: Duration,
+    method: KeyMethod,
+) -> Result<CopyOutcome, ClipboardError> {
     let baseline = sequence_number();
     let started = Instant::now();
-    send_ctrl_c()?;
+    send_ctrl_c(method)?;
 
     loop {
         if sequence_number() != baseline {
