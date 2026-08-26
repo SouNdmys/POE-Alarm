@@ -131,6 +131,15 @@ mod app {
         /// Measure how long the craft actually takes, without blocking a
         /// single click and with two copies per click instead of eight.
         pub observe: bool,
+        /// Block every click until a verdict exists. Measured at ~2.9 presses
+        /// per applied orb, so it is off by default; recognition accuracy and
+        /// interception policy are independent choices and conflating them was
+        /// what made this feel unusable.
+        pub block_first: bool,
+        /// How long after a click to keep polling for a new roll.
+        pub active_window_ms: u64,
+        /// Gap between polls while crafting is active.
+        pub watch_interval_ms: u64,
     }
 
     impl Default for Options {
@@ -148,6 +157,9 @@ mod app {
                 min_craft_ms: 25,
                 settle: true,
                 observe: false,
+                block_first: false,
+                active_window_ms: 1_200,
+                watch_interval_ms: 40,
             }
         }
     }
@@ -193,7 +205,9 @@ mod app {
         }
 
         match wparam.0 as u32 {
-            WM_LBUTTONDOWN if OBSERVE_ONLY.load(Ordering::Acquire) => {
+            WM_LBUTTONDOWN if OBSERVE_ONLY.load(Ordering::Acquire)
+                && STATE.load(Ordering::Acquire) != STATE_LOCKED =>
+            {
                 if let Some(sender) = CLICK_TX.get() {
                     let _ = sender.try_send(Instant::now());
                 }
@@ -589,10 +603,150 @@ mod app {
         let _ = profile;
     }
 
+    /// Watches for a new roll without ever holding a click back.
+    ///
+    /// This mirrors the policy the OCR build already ships and the user has
+    /// already lived with: clicks flow, and only a confirmed hit locks. The
+    /// clipboard replaces the recognizer, nothing else. Polling only runs while
+    /// crafting is actually happening, so the clipboard is left alone the rest
+    /// of the time.
+    fn watch(profile: &LabProfile, clicks: &Receiver<Instant>, options: &Options) {
+        let copy_timeout = Duration::from_millis(options.copy_timeout_ms);
+        let active_window = Duration::from_millis(options.active_window_ms);
+        let interval = Duration::from_millis(options.watch_interval_ms);
+
+        let mut last_click: Option<Instant> = None;
+        let mut last_text: Option<String> = None;
+        let mut armed = false;
+        let mut rolls_seen = 0_u64;
+        let mut hits = 0_u64;
+        let mut failures = 0_u64;
+        let mut detect_latency = LatencySamples::with_capacity(512);
+
+        while RUNNING.load(Ordering::Acquire) {
+            // Drain whatever clicks arrived; only the most recent matters.
+            while let Ok(at) = clicks.try_recv() {
+                last_click = Some(at);
+            }
+
+            let foreground = game_is_foreground();
+            GAME_FOREGROUND.store(foreground, Ordering::Release);
+            if foreground != armed {
+                armed = foreground;
+                println!(
+                    "  [{}] {}",
+                    if armed { "armed" } else { "idle" },
+                    if armed {
+                        "game focused — clicks pass freely, only a hit will lock"
+                    } else {
+                        "game lost focus"
+                    }
+                );
+                if !armed {
+                    last_text = None;
+                    if STATE.load(Ordering::Acquire) != STATE_IDLE {
+                        release();
+                    }
+                }
+            }
+
+            let crafting = armed
+                && STATE.load(Ordering::Acquire) != STATE_LOCKED
+                && last_click.is_some_and(|at| at.elapsed() < active_window);
+            if !crafting {
+                if let Ok(at) = clicks.recv_timeout(IDLE_TICK) {
+                    last_click = Some(at);
+                }
+                continue;
+            }
+
+            let outcome = match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
+                Ok(outcome) => outcome,
+                Err(error) if error.is_transient() => {
+                    failures += 1;
+                    std::thread::sleep(interval);
+                    continue;
+                }
+                Err(error) => {
+                    println!("  [error] {error}");
+                    failures += 1;
+                    std::thread::sleep(interval);
+                    continue;
+                }
+            };
+
+            let unchanged = last_text
+                .as_deref()
+                .is_some_and(|previous| describes_same_roll(previous, &outcome.text));
+            if unchanged {
+                std::thread::sleep(interval);
+                continue;
+            }
+
+            let first_read = last_text.is_none();
+            last_text = Some(outcome.text.clone());
+            if first_read {
+                // Nothing to compare against yet; this only establishes state.
+                continue;
+            }
+
+            rolls_seen += 1;
+            let since_click = last_click.map(|at| at.elapsed()).unwrap_or_default();
+            detect_latency.push(since_click);
+            let verdict = evaluate_payload(&profile.rules, &outcome.text);
+            println!(
+                "  roll {rolls_seen:<4} seen {:<9} {:<5} ({} lines)",
+                format_millis(since_click),
+                verdict.label(),
+                verdict.affix_count()
+            );
+
+            if let Verdict::Hit { item, evaluation } = verdict {
+                hits += 1;
+                println!("");
+                println!("  ==========================================================");
+                println!("   HIT — THIS IS THE ALARM FIRING. Clicks are blocked now.");
+                if let Some(group) = evaluation.matched_group() {
+                    println!("   matched group: {}", group.name);
+                }
+                for line in &item.affix_lines {
+                    println!("     {line}");
+                }
+                println!("   Press Ctrl+Shift+F12 to release.");
+                println!("  ==========================================================");
+                lock("target affix reached", false);
+            }
+            std::thread::sleep(interval);
+        }
+
+        println!();
+        println!("=== session summary (detect-then-block) ===");
+        println!("  rolls seen                {rolls_seen}");
+        println!("  hits                      {hits}");
+        println!("  copy failures             {failures}");
+        println!(
+            "  clicks swallowed          {}  (only a hit blocks anything)",
+            SWALLOWED.load(Ordering::Relaxed)
+        );
+        println!();
+        println!("  {}", input_breakdown());
+        println!();
+        println!("{}", detect_latency.summary("click -> roll detected"));
+        println!();
+        println!("  This is time from your most recent click, so it carries the craft");
+        println!("  itself (~220ms measured) plus the poll interval. The recognizer's own");
+        println!("  share is the ~3ms clipboard round trip.");
+    }
+
     fn worker(profile: LabProfile, clicks: Receiver<Instant>, options: Options) {
         if options.observe {
             OBSERVE_ONLY.store(true, Ordering::Release);
             observe(&profile, &clicks, &options);
+            return;
+        }
+        if !options.block_first {
+            OBSERVE_ONLY.store(true, Ordering::Release);
+            watch(&profile, &clicks, &options);
             return;
         }
         let mut totals = Totals::new();
@@ -887,6 +1041,9 @@ mod app {
                 "--min-craft-ms" => options.min_craft_ms = value()?,
                 "--no-settle" => options.settle = false,
                 "--observe" => options.observe = true,
+                "--block-first" => options.block_first = true,
+                "--active-window-ms" => options.active_window_ms = value()?,
+                "--watch-interval-ms" => options.watch_interval_ms = value()?,
                 "--help" | "-h" => {
                     println!(
                         "usage: clip-only-lab [--test-copy N] [--scancode] [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N] [--unlock-after-ms N]"
@@ -1034,6 +1191,17 @@ mod app {
         println!("  budget     {}ms (what your OCR path already meets)", options.budget_ms);
         println!();
         println!("  No capture region is used. Nothing on screen is read.");
+        println!();
+        println!(
+            "  policy     {}",
+            if options.observe {
+                "observe only — nothing is blocked, nothing is judged"
+            } else if options.block_first {
+                "block-first — every click waits for a verdict (~2.9 presses per orb)"
+            } else {
+                "detect-then-block — clicks flow freely, only a hit locks"
+            }
+        );
         println!();
         println!("  Hover the item you are rolling and craft normally.");
         println!("  Ctrl+Shift+F12 releases a lock. Ctrl+Shift+F9 quits and reports.");
