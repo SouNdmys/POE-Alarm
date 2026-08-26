@@ -157,7 +157,6 @@ pub enum RuntimeEvent {
     },
     SettingsCompiled {
         generation: RuntimeGeneration,
-        profile: RecognitionProfile,
         region: CaptureRegion,
         ui: CompiledUiBindings,
     },

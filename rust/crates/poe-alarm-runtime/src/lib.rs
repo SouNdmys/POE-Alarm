@@ -18,10 +18,7 @@ mod protection;
 mod tests;
 
 pub use actor::{ProductionRuntimeConfig, RuntimeHandle, RuntimeSendError};
-pub use backend::{
-    BackendError, BackendFactory, CaptureBackend, ProductionBackendFactory, RecognizerBackend,
-    ScreenshotBackend,
-};
+pub use backend::BackendError;
 pub use clipboard_source::{ClipboardSource, SourceError};
 pub use compile::{
     CompiledRuntimeSettings, SettingsFieldError, SettingsValidationError, compile_settings,

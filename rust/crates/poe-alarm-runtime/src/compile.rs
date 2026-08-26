@@ -13,7 +13,6 @@ use crate::{AlertCopy, CompiledUiBindings};
 #[derive(Clone, Debug)]
 pub struct CompiledRuntimeSettings {
     pub plan: MonitorPlan,
-    pub profile: RecognitionProfile,
     pub region: CaptureRegion,
     pub ui: CompiledUiBindings,
     pub alert_copy: AlertCopy,
@@ -163,7 +162,6 @@ mod tests {
     fn compiles_profile_region_and_quick_plan_without_normalizing_away_errors() {
         let settings = valid_settings();
         let compiled = compile_settings(&settings).unwrap();
-        assert_eq!(compiled.profile, RecognitionProfile::POE1_ENGLISH);
         assert_eq!(
             compiled.region,
             CaptureRegion::new(12, 20, 600, 800).unwrap()
