@@ -4205,6 +4205,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "poe-alarm-clip-only"
+version = "1.0.0"
+dependencies = [
+ "poe-alarm-core",
+ "poe-alarm-settings",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "poe-alarm-core"
 version = "1.0.0"
 dependencies = [

@@ -1,0 +1,595 @@
+//! Clipboard-only recognition loop, measured against the OCR pipeline's budget.
+//!
+//! Per click:
+//!
+//! 1. pass the click, immediately enter DECIDING (nothing else gets through)
+//! 2. Ctrl+C, read the text, compare it to the text from before the click
+//! 3. same text -> the craft has not resolved yet, ask again
+//! 4. different text -> that is the new roll; run the user's rules on it
+//! 5. hit -> stay locked and alert; miss -> release; anything else -> stay
+//!    locked and say why
+//!
+//! Step 2 is the whole change detector. There is no capture region, no mask,
+//! no fingerprint, and no tolerance to tune, so there is nothing to
+//! recalibrate when the scene behind the tooltip changes.
+//!
+//! The question this binary exists to answer is step 3's cost: how many extra
+//! round trips the server makes us spend, and whether the total still lands
+//! inside the budget the OCR path already meets.
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("clip-only-lab only runs on Windows");
+    std::process::exit(2);
+}
+
+#[cfg(windows)]
+mod app {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+    use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+    use std::time::{Duration, Instant};
+
+    use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey, VK_F9, VK_F12,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, MSG, MSLLHOOKSTRUCT,
+        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_HOTKEY,
+        WM_LBUTTONDOWN, WM_LBUTTONUP,
+    };
+
+    use poe_alarm_clip_only::clipboard::{self, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground};
+    use poe_alarm_clip_only::stats::{LatencySamples, format_millis};
+    use poe_alarm_clip_only::{LabProfile, Verdict, describes_same_roll, evaluate_payload};
+
+    const STATE_IDLE: u8 = 0;
+    const STATE_DECIDING: u8 = 1;
+    const STATE_LOCKED: u8 = 2;
+
+    const HOTKEY_RELEASE: i32 = 0x5041;
+    const HOTKEY_QUIT: i32 = 0x5042;
+    const IDLE_TICK: Duration = Duration::from_millis(40);
+
+    static STATE: AtomicU8 = AtomicU8::new(STATE_IDLE);
+    static PASS_MATCHING_UP: AtomicBool = AtomicBool::new(false);
+    static GAME_FOREGROUND: AtomicBool = AtomicBool::new(false);
+    static SWALLOWED: AtomicU64 = AtomicU64::new(0);
+    static RUNNING: AtomicBool = AtomicBool::new(true);
+    static CLICK_TX: OnceLock<SyncSender<Instant>> = OnceLock::new();
+    static HOOK_EVENTS: AtomicU64 = AtomicU64::new(0);
+    static LBUTTON_DOWNS: AtomicU64 = AtomicU64::new(0);
+    static CLICKS_DROPPED: AtomicU64 = AtomicU64::new(0);
+
+    pub struct Options {
+        /// Latency the OCR pipeline already meets, used as the pass mark.
+        pub budget_ms: u64,
+        /// Per-copy deadline.
+        pub copy_timeout_ms: u64,
+        /// Overall deadline from the click.
+        pub deadline_ms: u64,
+        /// Pause between copies while waiting for the craft to resolve.
+        pub poll_gap_ms: u64,
+        /// Delay before the very first copy, to skip a doomed early attempt.
+        pub first_delay_ms: u64,
+    }
+
+    impl Default for Options {
+        fn default() -> Self {
+            Self {
+                budget_ms: 120,
+                copy_timeout_ms: 600,
+                deadline_ms: 1_500,
+                poll_gap_ms: 0,
+                first_delay_ms: 0,
+            }
+        }
+    }
+
+    /// Low-level mouse hook. Reads cached atomics and returns immediately;
+    /// Windows drops hooks whose callback stalls, so no clipboard work here.
+    unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code < 0 {
+            // SAFETY: forwarding the chain with the parameters we were handed.
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+        HOOK_EVENTS.fetch_add(1, Ordering::Relaxed);
+        if wparam.0 as u32 == WM_LBUTTONDOWN {
+            LBUTTON_DOWNS.fetch_add(1, Ordering::Relaxed);
+        }
+        if !GAME_FOREGROUND.load(Ordering::Acquire) {
+            STATE.store(STATE_IDLE, Ordering::Release);
+            // SAFETY: as above.
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+
+        // SAFETY: for WH_MOUSE_LL with code >= 0, lparam points at a live
+        // MSLLHOOKSTRUCT owned by the system for this call.
+        let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+        if info.dwExtraInfo == SYNTHETIC_INPUT_SIGNATURE {
+            // SAFETY: as above.
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+
+        match wparam.0 as u32 {
+            WM_LBUTTONDOWN => {
+                if STATE
+                    .compare_exchange(
+                        STATE_IDLE,
+                        STATE_DECIDING,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_ok()
+                {
+                    PASS_MATCHING_UP.store(true, Ordering::Release);
+                    match CLICK_TX.get().map(|sender| sender.try_send(Instant::now())) {
+                        Some(Ok(())) => {}
+                        _ => {
+                            // Nobody will decide, so holding DECIDING would
+                            // swallow every later click.
+                            CLICKS_DROPPED.fetch_add(1, Ordering::Relaxed);
+                            STATE.store(STATE_IDLE, Ordering::Release);
+                        }
+                    }
+                    // SAFETY: as above.
+                    return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+                }
+                SWALLOWED.fetch_add(1, Ordering::Relaxed);
+                LRESULT(1)
+            }
+            WM_LBUTTONUP => {
+                if PASS_MATCHING_UP.swap(false, Ordering::AcqRel)
+                    || STATE.load(Ordering::Acquire) == STATE_IDLE
+                {
+                    // SAFETY: as above.
+                    return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+                }
+                LRESULT(1)
+            }
+            // SAFETY: as above.
+            _ => unsafe { CallNextHookEx(None, code, wparam, lparam) },
+        }
+    }
+
+    struct Totals {
+        first_copy: LatencySamples,
+        decision: LatencySamples,
+        copies_per_roll: Vec<u32>,
+        rolls: u64,
+        hits: u64,
+        fail_closed: u64,
+    }
+
+    impl Totals {
+        fn new() -> Self {
+            Self {
+                first_copy: LatencySamples::with_capacity(512),
+                decision: LatencySamples::with_capacity(512),
+                copies_per_roll: Vec::with_capacity(512),
+                rolls: 0,
+                hits: 0,
+                fail_closed: 0,
+            }
+        }
+    }
+
+    fn lock(reason: &str) {
+        STATE.store(STATE_LOCKED, Ordering::Release);
+        println!("        LOCKED — {reason}");
+        println!("        press Ctrl+Shift+F12 to release");
+    }
+
+    fn release() {
+        STATE.store(STATE_IDLE, Ordering::Release);
+    }
+
+    /// One click: poll the clipboard until the item text changes, then judge.
+    fn handle_roll(
+        profile: &LabProfile,
+        baseline: &mut Option<String>,
+        totals: &mut Totals,
+        click_at: Instant,
+        options: &Options,
+    ) {
+        totals.rolls += 1;
+        let index = totals.rolls;
+        let deadline = Duration::from_millis(options.deadline_ms);
+        let copy_timeout = Duration::from_millis(options.copy_timeout_ms);
+        let mut copies = 0_u32;
+        let mut first_copy: Option<Duration> = None;
+
+        if options.first_delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(options.first_delay_ms));
+        }
+
+        loop {
+            if click_at.elapsed() >= deadline {
+                totals.fail_closed += 1;
+                lock(&format!(
+                    "item text never changed within {}ms across {copies} copies",
+                    options.deadline_ms
+                ));
+                return;
+            }
+
+            copies += 1;
+            let outcome = match clipboard::copy_hovered_item(copy_timeout) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    totals.fail_closed += 1;
+                    lock(&format!("clipboard round trip failed: {error}"));
+                    return;
+                }
+            };
+            if first_copy.is_none() {
+                first_copy = Some(outcome.total());
+            }
+
+            // Borrow ends before the branch that reassigns the baseline.
+            let unchanged = baseline
+                .as_deref()
+                .map(|previous| describes_same_roll(previous, &outcome.text));
+
+            match unchanged {
+                // First click of the session: this read establishes what the
+                // item looked like before the orb landed.
+                None => *baseline = Some(outcome.text),
+                // The server has not resolved the craft yet. Ask again.
+                Some(true) => {
+                    if options.poll_gap_ms > 0 {
+                        std::thread::sleep(Duration::from_millis(options.poll_gap_ms));
+                    }
+                }
+                Some(false) => {
+                    let verdict = evaluate_payload(&profile.rules, &outcome.text);
+                    let decided = click_at.elapsed();
+                    totals.decision.push(decided);
+                    totals.copies_per_roll.push(copies);
+                    if let Some(first) = first_copy {
+                        totals.first_copy.push(first);
+                    }
+                    *baseline = Some(outcome.text);
+
+                    println!(
+                        "  #{index:<4} copies {copies:<3} first {:<8} verdict {:<8} {:<5} ({} lines)",
+                        format_millis(first_copy.unwrap_or_default()),
+                        format_millis(decided),
+                        verdict.label(),
+                        verdict.affix_count()
+                    );
+
+                    match verdict {
+                        Verdict::Hit { item, evaluation } => {
+                            totals.hits += 1;
+                            println!("\x07");
+                            println!("  ==========================================================");
+                            println!("   HIT on roll #{index}");
+                            if let Some(group) = evaluation.matched_group() {
+                                println!("   matched group: {}", group.name);
+                            }
+                            for line in &item.affix_lines {
+                                println!("     {line}");
+                            }
+                            println!("  ==========================================================");
+                            lock("target affix reached");
+                        }
+                        Verdict::Miss { .. } => release(),
+                        Verdict::Unreadable(error) => {
+                            totals.fail_closed += 1;
+                            lock(&format!("clipboard payload unreadable: {error}"));
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    fn worker(profile: LabProfile, clicks: Receiver<Instant>, options: Options) {
+        let mut totals = Totals::new();
+        let mut baseline: Option<String> = None;
+        let mut armed = false;
+        let mut last_heartbeat = Instant::now();
+        let mut last_events = 0_u64;
+
+        while RUNNING.load(Ordering::Acquire) {
+            match clicks.recv_timeout(IDLE_TICK) {
+                Ok(click_at) => {
+                    handle_roll(&profile, &mut baseline, &mut totals, click_at, &options);
+                }
+                Err(_) => {
+                    let foreground = game_is_foreground();
+                    GAME_FOREGROUND.store(foreground, Ordering::Release);
+                    if foreground != armed {
+                        armed = foreground;
+                        if armed {
+                            println!("  [armed] game focused — clicks are now being watched");
+                        } else {
+                            let (title, class) = clipboard::foreground_window_description();
+                            println!(
+                                "  [idle] game lost focus (now \"{title}\" / {class}) — not intercepting"
+                            );
+                            // The next click starts a fresh comparison; the item
+                            // under the cursor may well be a different one.
+                            baseline = None;
+                        }
+                    }
+                    if armed && last_heartbeat.elapsed() >= Duration::from_secs(3) {
+                        let events = HOOK_EVENTS.load(Ordering::Relaxed);
+                        if events == last_events {
+                            println!(
+                                "  [watching] hook saw 0 mouse events in 3s. Move the mouse; if this"
+                            );
+                            println!(
+                                "             keeps printing, run this terminal as Administrator."
+                            );
+                        } else {
+                            println!(
+                                "  [watching] events {events}  left-downs {}  dropped {}  swallowed {}  state {}",
+                                LBUTTON_DOWNS.load(Ordering::Relaxed),
+                                CLICKS_DROPPED.load(Ordering::Relaxed),
+                                SWALLOWED.load(Ordering::Relaxed),
+                                match STATE.load(Ordering::Acquire) {
+                                    STATE_DECIDING => "deciding",
+                                    STATE_LOCKED => "LOCKED",
+                                    _ => "idle",
+                                }
+                            );
+                        }
+                        last_events = events;
+                        last_heartbeat = Instant::now();
+                    }
+                    if !foreground && STATE.load(Ordering::Acquire) != STATE_IDLE {
+                        release();
+                    }
+                }
+            }
+        }
+
+        report(&totals, &options);
+    }
+
+    fn report(totals: &Totals, options: &Options) {
+        println!();
+        println!("=== session summary ===");
+        println!("  rolls decided             {}", totals.rolls);
+        println!("  hits                      {}", totals.hits);
+        println!("  fail-closed locks         {}", totals.fail_closed);
+        println!(
+            "  clicks swallowed          {}",
+            SWALLOWED.load(Ordering::Relaxed)
+        );
+        println!();
+        println!("{}", totals.first_copy.summary("first Ctrl+C round trip"));
+        println!("{}", totals.decision.summary("click -> verdict"));
+
+        if !totals.copies_per_roll.is_empty() {
+            let total: u32 = totals.copies_per_roll.iter().sum();
+            let mean = f64::from(total) / totals.copies_per_roll.len() as f64;
+            let mut counts = std::collections::BTreeMap::new();
+            for copies in &totals.copies_per_roll {
+                *counts.entry(*copies).or_insert(0_u64) += 1;
+            }
+            println!();
+            println!("  Ctrl+C copies per roll (mean {mean:.2}):");
+            for (copies, hits) in counts {
+                let share = hits as f64 / totals.copies_per_roll.len() as f64 * 100.0;
+                let bar = "#".repeat((share / 2.5).round() as usize);
+                println!("    {copies:>2} copies  {hits:>5} {share:>5.1}% {bar}");
+            }
+        }
+
+        if totals.decision.is_empty() {
+            println!();
+            println!("  No rolls were decided, so there is nothing to compare against OCR.");
+            return;
+        }
+
+        println!();
+        println!("  click -> verdict distribution:");
+        println!("{}", totals.decision.histogram(&[40, 60, 80, 100, 120, 200]));
+        println!();
+        for budget in [60_u64, 80, 100, options.budget_ms, 150] {
+            let share = totals
+                .decision
+                .fraction_within(Duration::from_millis(budget))
+                * 100.0;
+            println!("  decided within {budget:>3}ms: {share:>5.1}%");
+        }
+
+        let p95 = totals.decision.percentile(0.95).unwrap_or_default();
+        let budget = Duration::from_millis(options.budget_ms);
+        let within = totals.decision.fraction_within(budget);
+        println!();
+        println!("=== verdict ===");
+        println!(
+            "  Your OCR path closes the loop at about {}ms.",
+            options.budget_ms
+        );
+        if totals.fail_closed > totals.rolls / 20 {
+            println!("  But {} of {} rolls failed closed. Fix that before reading the", totals.fail_closed, totals.rolls);
+            println!("  latency numbers — a fast pipeline that keeps giving up is not faster.");
+        } else if within >= 0.99 {
+            println!(
+                "  This path decided {:.1}% of rolls inside that, p95 {}. It is at least",
+                within * 100.0,
+                format_millis(p95)
+            );
+            println!("  as fast, with no region, no mask, and no OCR. Drop OCR.");
+        } else if within >= 0.90 {
+            println!(
+                "  This path decided {:.1}% inside that, p95 {}. Close, and block-first",
+                within * 100.0,
+                format_millis(p95)
+            );
+            println!("  turns the misses into a brief stutter rather than a lost roll.");
+        } else {
+            println!(
+                "  This path only decided {:.1}% inside that, p95 {}. The extra copies",
+                within * 100.0,
+                format_millis(p95)
+            );
+            println!("  are costing too much — try --first-delay-ms to skip the doomed first");
+            println!("  copy, or keep OCR.");
+        }
+    }
+
+    fn pump(hook: HHOOK) {
+        let mut message = MSG::default();
+        loop {
+            // SAFETY: standard message loop over this thread's queue.
+            let result = unsafe { GetMessageW(&mut message, None, 0, 0) };
+            if result.0 <= 0 {
+                break;
+            }
+            if message.message == WM_HOTKEY {
+                match message.wParam.0 as i32 {
+                    HOTKEY_RELEASE => {
+                        let previous = STATE.swap(STATE_IDLE, Ordering::AcqRel);
+                        println!(
+                            "  [released] was {} — monitoring resumed",
+                            match previous {
+                                STATE_DECIDING => "deciding (a verdict was still pending)",
+                                STATE_LOCKED => "LOCKED",
+                                _ => "already idle (nothing was blocking your clicks)",
+                            }
+                        );
+                    }
+                    HOTKEY_QUIT => {
+                        println!("  [quit] shutting down");
+                        RUNNING.store(false, Ordering::Release);
+                        break;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            // SAFETY: message was filled by GetMessageW.
+            unsafe {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        // SAFETY: hook came from SetWindowsHookExW and is removed exactly once.
+        let _ = unsafe { UnhookWindowsHookEx(hook) };
+    }
+
+    fn parse_options(mut arguments: impl Iterator<Item = String>) -> Result<Options, String> {
+        let mut options = Options::default();
+        while let Some(argument) = arguments.next() {
+            let mut value = || {
+                arguments
+                    .next()
+                    .ok_or_else(|| "flag needs a value".to_string())
+                    .and_then(|raw| {
+                        raw.parse::<u64>()
+                            .map_err(|_| format!("expected a number, got {raw}"))
+                    })
+            };
+            match argument.as_str() {
+                "--budget-ms" => options.budget_ms = value()?,
+                "--copy-timeout-ms" => options.copy_timeout_ms = value()?,
+                "--deadline-ms" => options.deadline_ms = value()?,
+                "--poll-gap-ms" => options.poll_gap_ms = value()?,
+                "--first-delay-ms" => options.first_delay_ms = value()?,
+                "--help" | "-h" => {
+                    println!(
+                        "usage: clip-only-lab [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N]"
+                    );
+                    std::process::exit(0);
+                }
+                other => return Err(format!("unknown argument {other}")),
+            }
+        }
+        Ok(options)
+    }
+
+    pub fn run() {
+        let options = parse_options(std::env::args().skip(1)).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
+        let profile = match LabProfile::load_release() {
+            Ok(profile) => profile,
+            Err(error) => {
+                eprintln!("could not build a lab profile: {error}");
+                std::process::exit(2);
+            }
+        };
+
+        println!("POE Alarm — clipboard-only recognition lab");
+        println!("  settings   {}", profile.settings_path);
+        println!("  game       {}", profile.game_profile);
+        println!("  language   {}", profile.ocr_language);
+        println!("  groups     {}", profile.rules.definition().groups.len());
+        println!("  budget     {}ms (what your OCR path already meets)", options.budget_ms);
+        println!();
+        println!("  No capture region is used. Nothing on screen is read.");
+        println!();
+        println!("  Hover the item you are rolling and craft normally.");
+        println!("  Ctrl+Shift+F12 releases a lock. Ctrl+Shift+F9 quits and reports.");
+        println!();
+        println!("  If the game runs as Administrator, this terminal must too, or the");
+        println!("  hook is installed but never receives anything. The [watching] line");
+        println!("  tells you which case you are in.");
+        println!();
+        println!("  NOTE: every roll overwrites your clipboard. That is inherent here.");
+        println!();
+
+        let (sender, receiver) = sync_channel::<Instant>(64);
+        let _ = CLICK_TX.set(sender);
+
+        let worker_handle = std::thread::Builder::new()
+            .name("clip-only-worker".to_string())
+            .spawn(move || worker(profile, receiver, options))
+            .expect("worker thread spawns");
+
+        // SAFETY: this executable's module stays loaded for the process
+        // lifetime, which outlives the hook.
+        let module = unsafe { GetModuleHandleW(None) }
+            .map(|handle| HINSTANCE(handle.0))
+            .unwrap_or_default();
+        // SAFETY: mouse_proc has the required signature.
+        let hook =
+            match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), Some(module), 0) } {
+                Ok(hook) => hook,
+                Err(error) => {
+                    eprintln!("SetWindowsHookExW failed: {error}");
+                    RUNNING.store(false, Ordering::Release);
+                    let _ = worker_handle.join();
+                    std::process::exit(1);
+                }
+            };
+
+        let modifiers = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
+        // SAFETY: a null window posts WM_HOTKEY to this thread's queue.
+        unsafe {
+            if RegisterHotKey(None, HOTKEY_RELEASE, modifiers, u32::from(VK_F12.0)).is_err() {
+                eprintln!("  warning: Ctrl+Shift+F12 is already taken");
+            }
+            if RegisterHotKey(None, HOTKEY_QUIT, modifiers, u32::from(VK_F9.0)).is_err() {
+                eprintln!("  warning: Ctrl+Shift+F9 is already taken");
+            }
+        }
+
+        println!("  armed — go craft.");
+        println!();
+        pump(hook);
+
+        // SAFETY: ids were registered on this thread.
+        unsafe {
+            let _ = UnregisterHotKey(None, HOTKEY_RELEASE);
+            let _ = UnregisterHotKey(None, HOTKEY_QUIT);
+        }
+        RUNNING.store(false, Ordering::Release);
+        let _ = worker_handle.join();
+    }
+}
+
+#[cfg(windows)]
+fn main() {
+    app::run();
+}
