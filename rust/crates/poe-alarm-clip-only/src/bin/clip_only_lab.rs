@@ -73,6 +73,10 @@ mod app {
     static ERROR_LOCKED: AtomicBool = AtomicBool::new(false);
     /// Thread running the message pump, so the worker can end the session.
     static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+    /// Pass every click through untouched. Blocking costs the user roughly
+    /// three clicks per applied orb at spam speed, which contaminates any
+    /// attempt to measure how long the craft itself takes.
+    static OBSERVE_ONLY: AtomicBool = AtomicBool::new(false);
 
     /// Per-message-type counts. "Moves arrive but presses do not" is a real
     /// enough outcome that it needs to be visible rather than inferred: swapped
@@ -124,6 +128,9 @@ mod app {
         /// Require two consecutive identical reads before judging, so an
         /// intermediate render is never mistaken for the final roll.
         pub settle: bool,
+        /// Measure how long the craft actually takes, without blocking a
+        /// single click and with two copies per click instead of eight.
+        pub observe: bool,
     }
 
     impl Default for Options {
@@ -140,6 +147,7 @@ mod app {
                 test_copy: None,
                 min_craft_ms: 25,
                 settle: true,
+                observe: false,
             }
         }
     }
@@ -185,6 +193,13 @@ mod app {
         }
 
         match wparam.0 as u32 {
+            WM_LBUTTONDOWN if OBSERVE_ONLY.load(Ordering::Acquire) => {
+                if let Some(sender) = CLICK_TX.get() {
+                    let _ = sender.try_send(Instant::now());
+                }
+                // SAFETY: as above.
+                unsafe { CallNextHookEx(None, code, wparam, lparam) }
+            }
             WM_LBUTTONDOWN => {
                 if STATE
                     .compare_exchange(
@@ -457,7 +472,129 @@ mod app {
         }
     }
 
+    /// Delays probed, in milliseconds. Rotating through them builds the whole
+    /// curve in one session instead of forcing a run per delay.
+    const OBSERVE_DELAYS: [u64; 8] = [40, 70, 100, 150, 220, 320, 460, 650];
+
+    /// Measures how long the client actually takes to show a new roll.
+    ///
+    /// Blocks nothing and spends exactly two copies per click: one immediately,
+    /// which reliably still shows the pre-craft item, and one after a delay.
+    /// Comparing those two is self-contained per click, so a drifting baseline
+    /// cannot confound it the way the polling loop's could.
+    fn observe(profile: &LabProfile, clicks: &Receiver<Instant>, options: &Options) {
+        let copy_timeout = Duration::from_millis(options.copy_timeout_ms);
+        let mut attempts = [0_u32; OBSERVE_DELAYS.len()];
+        let mut changed = [0_u32; OBSERVE_DELAYS.len()];
+        let mut failures = 0_u64;
+        let mut index = 0_usize;
+        let mut armed = false;
+        let mut observed = 0_u64;
+
+        while RUNNING.load(Ordering::Acquire) {
+            match clicks.recv_timeout(IDLE_TICK) {
+                Ok(_) => {
+                    let slot = index % OBSERVE_DELAYS.len();
+                    index += 1;
+                    let delay = OBSERVE_DELAYS[slot];
+
+                    let before =
+                        match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
+                            Ok(outcome) => outcome.text,
+                            Err(_) => {
+                                failures += 1;
+                                continue;
+                            }
+                        };
+                    std::thread::sleep(Duration::from_millis(delay));
+                    let after =
+                        match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
+                            Ok(outcome) => outcome.text,
+                            Err(_) => {
+                                failures += 1;
+                                continue;
+                            }
+                        };
+
+                    attempts[slot] += 1;
+                    observed += 1;
+                    let moved = !describes_same_roll(&before, &after);
+                    if moved {
+                        changed[slot] += 1;
+                    }
+                    println!(
+                        "  observed #{observed:<4} waited {delay:>4}ms  {}",
+                        if moved { "CHANGED" } else { "unchanged" }
+                    );
+                }
+                Err(_) => {
+                    let foreground = game_is_foreground();
+                    GAME_FOREGROUND.store(foreground, Ordering::Release);
+                    if foreground != armed {
+                        armed = foreground;
+                        println!(
+                            "  [{}] {}",
+                            if armed { "armed" } else { "idle" },
+                            if armed {
+                                "game focused — every click passes through untouched"
+                            } else {
+                                "game lost focus"
+                            }
+                        );
+                    }
+                }
+            }
+        }
+
+        println!();
+        println!("=== how long the craft actually takes ===");
+        println!("  clicks observed           {observed}");
+        println!("  copy failures             {failures}");
+        println!();
+        println!("  delay    changed / tried    share");
+        let mut resolved_by = None;
+        for (slot, delay) in OBSERVE_DELAYS.iter().enumerate() {
+            let tried = attempts[slot];
+            if tried == 0 {
+                println!("  {delay:>4}ms   no samples");
+                continue;
+            }
+            let share = f64::from(changed[slot]) / f64::from(tried);
+            let bar = "#".repeat((share * 30.0).round() as usize);
+            println!(
+                "  {delay:>4}ms   {:>3} / {:<3}          {:>5.1}% {bar}",
+                changed[slot], tried, share * 100.0
+            );
+            if share >= 0.9 && resolved_by.is_none() {
+                resolved_by = Some(*delay);
+            }
+        }
+        println!();
+        match resolved_by {
+            Some(delay) => {
+                println!("  By {delay}ms, 90% of crafts had resolved. That is the real floor:");
+                println!("  no recognizer of any kind can decide sooner, OCR included.");
+                if delay > 150 {
+                    println!();
+                    println!("  It is well past the {}ms the OCR path is credited with, which", options.budget_ms);
+                    println!("  means that number is measuring something other than 'the new");
+                    println!("  affixes were readable'. Worth checking before comparing further.");
+                }
+            }
+            None => {
+                println!("  No delay reached 90%. Either the sample is too small, or the craft");
+                println!("  regularly takes longer than {}ms.", OBSERVE_DELAYS[OBSERVE_DELAYS.len() - 1]);
+            }
+        }
+        let _ = profile;
+    }
+
     fn worker(profile: LabProfile, clicks: Receiver<Instant>, options: Options) {
+        if options.observe {
+            OBSERVE_ONLY.store(true, Ordering::Release);
+            observe(&profile, &clicks, &options);
+            return;
+        }
         let mut totals = Totals::new();
         let mut baseline: Option<String> = None;
         let mut armed = false;
@@ -571,10 +708,20 @@ mod app {
         println!("  rolls decided             {}", totals.rolls);
         println!("  hits                      {}", totals.hits);
         println!("  fail-closed locks         {}", totals.fail_closed);
-        println!(
-            "  clicks swallowed          {}",
-            SWALLOWED.load(Ordering::Relaxed)
-        );
+        let swallowed = SWALLOWED.load(Ordering::Relaxed);
+        println!("  clicks swallowed          {swallowed}");
+        if totals.rolls > 0 {
+            let per_orb = (swallowed + totals.rolls) as f64 / totals.rolls as f64;
+            println!(
+                "  clicks spent per orb      {per_orb:.1}  (blocking ate {swallowed} of {} presses)",
+                swallowed + totals.rolls
+            );
+            if per_orb > 1.5 {
+                println!(
+                    "  ^ this is the felt cost of block-first at your click rate, not a bug"
+                );
+            }
+        }
         println!();
         println!("=== what the mouse hook actually received ===");
         println!("  {}", input_breakdown());
@@ -739,6 +886,7 @@ mod app {
                 "--scancode" => options.key_method = KeyMethod::ScanCode,
                 "--min-craft-ms" => options.min_craft_ms = value()?,
                 "--no-settle" => options.settle = false,
+                "--observe" => options.observe = true,
                 "--help" | "-h" => {
                     println!(
                         "usage: clip-only-lab [--test-copy N] [--scancode] [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N] [--unlock-after-ms N]"
