@@ -300,6 +300,25 @@ pub fn foreground_window_description() -> (String, String) {
     }
 }
 
+/// Where the game window is, if it can be found.
+///
+/// Answers one question: which monitor is the player looking at. `None` is an
+/// ordinary answer meaning "could not tell" — the game may be closed,
+/// minimized, or on a machine that has no window manager at all — and every
+/// caller falls back to the primary monitor, which is what a single-screen user
+/// sees regardless.
+#[must_use]
+pub fn game_window_rect() -> Option<crate::geometry::RectI> {
+    #[cfg(windows)]
+    {
+        crate::win32::game_window_rect()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// True when the foreground window is a Path of Exile client.
 #[must_use]
 pub fn game_is_foreground() -> bool {

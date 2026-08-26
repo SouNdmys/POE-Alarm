@@ -12,7 +12,7 @@ use poe_alarm_core::LogicalAffixMatch;
 use poe_alarm_monitoring::{
     EventSink, Monitor, MonitorDetection, MonitorEvent, MonitorPlan, RecognitionResult, SystemClock,
 };
-use poe_alarm_vision::CaptureRegion;
+use poe_alarm_platform_win::game_window_rect;
 
 use crate::backend::{AffixSourceFactory, DynamicSource, ProductionSourceFactory};
 use crate::protection::AlertPresentation;
@@ -351,7 +351,6 @@ impl RuntimeActor {
         let valid = Arc::new(AtomicBool::new(true));
         let bridge = MonitorBridge {
             generation,
-            region: compiled.region,
             alert_copy: compiled.alert_copy.clone(),
             input_guard_enabled: compiled.input_guard_enabled,
             protection: Arc::clone(&self.protection),
@@ -711,7 +710,6 @@ impl RuntimeActor {
     fn publish_compiled(&self, generation: RuntimeGeneration, compiled: &CompiledRuntimeSettings) {
         let _ = self.events.send(RuntimeEvent::SettingsCompiled {
             generation,
-            region: compiled.region,
             ui: compiled.ui.clone(),
         });
     }
@@ -766,7 +764,6 @@ enum BridgeMonitorEvent {
 
 struct MonitorBridge {
     generation: RuntimeGeneration,
-    region: CaptureRegion,
     alert_copy: crate::AlertCopy,
     input_guard_enabled: bool,
     protection: Arc<dyn ProtectionService>,
@@ -834,7 +831,12 @@ impl EventSink for MonitorBridge {
                 let presentation = AlertPresentation {
                     copy: self.alert_copy.clone(),
                     detail: alert_detail,
-                    anchor_region: self.region,
+                    // Asked here rather than at compile time: a rectangle
+                    // captured when the user pressed Start can be minutes stale
+                    // by the time an item rolls, and the client may not even
+                    // have been up. This runs immediately before a fullscreen
+                    // window is painted, so one lookup costs nothing.
+                    anchor_region: game_window_rect(),
                 };
                 match self
                     .protection

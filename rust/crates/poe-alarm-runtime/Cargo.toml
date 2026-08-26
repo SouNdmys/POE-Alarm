@@ -13,4 +13,3 @@ poe-alarm-core = { path = "../poe-alarm-core" }
 poe-alarm-monitoring = { path = "../poe-alarm-monitoring" }
 poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
 poe-alarm-settings = { path = "../poe-alarm-settings" }
-poe-alarm-vision = { path = "../poe-alarm-vision" }

@@ -2,8 +2,6 @@
 //! 泵消息并接收内容/显隐/交互命令。监控中点击穿透、置顶,未监控时可拖动;
 //! 拖动结束把相对位置回投给 UI 落盘。
 
-#![cfg(windows)]
-
 use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 

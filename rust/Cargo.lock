@@ -4185,7 +4185,6 @@ dependencies = [
  "poe-alarm-monitoring",
  "poe-alarm-platform-win",
  "poe-alarm-settings",
- "poe-alarm-vision",
 ]
 
 [[package]]
@@ -4195,13 +4194,6 @@ dependencies = [
  "poe-alarm-core",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "poe-alarm-vision"
-version = "1.0.0"
-dependencies = [
- "windows 0.61.3",
 ]
 
 [[package]]

@@ -19,13 +19,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, SW_SHOWNORMAL,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_SHOWNORMAL,
 };
 use windows::core::HSTRING;
 
 use crate::clipboard::{
     ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
+    describes_game,
 };
+use crate::geometry::RectI;
 
 /// `CF_UNICODETEXT`. Spelled out so the crate need not take the OLE feature.
 const CF_UNICODETEXT: u32 = 13;
@@ -264,11 +267,15 @@ pub(crate) fn held_modifiers() -> HeldModifiers {
 }
 
 pub(crate) fn foreground_window_description() -> (String, String) {
-    // SAFETY: returns a borrowed handle valid for the calls below.
+    // SAFETY: returns a borrowed handle valid for the call below.
     let window = unsafe { GetForegroundWindow() };
     if window.is_invalid() {
         return (String::new(), String::new());
     }
+    window_description(window)
+}
+
+fn window_description(window: HWND) -> (String, String) {
     let mut title = [0_u16; 256];
     let mut class = [0_u16; 256];
     // SAFETY: both buffers are live and their lengths travel with the slices.
@@ -279,6 +286,80 @@ pub(crate) fn foreground_window_description() -> (String, String) {
         String::from_utf16_lossy(&title[..title_length]),
         String::from_utf16_lossy(&class[..class_length]),
     )
+}
+
+/// Where the game window is, if it can be found.
+///
+/// Only ever used to answer "which monitor" — the red alert centres its card on
+/// the monitor holding this rectangle. `None` is an ordinary answer, not a
+/// failure: every caller already treats it as "use the primary monitor", which
+/// is exactly what a user with one screen sees either way.
+pub(crate) fn game_window_rect() -> Option<RectI> {
+    // The overwhelmingly common case is that the player is looking at the game,
+    // and this runs on the path that is about to paint a fullscreen alert.
+    // SAFETY: returns a borrowed handle checked below.
+    let foreground = unsafe { GetForegroundWindow() };
+    if !foreground.is_invalid() {
+        let (title, class) = window_description(foreground);
+        if describes_game(&title, &class)
+            && let Some(rect) = window_rect(foreground)
+        {
+            return Some(rect);
+        }
+    }
+    enumerate_game_window().and_then(window_rect)
+}
+
+/// The window rectangle, refusing the two shapes that would silently mislead.
+fn window_rect(window: HWND) -> Option<RectI> {
+    // A minimized window reports roughly (-32000, -32000)-(-31840, -31972).
+    // That has positive area, so it would sail through RectI::new and then
+    // resolve to the primary monitor — an answer that looks deliberate and is
+    // not. Refusing it hands the caller an honest "unknown" instead.
+    // SAFETY: takes a borrowed handle.
+    if unsafe { IsIconic(window) }.as_bool() {
+        return None;
+    }
+    let mut rect = windows::Win32::Foundation::RECT::default();
+    // SAFETY: `rect` is live for the call.
+    unsafe { GetWindowRect(window, &raw mut rect) }.ok()?;
+    RectI::new(
+        rect.left,
+        rect.top,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+    )
+}
+
+fn enumerate_game_window() -> Option<HWND> {
+    let mut found: Option<HWND> = None;
+    // SAFETY: the callback below only writes through this pointer while
+    // EnumWindows is running, and EnumWindows is synchronous.
+    let _ = unsafe {
+        EnumWindows(
+            Some(visit_window),
+            windows::Win32::Foundation::LPARAM((&raw mut found) as isize),
+        )
+    };
+    found
+}
+
+unsafe extern "system" fn visit_window(
+    window: HWND,
+    state: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    // SAFETY: `state` is the &mut Option<HWND> handed to EnumWindows above.
+    let found = unsafe { &mut *(state.0 as *mut Option<HWND>) };
+    // SAFETY: EnumWindows hands out live top-level handles.
+    if !unsafe { IsWindowVisible(window) }.as_bool() {
+        return true.into();
+    }
+    let (title, class) = window_description(window);
+    if describes_game(&title, &class) {
+        *found = Some(window);
+        return false.into();
+    }
+    true.into()
 }
 
 pub(crate) fn process_is_elevated() -> Option<bool> {

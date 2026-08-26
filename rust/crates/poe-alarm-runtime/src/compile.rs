@@ -6,14 +6,12 @@ use poe_alarm_core::{
 };
 use poe_alarm_monitoring::MonitorPlan;
 use poe_alarm_settings::{AppSettings, CURRENT_SCHEMA_VERSION, GameProfile, RuleEditorMode};
-use poe_alarm_vision::CaptureRegion;
 
 use crate::{AlertCopy, CompiledUiBindings};
 
 #[derive(Clone, Debug)]
 pub struct CompiledRuntimeSettings {
     pub plan: MonitorPlan,
-    pub region: CaptureRegion,
     pub ui: CompiledUiBindings,
     pub alert_copy: AlertCopy,
     /// Reserved for a future explicitly selected protection policy. The released fast mode must
@@ -72,23 +70,6 @@ pub fn compile_settings(
 
     let selected = settings.selected_profile();
     let selected_rules = selected.selected_rules();
-    let screen_region = selected.capture_region.ok_or_else(|| {
-        SettingsValidationError::one("capture_region", "select an item tooltip region first")
-    })?;
-    if !screen_region.is_valid() {
-        return Err(SettingsValidationError::one(
-            "capture_region",
-            "the selected region must have positive width and height",
-        ));
-    }
-    let width = u32::try_from(screen_region.width).map_err(|_| {
-        SettingsValidationError::one("capture_region.width", "width is outside the valid range")
-    })?;
-    let height = u32::try_from(screen_region.height).map_err(|_| {
-        SettingsValidationError::one("capture_region.height", "height is outside the valid range")
-    })?;
-    let region = CaptureRegion::new(screen_region.x, screen_region.y, width, height)
-        .map_err(|error| SettingsValidationError::one("capture_region", error.to_string()))?;
 
     // Still validated even though the parser reads both locales: this value
     // also selects which rule set the profile uses.
@@ -133,7 +114,6 @@ pub fn compile_settings(
 
     Ok(CompiledRuntimeSettings {
         plan,
-        region,
         ui: CompiledUiBindings::from_settings(settings),
         alert_copy: AlertCopy::for_ui_language(&settings.ui_language),
         input_guard_enabled: false,
@@ -142,30 +122,24 @@ pub fn compile_settings(
 
 #[cfg(test)]
 mod tests {
-    use poe_alarm_core::{AcceptableResultGroup, AffixCondition, RuleSetDefinition};
-    use poe_alarm_settings::{GameProfileSettings, ScreenRegion};
-
     use super::*;
+    use poe_alarm_core::{AcceptableResultGroup, AffixCondition, RuleSetDefinition};
 
     fn valid_settings() -> AppSettings {
         let mut settings = AppSettings::default();
-        settings.profiles.poe1 = GameProfileSettings {
-            capture_region: Some(ScreenRegion::new(12, 20, 600, 800)),
-            ..GameProfileSettings::default()
-        };
         settings.profiles.poe1.selected_rules_mut().target_affix =
             "+#% to Critical Hit Chance".to_owned();
         settings
     }
 
     #[test]
-    fn compiles_profile_region_and_quick_plan_without_normalizing_away_errors() {
+    fn a_profile_that_was_never_configured_beyond_its_rule_still_compiles() {
+        // The OCR build refused to compile a profile with no capture region,
+        // which after the clipboard migration meant a fresh install could
+        // neither monitor nor check an item — the field was still required and
+        // no longer read by anything.
         let settings = valid_settings();
         let compiled = compile_settings(&settings).unwrap();
-        assert_eq!(
-            compiled.region,
-            CaptureRegion::new(12, 20, 600, 800).unwrap()
-        );
         assert!(matches!(compiled.plan, MonitorPlan::Quick(_)));
         assert!(!compiled.input_guard_enabled);
     }
@@ -255,15 +229,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_region_and_unknown_language_are_explicit_errors() {
+    fn an_unknown_affix_language_is_an_explicit_error() {
         let mut settings = valid_settings();
-        settings.profiles.poe1.capture_region = None;
-        assert_eq!(
-            compile_settings(&settings).unwrap_err().fields[0].field,
-            "capture_region"
-        );
-
-        settings.profiles.poe1.capture_region = Some(ScreenRegion::new(0, 0, 100, 100));
         settings.profiles.poe1.ocr_language = "zh-CN".to_owned();
         assert_eq!(
             compile_settings(&settings).unwrap_err().fields[0].field,

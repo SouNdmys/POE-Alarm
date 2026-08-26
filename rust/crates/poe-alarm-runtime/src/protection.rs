@@ -9,7 +9,6 @@ use poe_alarm_alert_win::{
     BlockingAlertService,
 };
 use poe_alarm_platform_win::{PendingMouseInputGuard, RectI};
-use poe_alarm_vision::CaptureRegion;
 
 use crate::{AlertCopy, RuntimeGeneration};
 
@@ -20,7 +19,11 @@ const ALERT_SHUTDOWN_POLL: Duration = Duration::from_millis(2);
 pub struct AlertPresentation {
     pub copy: AlertCopy,
     pub detail: String,
-    pub anchor_region: CaptureRegion,
+    /// Which monitor should host the alert, expressed as the game window.
+    ///
+    /// `None` means the game window could not be found, and the alert lands on
+    /// the primary monitor — the same place it lands for anyone with one screen.
+    pub anchor_region: Option<RectI>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -310,14 +313,7 @@ impl ProtectionService for NativeProtection {
         )
         .map_err(|error| ProtectionError(error.to_string()))?;
         let mut trigger = AlertTrigger::new(text);
-        trigger.anchor_region = RectI::new(
-            presentation.anchor_region.x,
-            presentation.anchor_region.y,
-            i32::try_from(presentation.anchor_region.width)
-                .map_err(|_| ProtectionError("alert region width is too large".to_owned()))?,
-            i32::try_from(presentation.anchor_region.height)
-                .map_err(|_| ProtectionError("alert region height is too large".to_owned()))?,
-        );
+        trigger.anchor_region = presentation.anchor_region;
 
         let mut state = self.state();
         if !state.bookkeeping.is_active(generation) {
@@ -425,7 +421,7 @@ mod tests {
                         button: "Acknowledge".to_owned(),
                     },
                     detail: "Native protection smoke test".to_owned(),
-                    anchor_region: CaptureRegion::new(0, 0, 64, 64).unwrap(),
+                    anchor_region: RectI::new(0, 0, 64, 64),
                 },
             )
             .unwrap();

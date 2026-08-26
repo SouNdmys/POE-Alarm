@@ -3,7 +3,6 @@ use std::time::Duration;
 use poe_alarm_monitoring::{MonitorSnapshot, MonitorState};
 use poe_alarm_platform_win::{HotKeyConfig, StartMonitoringHotKey};
 use poe_alarm_settings::{AppSettings, HudPlacement};
-use poe_alarm_vision::CaptureRegion;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
@@ -163,7 +162,6 @@ pub enum RuntimeEvent {
     },
     SettingsCompiled {
         generation: RuntimeGeneration,
-        region: CaptureRegion,
         ui: CompiledUiBindings,
     },
     MonitorSnapshot {
