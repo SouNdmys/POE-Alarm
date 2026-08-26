@@ -99,7 +99,10 @@ mod app {
     pub struct Options {
         /// Latency the OCR pipeline already meets, used as the pass mark.
         pub budget_ms: u64,
-        /// Per-copy deadline.
+        /// Per-copy deadline. A healthy round trip is ~3ms and p99 is under
+        /// 10ms, so anything beyond a few dozen ms is the client declining to
+        /// answer, not a slow answer. Waiting it out blinds the poller for the
+        /// exact window the roll appears in.
         pub copy_timeout_ms: u64,
         /// Overall deadline from the click.
         pub deadline_ms: u64,
@@ -146,7 +149,7 @@ mod app {
         fn default() -> Self {
             Self {
                 budget_ms: 120,
-                copy_timeout_ms: 600,
+                copy_timeout_ms: 60,
                 deadline_ms: 1_500,
                 poll_gap_ms: 12,
                 poll_gap_max_ms: 60,
@@ -679,7 +682,10 @@ mod app {
                         ClipboardError::Busy { .. } => busy += 1,
                         _ => empties += 1,
                     }
-                    std::thread::sleep(interval);
+                    // A refusal is not a reason to stop watching. Retry
+                    // promptly rather than idling the full interval, so a
+                    // stretch of silence does not become a blind spot.
+                    std::thread::sleep(Duration::from_millis(4));
                     continue;
                 }
                 Err(error) => {
@@ -755,6 +761,10 @@ mod app {
         println!("  {}", input_breakdown());
         println!();
         println!("  failures by kind          timeout {timeouts}  empty {empties}  busy {busy}");
+        println!(
+            "  per-copy timeout          {}ms  (a refusal costs this much blindness)",
+            options.copy_timeout_ms
+        );
         println!();
         println!("{}", staleness.summary("detection staleness"));
         println!("{}", poll_gap.summary("gap between polls"));
