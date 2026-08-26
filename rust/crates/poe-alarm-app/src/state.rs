@@ -76,6 +76,8 @@ pub struct ViewState {
     /// 编辑区输入(实体常驻,刷新不丢输入)
     pub name_input: Entity<InputState>,
     pub template_input: Entity<InputState>,
+    /// 粘贴物品文本的多行输入框。
+    pub item_text_input: Entity<InputState>,
     pub value_rows: Vec<ValueRow>,
 
     /// 运行侧展示数据

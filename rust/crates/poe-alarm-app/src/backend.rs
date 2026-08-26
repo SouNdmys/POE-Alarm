@@ -1,6 +1,6 @@
 //! Phase 4:GPUI 前端 ↔ 生产运行时桥接。
 //!
-//! Windows 上使用真实 `poe-alarm-runtime`(截屏、OCR、规则判定、红色拦截窗
+//! Windows 上使用真实 `poe-alarm-runtime`(读取物品文本、规则判定、红色拦截窗
 //! 与提示音都由 runtime 内部完成;UI 只发命令、收事件)。非 Windows 平台
 //! 提供模拟器,保证云端 Linux 开发环境可编译、可迭代布局。
 //!
@@ -15,7 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use poe_alarm_settings::{AppSettings, SettingsStore};
 
-/// 平台事件(全局热键 / 框选结果 / 浮窗拖动),由后台线程投递、UI 轮询消费。
+/// 平台事件(全局热键 / 浮窗拖动),由后台线程投递、UI 轮询消费。
 #[derive(Clone, Copy, Debug)]
 pub enum PlatformEvent {
     HotKeyStart,
@@ -29,7 +29,7 @@ pub enum BridgeState {
     Idle,
     Starting,
     Monitoring,
-    TestingScreenshot,
+    CheckingItem,
     MatchFound,
     Faulted,
     ShuttingDown,
@@ -44,7 +44,7 @@ impl From<poe_alarm_runtime::RuntimeState> for BridgeState {
             R::Idle => Self::Idle,
             R::Starting => Self::Starting,
             R::Monitoring => Self::Monitoring,
-            R::TestingScreenshot => Self::TestingScreenshot,
+            R::CheckingItem => Self::CheckingItem,
             R::MatchFound => Self::MatchFound,
             R::Faulted => Self::Faulted,
             R::ShuttingDown => Self::ShuttingDown,
@@ -57,7 +57,7 @@ impl From<poe_alarm_runtime::RuntimeState> for BridgeState {
 #[derive(Clone, Debug)]
 pub enum BridgeEvent {
     State(BridgeState),
-    /// 监控快照:扫描轮数 / 截屏耗时 ms / OCR 耗时 ms / 是否缓存复用 / 最近行
+    /// 监控快照:轮询轮数 / 读取耗时 ms / 判定耗时 ms / 是否未变化 / 最近行
     Snapshot {
         scan_count: u64,
         capture_ms: f64,
@@ -71,7 +71,7 @@ pub enum BridgeEvent {
         lines: Vec<String>,
         matched_group: Option<String>,
     },
-    ScreenshotReport {
+    ItemCheckReport {
         lines: Vec<String>,
         matched: bool,
         detail: String,
@@ -354,16 +354,14 @@ impl Backend {
         }
     }
 
-    /// 检查物品文本:用当前设置跡跑一次规则判定。
+    /// 检查物品文本:用当前规则跑一次判定。
     ///
-    /// 文件里存的是 Ctrl+C 原文而不再是截图。
+    /// 入参是玩家在游戏里 Ctrl+C 复制出来的原文。
     #[cfg(windows)]
-    pub fn test_screenshot(&mut self, path: std::path::PathBuf) -> Result<(), String> {
+    pub fn check_item(&mut self, text: String) -> Result<(), String> {
         self.ensure_runtime()?;
-        let text = std::fs::read_to_string(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let settings = self.settings.clone().normalize();
-        let request = poe_alarm_runtime::ScreenshotRequest::new(
+        let request = poe_alarm_runtime::ItemCheckRequest::new(
             poe_alarm_runtime::RuntimeRequestId(1),
             settings,
             text,
@@ -371,12 +369,12 @@ impl Backend {
         self.runtime
             .as_ref()
             .expect("runtime just ensured")
-            .test_screenshot(request)
+            .check_item(request)
             .map_err(|e| e.to_string())
     }
 
     #[cfg(not(windows))]
-    pub fn test_screenshot(&mut self, _path: std::path::PathBuf) -> Result<(), String> {
+    pub fn check_item(&mut self, _text: String) -> Result<(), String> {
         Ok(())
     }
 
@@ -415,10 +413,10 @@ impl Backend {
                 E::Fault {
                     operation, detail, ..
                 } => out.push(BridgeEvent::Fault(format!("{operation:?}: {detail}"))),
-                E::ScreenshotCompleted(report) => {
+                E::ItemCheckCompleted(report) => {
                     let matched = report.evaluation.is_match;
                     let detail = report.evaluation.detail.clone().unwrap_or_default();
-                    out.push(BridgeEvent::ScreenshotReport {
+                    out.push(BridgeEvent::ItemCheckReport {
                         lines: report.lines.clone(),
                         matched,
                         detail,
@@ -426,7 +424,7 @@ impl Backend {
                 }
                 E::Ready
                 | E::SettingsCompiled { .. }
-                | E::ScreenshotCancelled { .. }
+                | E::ItemCheckCancelled { .. }
                 | E::ShutdownComplete { .. } => {}
             }
         }
@@ -465,7 +463,7 @@ impl Backend {
 #[cfg(windows)]
 const WM_APP_SET_START_HOTKEY: u32 = 0x8000 + 0x41; // WM_APP + 0x41
 
-/// 全局热键线程:注册 Ctrl⇧F10(可配)与 Ctrl⇧F11 框选,独立消息循环把
+/// 全局热键线程:注册 Ctrl⇧F10(可配)与 Ctrl⇧F12,独立消息循环把
 /// WM_HOTKEY 翻译成 PlatformEvent。F12 全局停止热键已按用户裁定移除;
 /// 命中解除由红窗按钮与其内部按键检测负责。返回线程 id 供运行时重配热键。
 #[cfg(windows)]

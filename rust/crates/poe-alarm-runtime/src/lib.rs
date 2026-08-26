@@ -26,9 +26,9 @@ pub use compile::{
     CompiledRuntimeSettings, SettingsFieldError, SettingsValidationError, compile_settings,
 };
 pub use model::{
-    AlertCopy, CompiledUiBindings, DetectionSummary, RuntimeCommand, RuntimeEvent,
-    RuntimeGeneration, RuntimeOperation, RuntimeRequestId, RuntimeState, ScreenshotEvaluation,
-    ScreenshotReport, ScreenshotRequest,
+    AlertCopy, CompiledUiBindings, DetectionSummary, ItemCheckEvaluation, ItemCheckReport,
+    ItemCheckRequest, RuntimeCommand, RuntimeEvent, RuntimeGeneration, RuntimeOperation,
+    RuntimeRequestId, RuntimeState,
 };
 pub use protection::{
     AlertLatchStatus, AlertPresentation, NativeProtection, ProtectionError, ProtectionEvent,

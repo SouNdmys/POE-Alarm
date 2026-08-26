@@ -20,9 +20,9 @@ use poe_alarm_settings::{AppSettings, RuleEditorMode};
 
 use crate::{
     AffixSourceFactory, AlertLatchStatus, AlertPresentation, BackendError, BoxedAffixSource,
-    ProtectionError, ProtectionEvent, ProtectionService, RuntimeEvent, RuntimeGeneration,
-    RuntimeHandle, RuntimeOperation, RuntimeRequestId, RuntimeSendError, RuntimeState,
-    ScreenshotRequest, SourceError,
+    ItemCheckRequest, ProtectionError, ProtectionEvent, ProtectionService, RuntimeEvent,
+    RuntimeGeneration, RuntimeHandle, RuntimeOperation, RuntimeRequestId, RuntimeSendError,
+    RuntimeState, SourceError,
 };
 
 #[derive(Clone)]
@@ -400,7 +400,7 @@ fn wait_for_without_late_result(
                 !matches!(
                     event,
                     RuntimeEvent::MatchFound { .. }
-                        | RuntimeEvent::ScreenshotCompleted(_)
+                        | RuntimeEvent::ItemCheckCompleted(_)
                         | RuntimeEvent::Fault { .. }
                 ),
                 "cancelled work published a late terminal event: {event:?}"
@@ -707,16 +707,16 @@ fn one_hybrid_modifier_cannot_satisfy_two_conditions() {
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
     handle
-        .test_screenshot(ScreenshotRequest::new(
+        .check_item(ItemCheckRequest::new(
             RuntimeRequestId(70),
             at_least_two_settings(),
             ONE_HYBRID_PREFIX,
         ))
         .unwrap();
     let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
+        matches!(event, RuntimeEvent::ItemCheckCompleted(_))
     });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
+    let RuntimeEvent::ItemCheckCompleted(report) = event else {
         unreachable!()
     };
     assert_eq!(report.request_id, RuntimeRequestId(70));
@@ -740,16 +740,16 @@ fn two_separate_modifiers_do_satisfy_two_conditions() {
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
     handle
-        .test_screenshot(ScreenshotRequest::new(
+        .check_item(ItemCheckRequest::new(
             RuntimeRequestId(71),
             at_least_two_settings(),
             TWO_SEPARATE_AFFIXES,
         ))
         .unwrap();
     let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
+        matches!(event, RuntimeEvent::ItemCheckCompleted(_))
     });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
+    let RuntimeEvent::ItemCheckCompleted(report) = event else {
         unreachable!()
     };
     assert_eq!(report.modifier_count, 2);
@@ -777,7 +777,7 @@ fn text_that_is_not_an_item_faults_rather_than_reporting_a_miss() {
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
     handle
-        .test_screenshot(ScreenshotRequest::new(
+        .check_item(ItemCheckRequest::new(
             RuntimeRequestId(72),
             structured_settings(),
             "whatever happened to be on the clipboard",
@@ -787,7 +787,7 @@ fn text_that_is_not_an_item_faults_rather_than_reporting_a_miss() {
         matches!(
             event,
             RuntimeEvent::Fault {
-                operation: RuntimeOperation::Screenshot,
+                operation: RuntimeOperation::ItemCheck,
                 ..
             }
         )
@@ -812,17 +812,17 @@ fn an_item_check_queued_behind_retiring_work_can_be_cancelled() {
 
     let request_id = RuntimeRequestId(73);
     handle
-        .test_screenshot(ScreenshotRequest::new(
+        .check_item(ItemCheckRequest::new(
             request_id,
             structured_settings(),
             TWO_SEPARATE_AFFIXES,
         ))
         .unwrap();
-    handle.cancel_screenshot(request_id).unwrap();
+    handle.cancel_item_check(request_id).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
             event,
-            RuntimeEvent::ScreenshotCancelled { request_id: id } if *id == request_id
+            RuntimeEvent::ItemCheckCancelled { request_id: id } if *id == request_id
         )
     });
 
@@ -832,7 +832,7 @@ fn an_item_check_queued_behind_retiring_work_can_be_cancelled() {
         .store(false, Ordering::Release);
     thread::sleep(Duration::from_millis(30));
     while let Some(event) = handle.try_next_event() {
-        assert!(!matches!(event, RuntimeEvent::ScreenshotCompleted(_)));
+        assert!(!matches!(event, RuntimeEvent::ItemCheckCompleted(_)));
     }
     shutdown(&handle);
 }
@@ -989,7 +989,7 @@ fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
             !matches!(
                 event,
                 RuntimeEvent::MatchFound { .. }
-                    | RuntimeEvent::ScreenshotCompleted(_)
+                    | RuntimeEvent::ItemCheckCompleted(_)
                     | RuntimeEvent::Fault { .. }
             ),
             "cancelled live work published after the soak: {event:?}"

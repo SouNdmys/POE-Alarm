@@ -2,7 +2,7 @@
 //!
 //! 用来在真机上逐节对照《POE Alarm Ledger.dc.html》检查设计系统层:
 //! 表面/发丝线、文字四级、状态三色、按钮四类、输入、分段、chip、
-//! 树行六态、OCR 八态、指标行、日志面板、警告/错误条与状态栏。
+//! 树行六态、读取八态、指标行、日志面板、警告/错误条与状态栏。
 
 mod theme;
 mod ui;
@@ -62,7 +62,7 @@ impl Render for Gallery {
                     .gap_2()
                     .items_center()
                     .child(button("b-pri", LedgerButton::Primary, "开始监控", cx))
-                    .child(button("b-sec", LedgerButton::Secondary, "识别截图", cx))
+                    .child(button("b-sec", LedgerButton::Secondary, "测试规则", cx))
                     .child(button("b-quiet", LedgerButton::Quiet, "+ 添加数值", cx))
                     .child(button("b-del", LedgerButton::Destructive, "删除方案", cx))
                     .child(button("b-dis", LedgerButton::Primary, "开始监控", cx).disabled(true))
@@ -186,31 +186,31 @@ impl Render for Gallery {
             }));
 
         let ocr_states: &[(StatusKind, &str, &str)] = &[
-            (StatusKind::Idle, "idle", "未监控 · 复用上次结果"),
+            (StatusKind::Idle, "idle", "未监控 · 保留上次结果"),
             (
                 StatusKind::Idle,
                 "unchanged",
-                "画面未变化 · 跳过识别  预检 3.1 ms",
+                "物品未变化 · 跳过判定  读取 2.9 ms",
             ),
             (
                 StatusKind::Monitoring,
-                "scanning",
-                "逐带识别 band 02 / 05 · 蓝字掩膜 100/14/72",
+                "reading",
+                "已读到 5 条词缀 · 判定 0.2 ms",
             ),
             (
                 StatusKind::Monitoring,
-                "recheck",
-                "原色局部复核 2 行 · 4/27",
+                "not-foreground",
+                "游戏不在前台 · 暂不读取(不自动停止)",
             ),
             (
                 StatusKind::Monitoring,
-                "no-blue",
-                "未检测到蓝字 · 继续等待(不自动停止)",
+                "other-item",
+                "光标移到了另一件物品 · 已重设基准",
             ),
             (
                 StatusKind::Warning,
-                "fallback",
-                "系统无中文 OCR · 已切内置 PP-OCRv5,较慢",
+                "outranked",
+                "游戏以管理员权限运行 · 需要提权才能读取",
             ),
             (StatusKind::Hit, "hit", "严格命中 · 已接管输入 · 等待确认"),
             (StatusKind::Idle, "cancelled", "已停止 · 下一轮需重新启动"),
@@ -343,7 +343,7 @@ impl Render for Gallery {
                             .items_start()
                             .flex_none()
                             .child(self.section("07 · 树行六态", tree).w(px(360.)))
-                            .child(self.section("08 · OCR 八态", ocr_list).flex_1()),
+                            .child(self.section("08 · 读取八态", ocr_list).flex_1()),
                     )
                     .child(
                         div()
@@ -362,11 +362,7 @@ impl Render for Gallery {
                         color: Some(ACCENT_TEXT),
                     },
                     StatusSegment {
-                        text: "区域 1134×956 @ 0,58",
-                        color: None,
-                    },
-                    StatusSegment {
-                        text: "OCR 繁中 · zh-TW",
+                        text: "词缀语言 繁中 · zh-TW",
                         color: None,
                     },
                     StatusSegment {
@@ -378,7 +374,7 @@ impl Render for Gallery {
                         color: None,
                     },
                 ],
-                Some("Ctrl⇧F10 开始 · F11 框选 · F12 停止"),
+                Some("Ctrl⇧F10 开始 · Ctrl⇧F12 解除锁定"),
             ))
     }
 }

@@ -17,10 +17,10 @@ use poe_alarm_platform_win::game_window_rect;
 use crate::backend::{AffixSourceFactory, DynamicSource, ProductionSourceFactory};
 use crate::protection::AlertPresentation;
 use crate::{
-    AlertLatchStatus, BackendError, CompiledRuntimeSettings, DetectionSummary, NativeProtection,
-    ProtectionEvent, ProtectionService, RuntimeCommand, RuntimeEvent, RuntimeGeneration,
-    RuntimeOperation, RuntimeRequestId, RuntimeState, ScreenshotEvaluation, ScreenshotReport,
-    ScreenshotRequest, compile_settings,
+    AlertLatchStatus, BackendError, CompiledRuntimeSettings, DetectionSummary, ItemCheckEvaluation,
+    ItemCheckReport, ItemCheckRequest, NativeProtection, ProtectionEvent, ProtectionService,
+    RuntimeCommand, RuntimeEvent, RuntimeGeneration, RuntimeOperation, RuntimeRequestId,
+    RuntimeState, compile_settings,
 };
 
 const COMMAND_CAPACITY: usize = 32;
@@ -136,12 +136,12 @@ impl RuntimeHandle {
         self.try_send(RuntimeCommand::Stop)
     }
 
-    pub fn test_screenshot(&self, request: ScreenshotRequest) -> Result<(), RuntimeSendError> {
-        self.try_send(RuntimeCommand::Screenshot(request))
+    pub fn check_item(&self, request: ItemCheckRequest) -> Result<(), RuntimeSendError> {
+        self.try_send(RuntimeCommand::CheckItem(request))
     }
 
-    pub fn cancel_screenshot(&self, request_id: RuntimeRequestId) -> Result<(), RuntimeSendError> {
-        self.try_send(RuntimeCommand::CancelScreenshot { request_id })
+    pub fn cancel_item_check(&self, request_id: RuntimeRequestId) -> Result<(), RuntimeSendError> {
+        self.try_send(RuntimeCommand::CancelItemCheck { request_id })
     }
 
     pub fn acknowledge_alert(&self) -> Result<(), RuntimeSendError> {
@@ -206,7 +206,7 @@ enum RetiredWork {
 
 enum RuntimeIntent {
     Live(poe_alarm_settings::AppSettings),
-    Screenshot(ScreenshotRequest),
+    ItemCheck(ItemCheckRequest),
 }
 
 impl RuntimeActor {
@@ -284,12 +284,12 @@ impl RuntimeActor {
                 self.retire_active_work(true);
             }
             RuntimeCommand::Stop => self.stop_all(true),
-            RuntimeCommand::Screenshot(request) => {
-                self.replace_intent(RuntimeIntent::Screenshot(request));
+            RuntimeCommand::CheckItem(request) => {
+                self.replace_intent(RuntimeIntent::ItemCheck(request));
                 self.retire_active_work(true);
             }
-            RuntimeCommand::CancelScreenshot { request_id } => {
-                self.cancel_pending_screenshot(request_id, true);
+            RuntimeCommand::CancelItemCheck { request_id } => {
+                self.cancel_pending_item_check(request_id, true);
             }
             RuntimeCommand::AlertAck => {
                 if let Err(error) = self.protection.acknowledge() {
@@ -384,18 +384,18 @@ impl RuntimeActor {
     /// evaluation take microseconds, so the whole apparatus — worker,
     /// cancellation flag, in-flight task tracking, retirement — is gone and the
     /// answer is produced before this function returns.
-    fn launch_screenshot(&mut self, request: ScreenshotRequest) {
+    fn launch_item_check(&mut self, request: ItemCheckRequest) {
         debug_assert!(self.live.is_none());
         debug_assert!(self.retired.is_none());
         let generation = self.allocate_generation();
         self.active_generation = Some(generation);
-        self.publish_state(Some(generation), RuntimeState::TestingScreenshot);
+        self.publish_state(Some(generation), RuntimeState::CheckingItem);
         let compiled = match compile_settings(&request.settings) {
             Ok(compiled) => compiled,
             Err(error) => {
                 self.fault(
                     Some(generation),
-                    RuntimeOperation::Screenshot,
+                    RuntimeOperation::ItemCheck,
                     error.to_string(),
                 );
                 return;
@@ -404,7 +404,7 @@ impl RuntimeActor {
         self.publish_compiled(generation, &compiled);
         match check_item_text(generation, request.request_id, &request.text, &compiled) {
             Ok(report) => {
-                let _ = self.events.send(RuntimeEvent::ScreenshotCompleted(report));
+                let _ = self.events.send(RuntimeEvent::ItemCheckCompleted(report));
                 self.active_generation = None;
                 self.publish_state(None, RuntimeState::Idle);
             }
@@ -412,7 +412,7 @@ impl RuntimeActor {
                 self.active_generation = None;
                 self.fault(
                     Some(generation),
-                    RuntimeOperation::Screenshot,
+                    RuntimeOperation::ItemCheck,
                     error.to_string(),
                 );
             }
@@ -433,18 +433,18 @@ impl RuntimeActor {
     }
 
     fn replace_intent(&mut self, intent: RuntimeIntent) {
-        if let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.replace(intent) {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
+        if let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.replace(intent) {
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
                 request_id: request.request_id,
             });
         }
     }
 
     fn cancel_pending_intent(&mut self, publish: bool) {
-        if let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.take()
+        if let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.take()
             && publish
         {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
                 request_id: request.request_id,
             });
         }
@@ -462,7 +462,7 @@ impl RuntimeActor {
         }
         match self.pending_intent.take() {
             Some(RuntimeIntent::Live(settings)) => self.launch_live(settings),
-            Some(RuntimeIntent::Screenshot(request)) => self.launch_screenshot(request),
+            Some(RuntimeIntent::ItemCheck(request)) => self.launch_item_check(request),
             None => {}
         }
     }
@@ -498,10 +498,10 @@ impl RuntimeActor {
     /// Cancels an item-text check that is still queued behind retiring work.
     ///
     /// Nothing is ever in flight to cancel: the check itself completes inside
-    /// `launch_screenshot`. What can be cancelled is the intent waiting for a
+    /// `launch_item_check`. What can be cancelled is the intent waiting for a
     /// live session to finish draining.
-    fn cancel_pending_screenshot(&mut self, expected_request: RuntimeRequestId, publish: bool) {
-        let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.as_ref() else {
+    fn cancel_pending_item_check(&mut self, expected_request: RuntimeRequestId, publish: bool) {
+        let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.as_ref() else {
             return;
         };
         if request.request_id != expected_request {
@@ -509,7 +509,7 @@ impl RuntimeActor {
         }
         self.pending_intent = None;
         if publish {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
                 request_id: expected_request,
             });
         }
@@ -890,7 +890,7 @@ fn check_item_text(
     request_id: RuntimeRequestId,
     text: &str,
     compiled: &CompiledRuntimeSettings,
-) -> Result<ScreenshotReport, BackendError> {
+) -> Result<ItemCheckReport, BackendError> {
     let parse_started = Instant::now();
     let item = poe_alarm_clipboard::parse(text, ModFilter::default())
         .map_err(|error| BackendError(error.to_string()))?;
@@ -904,10 +904,10 @@ fn check_item_text(
         ..RecognitionResult::default()
     };
     let evaluation_started = Instant::now();
-    let evaluation = evaluate_screenshot(&compiled.plan, &result);
+    let evaluation = evaluate_item(&compiled.plan, &result);
     let evaluation_elapsed = evaluation_started.elapsed();
 
-    Ok(ScreenshotReport {
+    Ok(ItemCheckReport {
         request_id,
         generation,
         lines: result.lines,
@@ -918,7 +918,7 @@ fn check_item_text(
     })
 }
 
-fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> ScreenshotEvaluation {
+fn evaluate_item(plan: &MonitorPlan, result: &RecognitionResult) -> ItemCheckEvaluation {
     match plan {
         MonitorPlan::Quick(target) => {
             let matched = target.find_match(&result.lines).or_else(|| {
@@ -937,7 +937,7 @@ fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> Screen
                 &result.physical_line_identities,
             );
             let group = evaluation.matched_group();
-            ScreenshotEvaluation {
+            ItemCheckEvaluation {
                 is_match: evaluation.is_match,
                 detail: group.map(|matched| {
                     let observed = matched
@@ -960,8 +960,8 @@ fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> Screen
     }
 }
 
-fn quick_evaluation(matched: Option<LogicalAffixMatch>) -> ScreenshotEvaluation {
-    ScreenshotEvaluation {
+fn quick_evaluation(matched: Option<LogicalAffixMatch>) -> ItemCheckEvaluation {
+    ItemCheckEvaluation {
         is_match: matched.is_some(),
         detail: matched.map(|value| value.original_text),
         matched_group: None,

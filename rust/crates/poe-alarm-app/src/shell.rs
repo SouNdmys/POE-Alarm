@@ -92,6 +92,12 @@ impl AppShell {
         let name_input = cx.new(|cx| InputState::new(window, cx));
         let template_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(text.template_placeholder));
+        let item_text_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(6)
+                .placeholder(text.item_text_placeholder)
+        });
 
         let tree = Self::tree_from_settings(backend.as_ref());
         let selected = tree
@@ -128,6 +134,7 @@ impl AppShell {
                 selected,
                 name_input,
                 template_input,
+                item_text_input,
                 value_rows: Vec::new(),
                 elapsed: "--:--".into(),
                 hit_count: 0,
@@ -338,7 +345,7 @@ impl AppShell {
                         format!("{} · {group} · {detail}", self.t().log_rule_hit_prefix),
                     );
                 }
-                BridgeEvent::ScreenshotReport {
+                BridgeEvent::ItemCheckReport {
                     lines,
                     matched,
                     detail,
@@ -349,10 +356,10 @@ impl AppShell {
                     if matched {
                         self.push_log(
                             LogKind::Hit,
-                            format!("{} · {detail}", self.t().log_shot_hit_prefix),
+                            format!("{} · {detail}", self.t().log_check_hit_prefix),
                         );
                     } else {
-                        self.push_log(LogKind::Meta, self.t().log_shot_miss.to_owned());
+                        self.push_log(LogKind::Meta, self.t().log_check_miss.to_owned());
                     }
                 }
                 BridgeEvent::AlertPresented => {
@@ -462,7 +469,7 @@ impl AppShell {
 
     fn apply_runtime_state(&mut self, state: BridgeState) {
         let next = match state {
-            BridgeState::Starting | BridgeState::Monitoring | BridgeState::TestingScreenshot => {
+            BridgeState::Starting | BridgeState::Monitoring | BridgeState::CheckingItem => {
                 RunPhase::Monitoring
             }
             BridgeState::MatchFound => RunPhase::Hit,
@@ -985,43 +992,34 @@ impl AppShell {
         cx.notify();
     }
 
-    /// 识别截图:弹文件选择,选中后交 runtime 回放。
-    pub fn test_screenshot(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: None,
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(mut paths))) = receiver.await
-                && let Some(path) = paths.pop()
-            {
-                let _ = this.update(cx, |this: &mut AppShell, cx| {
-                    let text = this.t();
-                    if let Some(backend) = &mut this.backend {
-                        match backend.test_screenshot(path.clone()) {
-                            Ok(()) => this.push_log(
-                                LogKind::Meta,
-                                format!("{}:{}", text.log_shot_prefix, path.display()),
-                            ),
-                            Err(e) => {
-                                this.notice = Some((StatusKind::Error, e.clone().into()));
-                                this.push_log(
-                                    LogKind::Meta,
-                                    format!("{}:{e}", text.log_shot_failed_prefix),
-                                );
-                            }
-                        }
-                        cx.notify();
-                    }
-                });
+    /// 测试规则:拿粘贴框里的物品文本跑一次判定。
+    ///
+    /// 不再弹文件选择框。要检查的东西本来就在剪贴板里,让用户去存一个
+    /// 文件再选回来,中间那两步纯粹是 OCR 时代留下的。
+    pub fn check_item(&mut self, cx: &mut Context<Self>) {
+        let item_text = self.s.item_text_input.read(cx).value().trim().to_string();
+        let text = self.t();
+        if item_text.is_empty() {
+            self.notice = Some((StatusKind::Warning, text.notice_item_text_empty.into()));
+            cx.notify();
+            return;
+        }
+        if let Some(backend) = &mut self.backend {
+            match backend.check_item(item_text) {
+                Ok(()) => self.push_log(LogKind::Meta, text.log_check_prefix.to_owned()),
+                Err(e) => {
+                    self.notice = Some((StatusKind::Error, e.clone().into()));
+                    self.push_log(
+                        LogKind::Meta,
+                        format!("{}:{e}", text.log_check_failed_prefix),
+                    );
+                }
             }
-        })
-        .detach();
+            cx.notify();
+        }
     }
 
-    /// 切换游戏或 OCR 语言:写设置、保存并整体刷新(模板/树/区域)。
+    /// 切换游戏或词缀语言:写设置、保存并整体刷新(模板/树)。
     pub fn switch_profile(
         &mut self,
         game: Option<poe_alarm_settings::GameProfile>,
@@ -1186,7 +1184,7 @@ impl AppShell {
                         color: None,
                     },
                 ],
-                Some("F10 · F11 · F12"),
+                Some("F10 · F12"),
             )
         } else {
             let notice_text = self

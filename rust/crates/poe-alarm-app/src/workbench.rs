@@ -286,13 +286,8 @@ impl AppShell {
             )
     }
 
-    /// 使用说明:上手流程、热键、规则语义、繁中 OCR 安装建议与作者信息。
+    /// 使用说明:上手流程、热键、规则语义、高级词缀说明与作者信息。
     fn wb_tab_help(&mut self, cx: &mut Context<Self>) -> Div {
-        const OCR_INSTALL_COMMAND: &str =
-            r#"Add-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
-        const OCR_VERIFY_COMMAND: &str =
-            r#"Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
-        const OCR_DOC_URL: &str = "https://learn.microsoft.com/zh-cn/windows-hardware/manufacture/desktop/add-language-packs-to-windows";
         const REPO_URL: &str = "https://github.com/SouNdmys/POE-Alarm";
         const CONTACT: &str = "soundmys1994@gmail.com";
 
@@ -329,18 +324,6 @@ impl AppShell {
                         .text_color(c(TEXT_SECONDARY))
                         .child(what),
                 )
-        };
-        let mono_block = |text: &'static str| {
-            div()
-                .px(px(10.))
-                .py(px(6.))
-                .bg(c(WELL))
-                .border_1()
-                .border_color(c(HAIRLINE))
-                .font_family(FONT_MONO)
-                .text_size(fs(FS_11_5))
-                .text_color(c(TEXT_PRIMARY))
-                .child(text)
         };
         let link =
             |id: &'static str, label: &'static str, url: &'static str, cx: &mut Context<Self>| {
@@ -393,81 +376,20 @@ impl AppShell {
                                 .v_flex()
                                 .gap(px(3.))
                                 .child(hotkey_row("Ctrl⇧F10", t.help_hotkey_start))
-                                .child(hotkey_row("Ctrl⇧F11", t.help_hotkey_select))
                                 .child(hotkey_row("Ctrl⇧F12", t.help_hotkey_stop)),
                         )
                         .child(section(t.help_rules_title))
                         .child(rules)
                         .child(section(t.help_hud_title))
                         .child(hud)
-                        .child(section(t.help_ocr_title))
+                        .child(section(t.help_advanced_title))
                         .child(
                             div()
                                 .v_flex()
                                 .gap(px(6.))
-                                .child(line(t.help_ocr_intro))
-                                .child(
-                                    div()
-                                        .h_flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(mono_block(OCR_INSTALL_COMMAND))
-                                        .child(
-                                            button(
-                                                "help-copy-install",
-                                                LedgerButton::Quiet,
-                                                t.help_copy,
-                                                cx,
-                                            )
-                                            .on_click(
-                                                cx.listener(|_, _, _, cx| {
-                                                    cx.write_to_clipboard(
-                                                        gpui::ClipboardItem::new_string(
-                                                            OCR_INSTALL_COMMAND.to_owned(),
-                                                        ),
-                                                    );
-                                                }),
-                                            ),
-                                        ),
-                                )
-                                .child(line(t.help_ocr_verify))
-                                .child(
-                                    div()
-                                        .h_flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(mono_block(OCR_VERIFY_COMMAND))
-                                        .child(
-                                            button(
-                                                "help-copy-verify",
-                                                LedgerButton::Quiet,
-                                                t.help_copy,
-                                                cx,
-                                            )
-                                            .on_click(
-                                                cx.listener(|_, _, _, cx| {
-                                                    cx.write_to_clipboard(
-                                                        gpui::ClipboardItem::new_string(
-                                                            OCR_VERIFY_COMMAND.to_owned(),
-                                                        ),
-                                                    );
-                                                }),
-                                            ),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .h_flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(line(t.help_ocr_settings_path))
-                                        .child(link(
-                                            "help-ms-doc",
-                                            t.help_ocr_doc_link,
-                                            OCR_DOC_URL,
-                                            cx,
-                                        )),
-                                ),
+                                .child(line(t.help_advanced_intro))
+                                .child(line(t.help_advanced_hybrid))
+                                .child(line(t.help_advanced_crafted)),
                         )
                         .child(section(t.help_about_title))
                         .child(
@@ -510,7 +432,7 @@ impl AppShell {
         )
     }
 
-    /// 设置:识别区域 + 提醒与显示(浮窗、录屏、界面语言、提示音、启动热键)。
+    /// 设置:词缀语言 + 提醒与显示(浮窗、录屏、界面语言、提示音、启动热键)。
     /// 改动即保存。
     fn wb_tab_settings(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.t();
@@ -1144,17 +1066,26 @@ impl AppShell {
                     .px_3()
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(micro_title_sm(t.screenshot_title))
+                    .child(micro_title_sm(t.item_check_title))
                     .child(
                         div()
-                            .id("wb-shot")
+                            .id("wb-check-item")
                             .ml_auto()
                             .text_size(fs(FS_11_5))
                             .text_color(c(ACCENT))
                             .hover(|s| s.bg(c(HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| this.test_screenshot(cx)))
-                            .child(t.screenshot_button),
+                            .on_click(cx.listener(|this, _, _, cx| this.check_item(cx)))
+                            .child(t.check_item_button),
                     ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(c(HAIRLINE_SOFT))
+                    .child(Input::new(&self.s.item_text_input)),
             )
             .child(div().flex_1().min_h_0().child(self.log_block(15)))
     }

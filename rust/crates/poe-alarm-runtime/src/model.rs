@@ -18,7 +18,7 @@ pub enum RuntimeOperation {
     Start,
     Monitoring,
     Stop,
-    Screenshot,
+    ItemCheck,
     Alert,
     Shutdown,
 }
@@ -29,7 +29,7 @@ pub enum RuntimeState {
     Idle,
     Starting,
     Monitoring,
-    TestingScreenshot,
+    CheckingItem,
     MatchFound,
     Faulted,
     ShuttingDown,
@@ -42,14 +42,14 @@ pub enum RuntimeState {
 /// over it. Item text needs no replay: the client already wrote down exactly
 /// what the item is, so the check is a parse and an evaluation.
 #[derive(Clone, Debug)]
-pub struct ScreenshotRequest {
+pub struct ItemCheckRequest {
     pub request_id: RuntimeRequestId,
     pub settings: AppSettings,
     /// Raw Ctrl+C item text, verbatim.
     pub text: String,
 }
 
-impl ScreenshotRequest {
+impl ItemCheckRequest {
     #[must_use]
     pub fn new(
         request_id: RuntimeRequestId,
@@ -68,8 +68,8 @@ impl ScreenshotRequest {
 pub enum RuntimeCommand {
     Start { settings: AppSettings },
     Stop,
-    Screenshot(ScreenshotRequest),
-    CancelScreenshot { request_id: RuntimeRequestId },
+    CheckItem(ItemCheckRequest),
+    CancelItemCheck { request_id: RuntimeRequestId },
     AlertAck,
     Shutdown,
 }
@@ -132,14 +132,14 @@ pub struct DetectionSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScreenshotEvaluation {
+pub struct ItemCheckEvaluation {
     pub is_match: bool,
     pub detail: Option<String>,
     pub matched_group: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ScreenshotReport {
+pub struct ItemCheckReport {
     pub request_id: RuntimeRequestId,
     pub generation: RuntimeGeneration,
     /// Modifier lines exactly as the rule engine saw them. A blank entry marks
@@ -150,7 +150,7 @@ pub struct ScreenshotReport {
     pub modifier_count: usize,
     pub parse_elapsed: Duration,
     pub evaluation_elapsed: Duration,
-    pub evaluation: ScreenshotEvaluation,
+    pub evaluation: ItemCheckEvaluation,
 }
 
 #[derive(Clone, Debug)]
@@ -172,8 +172,8 @@ pub enum RuntimeEvent {
         generation: RuntimeGeneration,
         detection: DetectionSummary,
     },
-    ScreenshotCompleted(ScreenshotReport),
-    ScreenshotCancelled {
+    ItemCheckCompleted(ItemCheckReport),
+    ItemCheckCancelled {
         request_id: RuntimeRequestId,
     },
     AlertPresented {
