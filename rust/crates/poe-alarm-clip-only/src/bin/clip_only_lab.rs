@@ -685,6 +685,10 @@ mod app {
                         "game lost focus"
                     }
                 );
+                if armed && clipboard::foreground_process_outranks_us() {
+                    println!("  [!] the game outranks this process — injected input cannot reach");
+                    println!("      it, so nothing will ever be read. Relaunch elevated.");
+                }
                 if !armed {
                     last_text = None;
                     last_item = None;
@@ -1255,10 +1259,19 @@ mod app {
             println!("  Nothing was sent. Switch to the game and run this again.");
             return;
         }
+        if clipboard::foreground_process_outranks_us() {
+            println!();
+            println!("  >> The game outranks this process: its token cannot be read from here,");
+            println!("  >> which only happens when it runs at a higher integrity level. Input");
+            println!("  >> injected from here will not reach it, so every copy below will time");
+            println!("  >> out. Relaunch this from an elevated terminal.");
+            println!();
+        }
 
         let timeout = Duration::from_millis(options.copy_timeout_ms);
         let mut latencies = LatencySamples::with_capacity(samples);
         let mut failures: Vec<String> = Vec::new();
+        let mut failure_count = 0_usize;
         let mut first_text: Option<String> = None;
         let mut with_modifiers = 0_usize;
 
@@ -1278,6 +1291,7 @@ mod app {
                     latencies.push(outcome.total());
                 }
                 Err(error) => {
+                    failure_count += 1;
                     if failures.len() < 8 {
                         failures.push(format!("sample {index}: {error}"));
                     }
@@ -1289,7 +1303,7 @@ mod app {
         println!();
         println!("=== clipboard check ===");
         println!("  succeeded  {}/{samples}", latencies.len());
-        println!("  failed     {}", failures.len());
+        println!("  failed     {failure_count}");
         println!(
             "  copies that had to lift a held modifier  {with_modifiers}"
         );

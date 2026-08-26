@@ -491,6 +491,52 @@ pub fn process_is_elevated() -> Option<bool> {
     Some(elevation.TokenIsElevated != 0)
 }
 
+/// Whether this process can read the foreground process's token.
+///
+/// A medium-integrity process is denied the token of an elevated one, so a
+/// failure here — when our own token reads fine — means the foreground window
+/// outranks us. That is exactly the case where injected input never arrives,
+/// and detecting it up front beats letting the user discover it as a wall of
+/// timeouts.
+#[must_use]
+pub fn foreground_process_outranks_us() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::System::Threading::{
+        OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    if process_is_elevated() != Some(false) {
+        return false;
+    }
+    // SAFETY: returns a borrowed handle valid for the call below.
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_invalid() {
+        return false;
+    }
+    let mut pid = 0_u32;
+    // SAFETY: `pid` is a live out-parameter.
+    unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: a failed open simply yields Err.
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+        return true;
+    };
+    let mut token = HANDLE::default();
+    // SAFETY: `process` is live; `token` receives an owned handle.
+    let readable = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.is_ok();
+    if readable && !token.is_invalid() {
+        // SAFETY: token came from OpenProcessToken.
+        let _ = unsafe { CloseHandle(token) };
+    }
+    // SAFETY: process came from OpenProcess.
+    let _ = unsafe { CloseHandle(process) };
+    !readable
+}
+
 /// True when the foreground window looks like a Path of Exile client.
 ///
 /// The lab never intercepts input unless this holds, so a stuck state machine
