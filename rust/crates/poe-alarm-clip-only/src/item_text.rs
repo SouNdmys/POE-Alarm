@@ -47,6 +47,8 @@ const HEADER_KEYS: &[&str] = &[
     "rarity:",
     "物品類別:",
     "物品类别:",
+    "物品種類:",
+    "物品种类:",
     "稀有度:",
 ];
 
@@ -103,6 +105,9 @@ const CORRUPTED_KEYS: &[&str] = &["corrupted", "已腐化"];
 fn compact(line: &str) -> String {
     line.chars()
         .filter(|character| !character.is_whitespace())
+        // The Traditional Chinese client writes a full-width colon; folding it
+        // to ASCII lets one key table serve every locale.
+        .map(|character| if character == '\u{ff1a}' { ':' } else { character })
         .flat_map(char::to_lowercase)
         .collect()
 }
@@ -121,13 +126,34 @@ fn value_after_key<'a>(line: &'a str, keys: &[&str]) -> Option<&'a str> {
     if !starts_with_any(&compacted, keys) {
         return None;
     }
-    line.split_once(':').map(|(_, value)| value.trim())
+    // Split on either colon: the key matched against a folded copy, but the
+    // value has to come out of the original line.
+    line.split_once([':', '\u{ff1a}'])
+        .map(|(_, value)| value.trim())
 }
 
-/// True for lines the client only emits when advanced mod descriptions are on.
-fn is_advanced_annotation(line: &str) -> bool {
+/// A `{ Prefix "..." (Tier: 2) }` header, emitted only when advanced mod
+/// descriptions are enabled. When present these mark the affixes exactly, which
+/// beats every heuristic.
+fn is_mod_annotation(line: &str) -> bool {
+    line.trim().starts_with('{')
+}
+
+/// Lines that decorate an affix rather than being one.
+fn is_decoration(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.starts_with('{') || trimmed.starts_with('(')
+    is_mod_annotation(trimmed) || trimmed.starts_with('(')
+}
+
+/// Flavour and usage text: one long sentence carrying no numbers.
+fn is_prose(line: &str) -> bool {
+    let trimmed = line.trim();
+    const PROSE_MARKERS: &[&str] = &["右鍵點擊", "右键点击", "right click", "placed into"];
+    let lowered = trimmed.to_lowercase();
+    if PROSE_MARKERS.iter().any(|marker| lowered.contains(marker)) {
+        return true;
+    }
+    trimmed.chars().count() > 24 && !trimmed.chars().any(|character| character.is_ascii_digit())
 }
 
 /// Parses a clipboard payload into affix lines plus the few header fields worth
@@ -150,19 +176,20 @@ pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
     sections.push(current);
 
     let mut parsed = ParsedItem::default();
-    let mut affix_lines = Vec::new();
 
-    for section in &sections {
-        let meaningful: Vec<&str> = section
-            .iter()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty())
-            .collect();
-        if meaningful.is_empty() {
-            continue;
-        }
+    let trimmed_sections: Vec<Vec<&str>> = sections
+        .iter()
+        .map(|section| {
+            section
+                .iter()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .collect()
+        })
+        .collect();
 
-        for line in &meaningful {
+    for section in &trimmed_sections {
+        for line in section {
             if let Some(value) = value_after_key(line, ITEM_LEVEL_KEYS) {
                 parsed.item_level = Some(value.to_string());
             }
@@ -173,33 +200,52 @@ pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
                 parsed.corrupted = true;
             }
         }
-
-        let first = compact(meaningful[0]);
-        if starts_with_any(&first, HEADER_KEYS)
-            || starts_with_any(&first, METADATA_KEYS)
-            || starts_with_any(&first, TRAILER_KEYS)
-        {
-            continue;
-        }
-
-        // A section whose every line is a status flag carries no affixes.
-        let all_flags = meaningful
-            .iter()
-            .all(|line| FLAG_LINES.contains(&compact(line).as_str()));
-        if all_flags {
-            continue;
-        }
-
-        for line in meaningful {
-            if is_advanced_annotation(line) {
-                continue;
-            }
-            if FLAG_LINES.contains(&compact(line).as_str()) {
-                continue;
-            }
-            affix_lines.push(line.to_string());
-        }
     }
+
+    let is_affix = |line: &&&str| {
+        !is_decoration(line) && !FLAG_LINES.contains(&compact(line).as_str())
+    };
+
+    // Preferred path: with advanced mod descriptions enabled the client labels
+    // every affix itself, which is exact where any layout heuristic is a guess.
+    let annotated: Vec<String> = trimmed_sections
+        .iter()
+        .filter(|section| section.iter().any(|line| is_mod_annotation(line)))
+        .flat_map(|section| section.iter().filter(is_affix))
+        .map(|line| (*line).to_string())
+        .collect();
+
+    let affix_lines = if annotated.is_empty() {
+        // Fallback: affixes live in the sections after the item level.
+        let start = trimmed_sections
+            .iter()
+            .position(|section| {
+                section
+                    .iter()
+                    .any(|line| starts_with_any(&compact(line), ITEM_LEVEL_KEYS))
+            })
+            .map_or(1, |index| index + 1);
+        trimmed_sections
+            .iter()
+            .skip(start)
+            .filter(|section| {
+                let Some(first) = section.first().map(|line| compact(line)) else {
+                    return false;
+                };
+                !starts_with_any(&first, HEADER_KEYS)
+                    && !starts_with_any(&first, METADATA_KEYS)
+                    && !starts_with_any(&first, TRAILER_KEYS)
+                    && !section
+                        .iter()
+                        .all(|line| FLAG_LINES.contains(&compact(line).as_str()))
+            })
+            .flat_map(|section| section.iter().filter(is_affix))
+            .filter(|line| !is_prose(line))
+            .map(|line| (*line).to_string())
+            .collect()
+    } else {
+        annotated
+    };
 
     if affix_lines.is_empty() {
         return Err(ItemTextError::NoAffixSection);
@@ -331,5 +377,84 @@ mod tests {
             "Stack Size: 40/20\r\n",
         );
         assert_eq!(parse(payload), Err(ItemTextError::NoAffixSection));
+    }
+
+    /// Verbatim from a live zh-TW client, which is what exposed the
+    /// full-width colon and the 物品種類 key in the first place.
+    const TRADITIONAL_ABYSS_JEWEL: &str = concat!(
+        "物品種類：深淵珠寶
+",
+        "稀有度：魔法
+",
+        "放電的殺戮之眼珠寶
+",
+        "--------
+",
+        "深淵
+",
+        "無形性：18%
+",
+        "--------
+",
+        "需求：
+",
+        "等級：56
+",
+        "--------
+",
+        "物品等級：83
+",
+        "--------
+",
+        "{ 前綴 \"放電的\"(階層: 2)— 傷害,元素,閃電,攻擊 }
+",
+        "錘和權杖攻擊附加 2(2-4) 至 42(40-43) 閃電攻擊
+",
+        "--------
+",
+        "放置到一個道具的深淵珠寶插槽或一個天賦樹的珠寶插槽中以產生效果。右鍵點擊以移出插槽。
+",
+    );
+
+    #[test]
+    fn traditional_client_yields_only_the_real_affix() {
+        let parsed = parse(TRADITIONAL_ABYSS_JEWEL).expect("dump parses");
+        assert_eq!(
+            parsed.affix_lines,
+            vec!["錘和權杖攻擊附加 2(2-4) 至 42(40-43) 閃電攻擊".to_string()]
+        );
+        assert_eq!(parsed.rarity.as_deref(), Some("魔法"));
+        assert_eq!(parsed.item_level.as_deref(), Some("83"));
+        assert!(!parsed.corrupted);
+    }
+
+    #[test]
+    fn traditional_client_without_annotations_uses_the_positional_fallback() {
+        let stripped: String = TRADITIONAL_ABYSS_JEWEL
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('{'))
+            .map(|line| format!("{line}
+"))
+            .collect();
+        let parsed = parse(&stripped).expect("dump parses");
+        assert_eq!(
+            parsed.affix_lines,
+            vec!["錘和權杖攻擊附加 2(2-4) 至 42(40-43) 閃電攻擊".to_string()],
+            "the usage prose and the pre-item-level property block must stay out"
+        );
+    }
+
+    #[test]
+    fn usage_prose_is_never_an_affix() {
+        assert!(is_prose("放置到一個道具的深淵珠寶插槽或一個天賦樹的珠寶插槽中以產生效果。右鍵點擊以移出插槽。"));
+        assert!(is_prose("Place into an allocated Jewel Socket. Right click to remove."));
+        assert!(!is_prose("錘和權杖攻擊附加 2(2-4) 至 42(40-43) 閃電攻擊"));
+        assert!(!is_prose("+25 to maximum Life"));
+    }
+
+    #[test]
+    fn full_width_colons_fold_to_ascii_for_key_matching() {
+        assert_eq!(compact("物品等級：83"), "物品等級:83");
+        assert_eq!(compact("Item Level: 83"), "itemlevel:83");
     }
 }
