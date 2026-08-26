@@ -220,7 +220,7 @@ git checkout main && git branch -D clip-only-lab
 需要时加一个参数即可，会弹一次 UAC 并在新窗口继续：
 
 ```bash
-rust	argetelease\clip-only-lab.exe --elevate
+rust\target\release\clip-only-lab.exe --elevate
 ```
 
 （正式版如果合并这条路，对应的应该是界面上一个「以管理员身份重启」按钮，
