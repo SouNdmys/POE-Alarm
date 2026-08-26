@@ -622,6 +622,16 @@ mod app {
         let mut hits = 0_u64;
         let mut failures = 0_u64;
         let mut detect_latency = LatencySamples::with_capacity(512);
+        // The honest detection metric. `click -> detected` shrinks with the
+        // user's click rate and says nothing about the recognizer; the interval
+        // between the poll that missed a roll and the poll that caught it
+        // bounds how stale the alarm can be, and depends on nothing else.
+        let mut staleness = LatencySamples::with_capacity(512);
+        let mut poll_gap = LatencySamples::with_capacity(2048);
+        let mut last_poll_at: Option<Instant> = None;
+        let mut timeouts = 0_u64;
+        let mut empties = 0_u64;
+        let mut busy = 0_u64;
 
         while RUNNING.load(Ordering::Acquire) {
             // Drain whatever clicks arrived; only the most recent matters.
@@ -664,6 +674,11 @@ mod app {
                 Ok(outcome) => outcome,
                 Err(error) if error.is_transient() => {
                     failures += 1;
+                    match error {
+                        ClipboardError::Timeout { .. } => timeouts += 1,
+                        ClipboardError::Busy { .. } => busy += 1,
+                        _ => empties += 1,
+                    }
                     std::thread::sleep(interval);
                     continue;
                 }
@@ -674,6 +689,11 @@ mod app {
                     continue;
                 }
             };
+            let gap = last_poll_at.map(|at| at.elapsed());
+            last_poll_at = Some(Instant::now());
+            if let Some(gap) = gap {
+                poll_gap.push(gap);
+            }
 
             let unchanged = last_text
                 .as_deref()
@@ -693,6 +713,9 @@ mod app {
             rolls_seen += 1;
             let since_click = last_click.map(|at| at.elapsed()).unwrap_or_default();
             detect_latency.push(since_click);
+            if let Some(gap) = gap {
+                staleness.push(gap);
+            }
             let verdict = evaluate_payload(&profile.rules, &outcome.text);
             println!(
                 "  roll {rolls_seen:<4} seen {:<9} {:<5} ({} lines)",
@@ -731,11 +754,25 @@ mod app {
         println!();
         println!("  {}", input_breakdown());
         println!();
-        println!("{}", detect_latency.summary("click -> roll detected"));
+        println!("  failures by kind          timeout {timeouts}  empty {empties}  busy {busy}");
         println!();
-        println!("  This is time from your most recent click, so it carries the craft");
-        println!("  itself (~220ms measured) plus the poll interval. The recognizer's own");
-        println!("  share is the ~3ms clipboard round trip.");
+        println!("{}", staleness.summary("detection staleness"));
+        println!("{}", poll_gap.summary("gap between polls"));
+        println!("{}", detect_latency.summary("click -> detected (see note)"));
+        println!();
+        println!("  READ THIS ONE: 'detection staleness' is the window between the poll");
+        println!("  that missed the new roll and the poll that caught it. The roll became");
+        println!("  visible somewhere inside it, so the alarm is at worst that late. It is");
+        println!("  the only number here that depends on this tool rather than on you.");
+        println!();
+        println!(
+            "  It is dominated by --watch-interval-ms (currently {}ms) plus the ~3ms",
+            options.watch_interval_ms
+        );
+        println!("  round trip, so it is a dial, not a limit. Halve the interval to halve it.");
+        println!();
+        println!("  'click -> detected' is measured from your most recent click, so it");
+        println!("  shrinks as you click faster and proves nothing about speed. Ignore it.");
     }
 
     fn worker(profile: LabProfile, clicks: Receiver<Instant>, options: Options) {
