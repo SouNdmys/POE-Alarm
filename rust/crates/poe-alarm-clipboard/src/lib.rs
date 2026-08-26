@@ -36,7 +36,7 @@
 mod classify;
 mod sections;
 
-pub use classify::ModKind;
+pub use classify::{ModKind, classify_annotation, is_annotation};
 
 use poe_alarm_core::PhysicalLineIdentity;
 
@@ -121,8 +121,9 @@ impl Default for ModFilter {
 }
 
 impl ModFilter {
+    /// Whether a group of this kind survives the filter.
     #[must_use]
-    fn accepts(self, kind: ModKind) -> bool {
+    pub fn accepts(self, kind: ModKind) -> bool {
         match kind {
             ModKind::Prefix | ModKind::Suffix | ModKind::Fractured | ModKind::Explicit => {
                 self.explicit

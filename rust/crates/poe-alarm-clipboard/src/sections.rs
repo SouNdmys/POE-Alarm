@@ -36,11 +36,14 @@ const FLAG_LINES: &[&str] = &[
     "mirrored",
     "split",
     "synthesiseditem",
+    "fractureditem",
+    "desecrated",
     "已腐化",
     "未鑑定",
     "未鉴定",
     "已複製",
     "已复制",
+    "分裂的物品",
 ];
 
 /// Phrases that only ever appear in usage or flavour text.
