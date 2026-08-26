@@ -34,7 +34,8 @@ mod app {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey, VK_F9, VK_F12,
+        MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey, VK_F9, VK_F10,
+        VK_F12,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, MSG, MSLLHOOKSTRUCT,
@@ -59,6 +60,7 @@ mod app {
 
     const HOTKEY_RELEASE: i32 = 0x5041;
     const HOTKEY_QUIT: i32 = 0x5042;
+    const HOTKEY_MONITOR: i32 = 0x5043;
     const IDLE_TICK: Duration = Duration::from_millis(40);
 
     static STATE: AtomicU8 = AtomicU8::new(STATE_IDLE);
@@ -80,6 +82,10 @@ mod app {
     /// three clicks per applied orb at spam speed, which contaminates any
     /// attempt to measure how long the craft itself takes.
     static OBSERVE_ONLY: AtomicBool = AtomicBool::new(false);
+    /// Set by the monitor hotkey when running without a mouse hook.
+    static MONITORING: AtomicBool = AtomicBool::new(false);
+    /// True when no hook was installed, so polling is gated by the hotkey.
+    static HOOKLESS: AtomicBool = AtomicBool::new(false);
 
     /// Per-message-type counts. "Moves arrive but presses do not" is a real
     /// enough outcome that it needs to be visible rather than inferred: swapped
@@ -144,6 +150,15 @@ mod app {
         /// interception policy are independent choices and conflating them was
         /// what made this feel unusable.
         pub block_first: bool,
+        /// Skip the mouse hook entirely and gate polling on a hotkey.
+        ///
+        /// The hook only ever answered "is the user crafting", and a hotkey
+        /// answers that too. Dropping it drops the Administrator requirement,
+        /// which exists solely because a medium-integrity hook is skipped for
+        /// input aimed at an elevated client. Blocking does not need it either:
+        /// the shipped alert is a layered topmost window that intercepts clicks
+        /// by owning the pixels.
+        pub no_hook: bool,
         /// How long after a click to keep polling for a new roll.
         pub active_window_ms: u64,
         /// Gap between polls while crafting is active.
@@ -166,6 +181,7 @@ mod app {
                 settle: true,
                 observe: false,
                 block_first: false,
+                no_hook: false,
                 active_window_ms: 1_200,
                 watch_interval_ms: 40,
             }
@@ -675,7 +691,11 @@ mod app {
 
             let crafting = armed
                 && STATE.load(Ordering::Acquire) != STATE_LOCKED
-                && last_click.is_some_and(|at| at.elapsed() < active_window);
+                && if HOOKLESS.load(Ordering::Acquire) {
+                    MONITORING.load(Ordering::Acquire)
+                } else {
+                    last_click.is_some_and(|at| at.elapsed() < active_window)
+                };
             if !crafting {
                 // Not polling, so the next gap would span the whole pause and
                 // report as detection lag it never caused.
@@ -1071,7 +1091,7 @@ mod app {
         }
     }
 
-    fn pump(hook: HHOOK) {
+    fn pump(hook: Option<HHOOK>) {
         let mut message = MSG::default();
         loop {
             // SAFETY: standard message loop over this thread's queue.
@@ -1092,6 +1112,17 @@ mod app {
                             }
                         );
                     }
+                    HOTKEY_MONITOR => {
+                        let now = !MONITORING.fetch_not(Ordering::AcqRel);
+                        println!(
+                            "  [monitor] {}",
+                            if now {
+                                "ON — watching for a new roll"
+                            } else {
+                                "off — clipboard left alone"
+                            }
+                        );
+                    }
                     HOTKEY_QUIT => {
                         println!("  [quit] shutting down");
                         RUNNING.store(false, Ordering::Release);
@@ -1107,8 +1138,10 @@ mod app {
                 DispatchMessageW(&message);
             }
         }
-        // SAFETY: hook came from SetWindowsHookExW and is removed exactly once.
-        let _ = unsafe { UnhookWindowsHookEx(hook) };
+        if let Some(hook) = hook {
+            // SAFETY: hook came from SetWindowsHookExW and is removed once.
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
+        }
     }
 
     fn parse_options(mut arguments: impl Iterator<Item = String>) -> Result<Options, String> {
@@ -1137,6 +1170,7 @@ mod app {
                 "--no-settle" => options.settle = false,
                 "--observe" => options.observe = true,
                 "--block-first" => options.block_first = true,
+                "--no-hook" => options.no_hook = true,
                 "--active-window-ms" => options.active_window_ms = value()?,
                 "--watch-interval-ms" => options.watch_interval_ms = value()?,
                 "--help" | "-h" => {
@@ -1301,18 +1335,23 @@ mod app {
         println!("  Hover the item you are rolling and craft normally.");
         println!("  Ctrl+Shift+F12 releases a lock. Ctrl+Shift+F9 quits and reports.");
         println!();
-        match clipboard::process_is_elevated() {
-            Some(true) => println!("  elevation  this process IS running as Administrator."),
-            Some(false) => {
-                println!("  elevation  this process is NOT running as Administrator.");
-                println!();
-                println!("  >> If Path of Exile runs elevated, the mouse hook will install and");
-                println!("  >> then receive nothing while the game is focused — which looks");
-                println!("  >> exactly like you never clicked. If the [watching] line below");
-                println!("  >> reports 0 events while you are in the game, that is this.");
-                println!("  >> Fix: close this, right-click Terminal, Run as administrator.");
+        if options.no_hook {
+            println!("  hook       none — press Ctrl+Shift+F10 to start and stop monitoring");
+            println!("  elevation  not required, because no mouse hook is installed.");
+        } else {
+            match clipboard::process_is_elevated() {
+                Some(true) => println!("  elevation  this process IS running as Administrator."),
+                Some(false) => {
+                    println!("  elevation  this process is NOT running as Administrator.");
+                    println!();
+                    println!("  >> If Path of Exile runs elevated, the mouse hook will install and");
+                    println!("  >> then receive nothing while the game is focused — which looks");
+                    println!("  >> exactly like you never clicked.");
+                    println!("  >> Fix: relaunch from an elevated terminal, or pass --no-hook,");
+                    println!("  >> which needs no elevation at all.");
+                }
+                None => println!("  elevation  could not be determined"),
             }
-            None => println!("  elevation  could not be determined"),
         }
         println!();
         println!("  NOTE: every roll overwrites your clipboard. That is inherent here.");
@@ -1323,6 +1362,9 @@ mod app {
             return;
         }
 
+        // Read before `options` moves into the worker.
+        let no_hook = options.no_hook;
+
         let (sender, receiver) = sync_channel::<Instant>(64);
         let _ = CLICK_TX.set(sender);
 
@@ -1331,22 +1373,26 @@ mod app {
             .spawn(move || worker(profile, receiver, options))
             .expect("worker thread spawns");
 
-        // SAFETY: this executable's module stays loaded for the process
-        // lifetime, which outlives the hook.
-        let module = unsafe { GetModuleHandleW(None) }
-            .map(|handle| HINSTANCE(handle.0))
-            .unwrap_or_default();
-        // SAFETY: mouse_proc has the required signature.
-        let hook =
+        let hook = if no_hook {
+            HOOKLESS.store(true, Ordering::Release);
+            None
+        } else {
+            // SAFETY: this executable's module stays loaded for the process
+            // lifetime, which outlives the hook.
+            let module = unsafe { GetModuleHandleW(None) }
+                .map(|handle| HINSTANCE(handle.0))
+                .unwrap_or_default();
+            // SAFETY: mouse_proc has the required signature.
             match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), Some(module), 0) } {
-                Ok(hook) => hook,
+                Ok(hook) => Some(hook),
                 Err(error) => {
                     eprintln!("SetWindowsHookExW failed: {error}");
                     RUNNING.store(false, Ordering::Release);
                     let _ = worker_handle.join();
                     std::process::exit(1);
                 }
-            };
+            }
+        };
 
         let modifiers = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
         // SAFETY: a null window posts WM_HOTKEY to this thread's queue.
@@ -1357,10 +1403,19 @@ mod app {
             if RegisterHotKey(None, HOTKEY_QUIT, modifiers, u32::from(VK_F9.0)).is_err() {
                 eprintln!("  warning: Ctrl+Shift+F9 is already taken");
             }
+            if no_hook
+                && RegisterHotKey(None, HOTKEY_MONITOR, modifiers, u32::from(VK_F10.0)).is_err()
+            {
+                eprintln!("  warning: Ctrl+Shift+F10 is already taken — cannot start monitoring");
+            }
         }
 
         HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
-        println!("  armed — go craft.");
+        if no_hook {
+            println!("  ready — press Ctrl+Shift+F10 in game to start monitoring.");
+        } else {
+            println!("  armed — go craft.");
+        }
         println!();
         pump(hook);
 
@@ -1368,6 +1423,7 @@ mod app {
         unsafe {
             let _ = UnregisterHotKey(None, HOTKEY_RELEASE);
             let _ = UnregisterHotKey(None, HOTKEY_QUIT);
+            let _ = UnregisterHotKey(None, HOTKEY_MONITOR);
         }
         RUNNING.store(false, Ordering::Release);
         let _ = worker_handle.join();
