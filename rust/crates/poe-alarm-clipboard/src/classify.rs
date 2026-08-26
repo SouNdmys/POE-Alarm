@@ -34,8 +34,14 @@ const ANNOTATION_MARKERS: &[(&str, ModKind)] = &[
     ("已大師工藝", ModKind::Crafted),
     ("工藝", ModKind::Crafted),
     ("crafted", ModKind::Crafted),
+    ("已破裂", ModKind::Fractured),
     ("分裂", ModKind::Fractured),
     ("fractured", ModKind::Fractured),
+    // The Traditional Chinese client writes 固定詞綴, never 固有, and prefixes
+    // it for special sources: 灼烙總督固定詞綴, 吞噬天地固定詞綴. Getting this
+    // wrong classified every implicit as an ordinary affix, which put base-item
+    // stats in front of the rules.
+    ("固定詞綴", ModKind::Implicit),
     ("固有", ModKind::Implicit),
     ("implicit", ModKind::Implicit),
     ("附魔", ModKind::Enchant),

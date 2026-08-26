@@ -1,39 +1,112 @@
-//! What is lost when the client is not annotating modifiers.
+//! What changes when the client is not annotating modifiers.
 //!
 //! "Advanced Mod Descriptions" is the in-game setting that makes Ctrl+C label
 //! each modifier — `{ 前綴 "名字"(階層：1) }` — and say which lines belong to
 //! the same one. It is the client stating, authoritatively, facts that cannot
-//! be recovered from the text alone.
+//! be recovered from the words alone.
 //!
-//! These tests pin down exactly what is lost without it, because that is what
-//! the app has to tell users, and "it works a bit worse" would be too vague to
-//! act on. Both losses produce false positives, not misses.
+//! The guarantee that matters is directional. A false alarm costs a glance; a
+//! missed roll costs the item. So the load-bearing test here is
+//! `no_tracked_modifier_is_ever_lost_without_annotations`: whatever else
+//! degrades, the lines a rule could match on must never shrink.
 
-use poe_alarm_clipboard::{ModFilter, parse};
+use std::collections::BTreeSet;
 
-const ANNOTATED: &str =
+use poe_alarm_clipboard::{ModFilter, ParsedItem, parse};
+
+const HYBRID_BOW: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
+
+const CORPORA: &[(&str, &str)] = &[
+    (
+        "poe1-en",
+        include_str!("../../../../tests/语料/poe1/en.txt"),
+    ),
+    (
+        "poe1-zh-tw",
+        include_str!("../../../../tests/语料/poe1/zh-tw.txt"),
+    ),
+    (
+        "poe2-en",
+        include_str!("../../../../tests/语料/poe2/en.txt"),
+    ),
+    (
+        "poe2-zh-tw",
+        include_str!("../../../../tests/语料/poe2/zh-tw.txt"),
+    ),
+];
 
 /// The same dump with every `{ ... }` line removed, which is what the client
 /// writes when Advanced Mod Descriptions is off.
-fn without_annotations() -> String {
-    ANNOTATED
-        .lines()
+fn without_annotations(dump: &str) -> String {
+    dump.lines()
         .filter(|line| !line.trim_start().starts_with('{'))
         .collect::<Vec<_>>()
         .join("\r\n")
 }
 
-fn flatten(item: &poe_alarm_clipboard::ParsedItem) -> Vec<String> {
+fn lines_of(item: &ParsedItem) -> BTreeSet<String> {
     item.groups
         .iter()
         .flat_map(|group| group.lines.iter().cloned())
         .collect()
 }
 
+/// Splits a corpus file into its individual item dumps.
+///
+/// The client always opens with the item class, so a line starting one is the
+/// only reliable separator; blank runs appear inside dumps too.
+fn items(corpus: &str) -> Vec<String> {
+    let mut dumps = Vec::new();
+    let mut current = String::new();
+    for line in corpus.lines() {
+        let starts_item = line.starts_with("Item Class:")
+            || line.starts_with("物品種類:")
+            || line.starts_with("物品類別:");
+        if starts_item && !current.trim().is_empty() {
+            dumps.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+        current.push_str("\r\n");
+    }
+    if !current.trim().is_empty() {
+        dumps.push(current);
+    }
+    dumps
+}
+
+/// The invariant the app is allowed to rely on: turning the setting off can
+/// add noise, never remove signal.
+#[test]
+fn no_tracked_modifier_is_ever_lost_without_annotations() {
+    let mut compared = 0_usize;
+    for (name, corpus) in CORPORA {
+        for (index, dump) in items(corpus).into_iter().enumerate() {
+            let Ok(annotated) = parse(&dump, ModFilter::default()) else {
+                continue;
+            };
+            let Ok(flat) = parse(&without_annotations(&dump), ModFilter::default()) else {
+                panic!("{name} item {index}: the flat dump must still parse");
+            };
+            let annotated_lines = lines_of(&annotated);
+            let flat_lines = lines_of(&flat);
+            let missing: Vec<_> = annotated_lines.difference(&flat_lines).collect();
+            assert!(
+                missing.is_empty(),
+                "{name} item {index}: turning off annotations dropped {missing:?}"
+            );
+            compared += 1;
+        }
+    }
+    assert!(
+        compared >= 40,
+        "the corpus should cover the real item classes, compared only {compared}"
+    );
+}
+
 #[test]
 fn annotations_keep_a_hybrid_modifier_whole() {
-    let item = parse(ANNOTATED, ModFilter::default()).expect("fixture parses");
+    let item = parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses");
     let hybrid = item
         .groups
         .iter()
@@ -46,8 +119,8 @@ fn annotations_keep_a_hybrid_modifier_whole() {
 
 #[test]
 fn without_annotations_a_hybrid_splits_into_two_modifiers() {
-    let annotated = parse(ANNOTATED, ModFilter::default()).expect("fixture parses");
-    let flat = parse(&without_annotations(), ModFilter::default()).expect("flat dump parses");
+    let annotated = parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses");
+    let flat = parse(&without_annotations(HYBRID_BOW), ModFilter::default()).expect("parses");
 
     assert!(
         annotated.groups.iter().any(|group| group.lines.len() > 1),
@@ -57,31 +130,30 @@ fn without_annotations_a_hybrid_splits_into_two_modifiers() {
         flat.groups.iter().all(|group| group.lines.len() == 1),
         "without the client's grouping every line looks like its own modifier"
     );
-    // This is the damage: a rule asking for two separate modifiers can now be
-    // satisfied by the single physical prefix that produced both lines.
+    // Both lines survive, so nothing is missed. What is lost is the knowledge
+    // that one physical modifier produced them, which is what stops a rule
+    // asking for two modifiers being satisfied by one.
     assert!(flat.groups.len() > annotated.groups.len());
 }
 
 #[test]
 fn without_annotations_a_bench_crafted_modifier_is_read_as_rolled() {
-    let annotated = flatten(&parse(ANNOTATED, ModFilter::default()).expect("fixture parses"));
-    let flat = flatten(&parse(&without_annotations(), ModFilter::default()).expect("parses"));
+    let annotated = lines_of(&parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses"));
+    let flat =
+        lines_of(&parse(&without_annotations(HYBRID_BOW), ModFilter::default()).expect("ok"));
 
     // The bow's crafted suffix — { 已大師工藝 後綴 "工藝之" } — contributes these
     // two lines. Excluded by default when the client says it is crafted.
     for crafted in ["+21(20-24) 力量和智慧", "增加 25(21-25)% 暴擊率"] {
         assert!(
-            !annotated.contains(&crafted.to_owned()),
+            !annotated.contains(crafted),
             "a crafted line must not reach the rules: {crafted}"
         );
         assert!(
-            flat.contains(&crafted.to_owned()),
-            "without annotations the crafted line is indistinguishable from a roll: {crafted}"
+            flat.contains(crafted),
+            "without annotations a crafted line is indistinguishable from a roll: {crafted}"
         );
     }
-
-    // Which means the alarm can fire on a modifier the player crafted onto the
-    // item themselves — the one kind of false positive that never self-corrects.
     assert_eq!(annotated.len(), 6);
     assert_eq!(flat.len(), 8);
 }

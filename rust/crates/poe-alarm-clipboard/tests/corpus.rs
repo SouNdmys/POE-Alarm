@@ -74,13 +74,72 @@ fn all_cases() -> Vec<Case> {
     cases
 }
 
-/// Annotations the client wrote, classified the way the parser classifies them.
+/// Reads an annotation the way a person would, without asking the parser.
+///
+/// This deliberately does not call `classify_annotation`. It used to, which
+/// made the invariant below check only that the parser agreed with itself — and
+/// it did agree, right through a stretch where every Traditional Chinese
+/// implicit was being matched against user rules because the marker table
+/// looked for 固有 and the client writes 固定詞綴.
+///
+/// The words here were taken by listing every distinct `{ ... }` head in the
+/// corpus and reading them. Keep it that way: if the parser gains a marker,
+/// this list should only gain it after the corpus shows the client using it.
+fn expected_kind(annotation: &str) -> ModKind {
+    let head = annotation
+        .trim_start_matches('{')
+        .split('"')
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    let has = |needle: &str| head.contains(needle);
+
+    if has("已大師工藝") || has("工藝") || has("crafted") {
+        ModKind::Crafted
+    } else if has("已破裂") || has("fractured") {
+        ModKind::Fractured
+    } else if has("固定詞綴") || has("implicit") {
+        ModKind::Implicit
+    } else if has("附魔") || has("enchant") {
+        ModKind::Enchant
+    } else if has("前綴") || has("prefix") {
+        ModKind::Prefix
+    } else if has("後綴") || has("suffix") {
+        ModKind::Suffix
+    } else {
+        panic!("unrecognised annotation head, add it after checking the corpus: {annotation}")
+    }
+}
+
 fn annotation_kinds(text: &str) -> Vec<ModKind> {
     text.lines()
         .map(str::trim)
         .filter(|line| line.starts_with('{'))
-        .map(poe_alarm_clipboard::classify_annotation)
+        .map(expected_kind)
         .collect()
+}
+
+/// The parser and an independent reading of the same annotation must agree.
+#[test]
+fn the_parser_classifies_every_annotation_in_the_corpus_the_way_a_person_would() {
+    let mut checked = 0_usize;
+    for case in all_cases() {
+        for line in case
+            .text
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with('{'))
+        {
+            assert_eq!(
+                poe_alarm_clipboard::classify_annotation(line),
+                expected_kind(line),
+                "{}: {line}",
+                case.label
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 200, "only checked {checked} annotations");
 }
 
 fn parsed(case: &Case, filter: ModFilter) -> ParsedItem {

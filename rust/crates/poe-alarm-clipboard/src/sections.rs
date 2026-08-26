@@ -26,10 +26,17 @@ const ITEM_CLASS_KEYS: &[&str] = &[
 ];
 const RARITY_KEYS: &[&str] = &["rarity:", "稀有度:"];
 const ITEM_LEVEL_KEYS: &[&str] = &["itemlevel:", "物品等級:", "物品等级:"];
-const CORRUPTED_KEYS: &[&str] = &["corrupted", "已腐化"];
+// The Traditional Chinese client says 已汙染; 已腐化 is kept as an alias.
+const CORRUPTED_KEYS: &[&str] = &["corrupted", "已汙染", "已污染", "已腐化"];
 const TRAILER_KEYS: &[&str] = &["note:", "備註:", "备注:", "出售", "sellprice"];
 
 /// Standalone lines that are status flags rather than modifiers.
+///
+/// Getting this list wrong is not cosmetic. These lines sit in their own
+/// section after the explicit modifiers, and a section that is not recognised
+/// as flags is taken for the explicit one — which demotes the real modifiers to
+/// implicits and drops them. Influence tags are the ones that bite: an Elder
+/// pair of gloves used to lose every affix on it.
 const FLAG_LINES: &[&str] = &[
     "corrupted",
     "unidentified",
@@ -38,12 +45,27 @@ const FLAG_LINES: &[&str] = &[
     "synthesiseditem",
     "fractureditem",
     "desecrated",
+    // Influence tags, one line each and often two at a time.
+    "shaperitem",
+    "elderitem",
+    "crusaderitem",
+    "redeemeritem",
+    "hunteritem",
+    "warloriditem",
+    "searingexarchitem",
+    "eaterofworldsitem",
+    "影響物品",
+    "開創者物品",
+    "尊爺物品",
+    "已汙染",
+    "已污染",
     "已腐化",
     "未鑑定",
     "未鉴定",
     "已複製",
     "已复制",
     "分裂的物品",
+    "破裂之物",
 ];
 
 /// Phrases that only ever appear in usage or flavour text.
@@ -98,11 +120,32 @@ fn is_decoration(line: &str) -> bool {
     trimmed.starts_with('(') || trimmed.starts_with('\u{ff08}')
 }
 
-/// Usage or flavour text, which reads as a long sentence carrying no numbers.
+/// A line that names how the item is used, which is never a modifier.
+fn names_a_usage(line: &str) -> bool {
+    let lowered = line.trim().to_lowercase();
+    PROSE_MARKERS.iter().any(|marker| lowered.contains(marker))
+}
+
+/// Usage or flavour text, judged for a whole section at a time.
+///
+/// Only ever applied where every line in a section agrees, because the client
+/// always gives usage text its own section — and because the last half of this
+/// is a guess. Plenty of real modifiers are long sentences with no numbers in
+/// them: "Monsters Maim on Hit with Attacks", "Area contains Labyrinth Hazards".
+///
+/// Getting this wrong is not a cosmetic miss. An unrecognised trailing section
+/// is taken for the explicit one, which demotes the real modifiers to implicits
+/// and drops them — a quiver whose only trailer was 持弓時才可裝備。 lost all
+/// six of its affixes.
 fn is_prose(line: &str) -> bool {
     let trimmed = line.trim();
-    let lowered = trimmed.to_lowercase();
-    if PROSE_MARKERS.iter().any(|marker| lowered.contains(marker)) {
+    if names_a_usage(trimmed) {
+        return true;
+    }
+    // The client never ends a modifier with a full stop and always ends usage
+    // text with one. Checked against all 340 annotated modifier lines in the
+    // four corpora: not one of them ends with a stop.
+    if trimmed.ends_with('。') || trimmed.ends_with('.') || trimmed.ends_with('!') {
         return true;
     }
     trimmed.chars().count() > 24 && !trimmed.chars().any(|character| character.is_ascii_digit())
@@ -263,7 +306,7 @@ fn groups_from_layout(section: &[&str], positional: ModKind) -> Vec<ModGroup> {
     section
         .iter()
         .filter_map(|line| {
-            if is_decoration(line) || is_flag(line) || is_prose(line) {
+            if is_decoration(line) || is_flag(line) || names_a_usage(line) {
                 return None;
             }
             let (text, inline_kind) = strip_inline_markers(line);
