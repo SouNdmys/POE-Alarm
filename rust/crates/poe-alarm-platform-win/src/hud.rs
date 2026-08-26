@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_position_prefers_right_of_capture_region() {
+    fn automatic_position_prefers_right_of_the_avoided_rectangle() {
         let work = RectI::new(0, 0, 1920, 1040).unwrap();
         let anchor = RectI::new(500, 200, 400, 500).unwrap();
         let size = SizeI::new(336, 150).unwrap();

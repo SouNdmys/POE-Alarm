@@ -5,7 +5,6 @@ use crate::PlatformError;
 pub struct PlatformSelfTestReport {
     pub hud_window_create_cleanup: bool,
     pub hot_key_register_cleanup: bool,
-    pub region_window_create_cleanup: bool,
     pub mouse_hook_create_cleanup: bool,
 }
 

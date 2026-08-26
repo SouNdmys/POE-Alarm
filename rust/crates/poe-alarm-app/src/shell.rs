@@ -281,39 +281,6 @@ impl AppShell {
                         self.push_log(LogKind::Meta, self.t().log_hotkey_start.to_owned());
                     }
                 }
-                PlatformEvent::HotKeySelectRegion => self.begin_region_selection(cx),
-                PlatformEvent::RegionSelected(region) => {
-                    let text = self.t();
-                    if let Some(backend) = &mut self.backend {
-                        backend.set_region(region);
-                        let label = backend.region_label().unwrap_or_default();
-                        match backend.save() {
-                            Ok(()) => {
-                                self.notice = Some((
-                                    StatusKind::Monitoring,
-                                    format!("{} · {label}", text.notice_region_saved).into(),
-                                ));
-                                self.push_log(
-                                    LogKind::Meta,
-                                    format!("{} · {label}", text.log_region_updated),
-                                );
-                            }
-                            Err(e) => {
-                                self.notice = Some((
-                                    StatusKind::Error,
-                                    format!("{}:{e}", text.notice_region_save_failed).into(),
-                                ));
-                            }
-                        }
-                    }
-                }
-                PlatformEvent::RegionSelectionCancelled => {
-                    self.push_log(LogKind::Meta, self.t().log_selection_cancelled.to_owned());
-                }
-                PlatformEvent::RegionSelectionFailed => {
-                    self.notice =
-                        Some((StatusKind::Error, self.t().notice_selection_failed.into()));
-                }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
                         backend.settings.hud_placement = poe_alarm_settings::HudPlacement {
@@ -1164,19 +1131,6 @@ impl AppShell {
         self.persist();
         self.push_log(LogKind::Meta, self.t().log_sound_reset.to_owned());
         cx.notify();
-    }
-
-    /// 触发框选(热键 Ctrl⇧F11 或界面按钮)。
-    pub fn begin_region_selection(&mut self, cx: &mut Context<Self>) {
-        let text = self.t();
-        if let Some(backend) = &mut self.backend {
-            if let Err(e) = backend.begin_region_selection() {
-                self.notice = Some((StatusKind::Error, e.into()));
-            } else {
-                self.push_log(LogKind::Meta, text.log_selecting.to_owned());
-            }
-            cx.notify();
-        }
     }
 
     // -- shared chrome ------------------------------------------------------

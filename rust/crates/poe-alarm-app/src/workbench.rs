@@ -524,13 +524,9 @@ impl AppShell {
             ),
             None => (true, true, "—".to_owned(), false),
         };
-        let (region, ocr) = match &self.backend {
-            Some(b) => (
-                b.region_label()
-                    .unwrap_or_else(|| t.region_unset.to_owned()),
-                b.ocr_language_label(),
-            ),
-            None => ("—".to_owned(), "—".to_owned()),
+        let ocr = match &self.backend {
+            Some(b) => b.ocr_language_label(),
+            None => "—".to_owned(),
         };
         let hotkey_index = self
             .backend
@@ -652,40 +648,16 @@ impl AppShell {
             .v_flex()
             .gap(px(12.))
             .p_4()
-            .child(section(t.section_region))
-            .child(
-                div()
-                    .h_flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(label(t.current_region))
-                    .child(
-                        div()
-                            .font_family(FONT_MONO)
-                            .text_size(fs(FS_12))
-                            .text_color(c(TEXT_PRIMARY))
-                            .child(SharedString::from(region)),
-                    )
-                    .child(
-                        button(
-                            "wb-select-region",
-                            LedgerButton::Secondary,
-                            t.select_region_button,
-                            cx,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.begin_region_selection(cx))),
-                    )
-                    .child(hotkey_chips(&["Ctrl", "⇧", "F11"])),
-            )
+            .child(section(t.section_affixes))
             .child(row(
-                label(t.ocr_language_row),
+                label(t.affix_language_row),
                 div()
                     .font_family(FONT_MONO)
                     .text_size(fs(FS_12))
                     .text_color(c(TEXT_PRIMARY))
                     .whitespace_nowrap()
                     .child(SharedString::from(ocr)),
-                t.region_hint,
+                t.affix_language_hint,
             ))
             .child(section(t.section_alerts))
             .child(row(

@@ -16,7 +16,6 @@ mod hud;
 mod mouse_guard;
 #[cfg(not(windows))]
 mod non_windows;
-mod region_selection;
 mod self_test;
 mod wave;
 #[cfg(windows)]
@@ -43,10 +42,6 @@ pub use hud::{
 pub use mouse_guard::{
     GuardDecision, GuardMode, GuardRelease, GuardSnapshot, MouseButton, MouseButtons,
     MouseGuardStateMachine, MouseInput, PendingMouseInputGuard,
-};
-pub use region_selection::{
-    RegionSelectionOverlay, RegionSelectionState, SelectionOverlayConfig, SelectionPhase,
-    SelectionUpdate,
 };
 pub use self_test::{PlatformSelfTestReport, run_windows_self_test};
 pub use wave::{

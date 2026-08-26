@@ -2,7 +2,6 @@ mod clipboard;
 mod hotkeys;
 mod hud;
 mod mouse_hook;
-mod region_overlay;
 mod self_test;
 mod wave;
 
@@ -14,7 +13,6 @@ pub(crate) use clipboard::{
 pub(crate) use hotkeys::{register_hot_key, unregister_hot_key};
 pub(crate) use hud::NativeHudWindow;
 pub(crate) use mouse_hook::NativePendingMouseGuard;
-pub(crate) use region_overlay::select_region;
 pub(crate) use self_test::run_self_test;
 pub(crate) use wave::{play_wave, stop_wave};
 

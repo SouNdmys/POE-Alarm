@@ -1,7 +1,6 @@
 use crate::hotkeys::{HotKeyBinding, HotKeyTarget};
 use crate::hud::{CaptureAffinity, HudWindowConfig, HudWindowPolicy};
 use crate::mouse_guard::{GuardMode, GuardSnapshot, MouseButtons};
-use crate::region_selection::SelectionOverlayConfig;
 use crate::{NativeWindowHandle, PlatformError, PlatformSelfTestReport, RectI};
 
 pub(crate) fn register_hot_key(
@@ -104,12 +103,6 @@ impl NativePendingMouseGuard {
             suppressed_buttons: MouseButtons::NONE,
         }
     }
-}
-
-pub(crate) fn select_region(
-    _config: SelectionOverlayConfig,
-) -> Result<Option<RectI>, PlatformError> {
-    Err(PlatformError::unsupported("native region selection"))
 }
 
 pub(crate) fn run_self_test() -> Result<PlatformSelfTestReport, PlatformError> {

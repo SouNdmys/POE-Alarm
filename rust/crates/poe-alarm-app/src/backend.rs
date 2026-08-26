@@ -13,16 +13,12 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use poe_alarm_settings::{AppSettings, ScreenRegion, SettingsStore};
+use poe_alarm_settings::{AppSettings, SettingsStore};
 
 /// 平台事件(全局热键 / 框选结果 / 浮窗拖动),由后台线程投递、UI 轮询消费。
 #[derive(Clone, Copy, Debug)]
 pub enum PlatformEvent {
     HotKeyStart,
-    HotKeySelectRegion,
-    RegionSelected(ScreenRegion),
-    RegionSelectionCancelled,
-    RegionSelectionFailed,
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
     HudMoved(f64, f64),
 }
@@ -92,7 +88,6 @@ pub struct Backend {
     pub read_only: bool,
     platform_rx: Receiver<PlatformEvent>,
     platform_tx: Sender<PlatformEvent>,
-    selecting_region: bool,
     #[cfg(windows)]
     hud: Option<crate::hud_service::HudService>,
     #[cfg(windows)]
@@ -136,7 +131,6 @@ impl Backend {
             read_only,
             platform_rx,
             platform_tx,
-            selecting_region: false,
             #[cfg(windows)]
             hud,
             #[cfg(windows)]
@@ -154,60 +148,13 @@ impl Backend {
         self.store.path().display().to_string()
     }
 
-    /// 排空平台事件(热键 / 框选结果)。
+    /// 排空平台事件(热键)。
     pub fn poll_platform(&mut self) -> Vec<PlatformEvent> {
         let mut out = Vec::new();
         while let Ok(event) = self.platform_rx.try_recv() {
-            if matches!(
-                event,
-                PlatformEvent::RegionSelected(_)
-                    | PlatformEvent::RegionSelectionCancelled
-                    | PlatformEvent::RegionSelectionFailed
-            ) {
-                self.selecting_region = false;
-            }
             out.push(event);
         }
         out
-    }
-
-    /// 触发 F11 框选(独立线程运行全屏 overlay,结果经 channel 回投)。
-    pub fn begin_region_selection(&mut self) -> Result<(), String> {
-        if self.selecting_region {
-            return Ok(());
-        }
-        self.selecting_region = true;
-        #[cfg(windows)]
-        {
-            let tx = self.platform_tx.clone();
-            std::thread::spawn(move || {
-                use poe_alarm_platform_win::{RegionSelectionOverlay, SelectionOverlayConfig};
-                let event = match RegionSelectionOverlay::select(SelectionOverlayConfig::default())
-                {
-                    Ok(Some(rect)) => PlatformEvent::RegionSelected(ScreenRegion::new(
-                        rect.x,
-                        rect.y,
-                        rect.width,
-                        rect.height,
-                    )),
-                    Ok(None) => PlatformEvent::RegionSelectionCancelled,
-                    Err(error) => {
-                        eprintln!("region selection failed: {error}");
-                        PlatformEvent::RegionSelectionFailed
-                    }
-                };
-                let _ = tx.send(event);
-            });
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = self
-                .platform_tx
-                .send(PlatformEvent::RegionSelected(ScreenRegion::new(
-                    0, 58, 1134, 956,
-                )));
-        }
-        Ok(())
     }
 
     pub fn set_game(&mut self, profile: poe_alarm_settings::GameProfile) {
@@ -217,18 +164,6 @@ impl Backend {
     pub fn set_ocr_language(&mut self, language: &str) {
         self.settings.selected_profile_mut().ocr_language =
             poe_alarm_settings::normalize_ocr_language(language).to_owned();
-    }
-
-    pub fn set_region(&mut self, region: ScreenRegion) {
-        self.settings.selected_profile_mut().capture_region = Some(region);
-    }
-
-    /// 已框选区域的展示文本;未框选时为 None(占位文案由界面按语言提供)。
-    pub fn region_label(&self) -> Option<String> {
-        self.settings
-            .selected_profile()
-            .capture_region
-            .map(|r| format!("{}×{} @ {},{}", r.width, r.height, r.x, r.y))
     }
 
     pub fn ocr_language_label(&self) -> String {
@@ -574,7 +509,6 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
             {
                 let event = match action {
                     HotKeyAction::StartMonitoring => PlatformEvent::HotKeyStart,
-                    HotKeyAction::SelectRegion => PlatformEvent::HotKeySelectRegion,
                     HotKeyAction::StopOrAcknowledge => continue,
                 };
                 if tx.send(event).is_err() {
