@@ -311,6 +311,44 @@ pub fn foreground_window_description() -> (String, String) {
     )
 }
 
+/// Whether this process is running elevated.
+///
+/// A low-level mouse hook in a medium-integrity process never receives input
+/// destined for an elevated window, so a mismatch here means the hook installs
+/// successfully and then sees nothing while the game is focused. That failure
+/// is otherwise indistinguishable from the user simply not clicking, so it is
+/// worth reporting up front rather than inferring from a title bar.
+#[must_use]
+pub fn process_is_elevated() -> Option<bool> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = HANDLE::default();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no closing;
+    // `token` receives an owned handle closed below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.ok()?;
+
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0_u32;
+    // SAFETY: the buffer matches the size declared for TokenElevation.
+    let queried = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some((&raw mut elevation).cast()),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &raw mut returned,
+        )
+    };
+    // SAFETY: `token` came from OpenProcessToken and is closed exactly once.
+    let _ = unsafe { CloseHandle(token) };
+    queried.ok()?;
+    Some(elevation.TokenIsElevated != 0)
+}
+
 /// True when the foreground window looks like a Path of Exile client.
 ///
 /// The lab never intercepts input unless this holds, so a stuck state machine

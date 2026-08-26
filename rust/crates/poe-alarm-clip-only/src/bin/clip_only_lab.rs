@@ -38,7 +38,8 @@ mod app {
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, MSG, MSLLHOOKSTRUCT,
         SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_HOTKEY,
-        WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
     };
 
     use poe_alarm_clip_only::clipboard::{self, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground};
@@ -62,6 +63,24 @@ mod app {
     static HOOK_EVENTS: AtomicU64 = AtomicU64::new(0);
     static LBUTTON_DOWNS: AtomicU64 = AtomicU64::new(0);
     static CLICKS_DROPPED: AtomicU64 = AtomicU64::new(0);
+
+    /// Per-message-type counts. "Moves arrive but presses do not" is a real
+    /// enough outcome that it needs to be visible rather than inferred: swapped
+    /// mouse buttons, for instance, deliver a physical left click to the hook
+    /// as WM_RBUTTONDOWN.
+    static MOVES: AtomicU64 = AtomicU64::new(0);
+    static L_UPS: AtomicU64 = AtomicU64::new(0);
+    static R_DOWNS: AtomicU64 = AtomicU64::new(0);
+    static R_UPS: AtomicU64 = AtomicU64::new(0);
+    static M_DOWNS: AtomicU64 = AtomicU64::new(0);
+    static X_DOWNS: AtomicU64 = AtomicU64::new(0);
+    static WHEELS: AtomicU64 = AtomicU64::new(0);
+    static OTHER_MESSAGES: AtomicU64 = AtomicU64::new(0);
+    /// Events Windows marked as injected by software rather than hardware.
+    static INJECTED: AtomicU64 = AtomicU64::new(0);
+
+    /// `LLMHF_INJECTED`.
+    const LLMHF_INJECTED: u32 = 0x0000_0001;
 
     pub struct Options {
         /// Latency the OCR pipeline already meets, used as the pass mark.
@@ -96,18 +115,33 @@ mod app {
             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
         }
         HOOK_EVENTS.fetch_add(1, Ordering::Relaxed);
-        if wparam.0 as u32 == WM_LBUTTONDOWN {
-            LBUTTON_DOWNS.fetch_add(1, Ordering::Relaxed);
+        let message = wparam.0 as u32;
+        match message {
+            WM_MOUSEMOVE => &MOVES,
+            WM_LBUTTONDOWN => &LBUTTON_DOWNS,
+            WM_LBUTTONUP => &L_UPS,
+            WM_RBUTTONDOWN => &R_DOWNS,
+            WM_RBUTTONUP => &R_UPS,
+            WM_MBUTTONDOWN => &M_DOWNS,
+            WM_XBUTTONDOWN => &X_DOWNS,
+            WM_MOUSEWHEEL => &WHEELS,
+            _ => &OTHER_MESSAGES,
         }
+        .fetch_add(1, Ordering::Relaxed);
+
+        // SAFETY: for WH_MOUSE_LL with code >= 0, lparam points at a live
+        // MSLLHOOKSTRUCT owned by the system for this call.
+        let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+        if info.flags & LLMHF_INJECTED != 0 {
+            INJECTED.fetch_add(1, Ordering::Relaxed);
+        }
+
         if !GAME_FOREGROUND.load(Ordering::Acquire) {
             STATE.store(STATE_IDLE, Ordering::Release);
             // SAFETY: as above.
             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
         }
 
-        // SAFETY: for WH_MOUSE_LL with code >= 0, lparam points at a live
-        // MSLLHOOKSTRUCT owned by the system for this call.
-        let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
         if info.dwExtraInfo == SYNTHETIC_INPUT_SIGNATURE {
             // SAFETY: as above.
             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
@@ -174,6 +208,23 @@ mod app {
                 fail_closed: 0,
             }
         }
+    }
+
+    /// One-line summary of what the hook actually received, by message type.
+    fn input_breakdown() -> String {
+        format!(
+            "moves {}  L(down {} up {})  R(down {} up {})  M {}  X {}  wheel {}  other {}  injected {}",
+            MOVES.load(Ordering::Relaxed),
+            LBUTTON_DOWNS.load(Ordering::Relaxed),
+            L_UPS.load(Ordering::Relaxed),
+            R_DOWNS.load(Ordering::Relaxed),
+            R_UPS.load(Ordering::Relaxed),
+            M_DOWNS.load(Ordering::Relaxed),
+            X_DOWNS.load(Ordering::Relaxed),
+            WHEELS.load(Ordering::Relaxed),
+            OTHER_MESSAGES.load(Ordering::Relaxed),
+            INJECTED.load(Ordering::Relaxed),
+        )
     }
 
     fn lock(reason: &str) {
@@ -327,17 +378,13 @@ mod app {
                                 "             keeps printing, run this terminal as Administrator."
                             );
                         } else {
-                            println!(
-                                "  [watching] events {events}  left-downs {}  dropped {}  swallowed {}  state {}",
-                                LBUTTON_DOWNS.load(Ordering::Relaxed),
-                                CLICKS_DROPPED.load(Ordering::Relaxed),
-                                SWALLOWED.load(Ordering::Relaxed),
-                                match STATE.load(Ordering::Acquire) {
-                                    STATE_DECIDING => "deciding",
-                                    STATE_LOCKED => "LOCKED",
-                                    _ => "idle",
-                                }
-                            );
+                            println!("  [watching] {}  state {}", input_breakdown(), match STATE
+                                .load(Ordering::Acquire)
+                            {
+                                STATE_DECIDING => "deciding",
+                                STATE_LOCKED => "LOCKED",
+                                _ => "idle",
+                            });
                         }
                         last_events = events;
                         last_heartbeat = Instant::now();
@@ -362,6 +409,26 @@ mod app {
             "  clicks swallowed          {}",
             SWALLOWED.load(Ordering::Relaxed)
         );
+        println!();
+        println!("=== what the mouse hook actually received ===");
+        println!("  {}", input_breakdown());
+        let left_downs = LBUTTON_DOWNS.load(Ordering::Relaxed);
+        let right_downs = R_DOWNS.load(Ordering::Relaxed);
+        if left_downs == 0 && MOVES.load(Ordering::Relaxed) > 100 {
+            println!();
+            println!("  The hook saw plenty of movement and zero left presses. Your left");
+            println!("  button is not reaching this hook at all, so nothing downstream can");
+            println!("  work. Likely causes, in order:");
+            println!("    - mouse buttons are swapped in Windows, so a physical left click");
+            if right_downs > 0 {
+                println!("      arrives as a RIGHT press — and {right_downs} right presses were seen,");
+                println!("      which fits. Check Settings > Bluetooth & devices > Mouse.");
+            } else {
+                println!("      would arrive as a right press (none were seen either)");
+            }
+            println!("    - mouse software rebinding the button below the hook layer");
+            println!("    - you were crafting while the game was not the foreground window");
+        }
         println!();
         println!("{}", totals.first_copy.summary("first Ctrl+C round trip"));
         println!("{}", totals.decision.summary("click -> verdict"));
@@ -532,9 +599,19 @@ mod app {
         println!("  Hover the item you are rolling and craft normally.");
         println!("  Ctrl+Shift+F12 releases a lock. Ctrl+Shift+F9 quits and reports.");
         println!();
-        println!("  If the game runs as Administrator, this terminal must too, or the");
-        println!("  hook is installed but never receives anything. The [watching] line");
-        println!("  tells you which case you are in.");
+        match clipboard::process_is_elevated() {
+            Some(true) => println!("  elevation  this process IS running as Administrator."),
+            Some(false) => {
+                println!("  elevation  this process is NOT running as Administrator.");
+                println!();
+                println!("  >> If Path of Exile runs elevated, the mouse hook will install and");
+                println!("  >> then receive nothing while the game is focused — which looks");
+                println!("  >> exactly like you never clicked. If the [watching] line below");
+                println!("  >> reports 0 events while you are in the game, that is this.");
+                println!("  >> Fix: close this, right-click Terminal, Run as administrator.");
+            }
+            None => println!("  elevation  could not be determined"),
+        }
         println!();
         println!("  NOTE: every roll overwrites your clipboard. That is inherent here.");
         println!();
