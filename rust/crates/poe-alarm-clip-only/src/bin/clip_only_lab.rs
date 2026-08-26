@@ -100,9 +100,11 @@ mod app {
         /// Latency the OCR pipeline already meets, used as the pass mark.
         pub budget_ms: u64,
         /// Per-copy deadline. A healthy round trip is ~3ms and p99 is under
-        /// 10ms, so anything beyond a few dozen ms is the client declining to
-        /// answer, not a slow answer. Waiting it out blinds the poller for the
-        /// exact window the roll appears in.
+        /// 10ms, so anything longer is the client declining to answer rather
+        /// than answering slowly — and it declines for the whole time a craft
+        /// is in flight. The moment it answers again is the moment the new
+        /// roll exists, so this deadline is what sets detection lag: measured
+        /// staleness tracked it almost exactly (60ms deadline -> 81ms p50).
         pub copy_timeout_ms: u64,
         /// Overall deadline from the click.
         pub deadline_ms: u64,
@@ -149,7 +151,7 @@ mod app {
         fn default() -> Self {
             Self {
                 budget_ms: 120,
-                copy_timeout_ms: 60,
+                copy_timeout_ms: 25,
                 deadline_ms: 1_500,
                 poll_gap_ms: 12,
                 poll_gap_max_ms: 60,
@@ -657,6 +659,7 @@ mod app {
                 );
                 if !armed {
                     last_text = None;
+                    last_poll_at = None;
                     if STATE.load(Ordering::Acquire) != STATE_IDLE {
                         release();
                     }
@@ -667,6 +670,9 @@ mod app {
                 && STATE.load(Ordering::Acquire) != STATE_LOCKED
                 && last_click.is_some_and(|at| at.elapsed() < active_window);
             if !crafting {
+                // Not polling, so the next gap would span the whole pause and
+                // report as detection lag it never caused.
+                last_poll_at = None;
                 if let Ok(at) = clicks.recv_timeout(IDLE_TICK) {
                     last_click = Some(at);
                 }
