@@ -727,10 +727,22 @@ mod app {
                     if consecutive_timeouts == 25 && !warned_unanswered {
                         warned_unanswered = true;
                         println!();
-                        println!("  [nothing to copy] 25 copies in a row went unanswered.");
-                        println!("  Ctrl+C copies whatever the cursor is resting on, so this");
-                        println!("  means the cursor is not on an item right now. Put it on the");
-                        println!("  item you are rolling and leave it there.");
+                        println!("  [no answer] 25 copies in a row went unanswered. Two causes:");
+                        println!();
+                        println!("   1. The cursor is not resting on an item. Ctrl+C copies");
+                        println!("      whatever is under the pointer and nothing else.");
+                        println!();
+                        if clipboard::process_is_elevated() == Some(false) {
+                            println!("   2. This process is NOT elevated. UIPI stops a");
+                            println!("      medium-integrity process from injecting input into an");
+                            println!("      elevated window, so if Path of Exile runs as");
+                            println!("      Administrator the Ctrl+C never arrives. --no-hook does");
+                            println!("      not avoid this: sending the key needs the elevation,");
+                            println!("      not just the hook. Relaunch from an elevated terminal.");
+                        } else {
+                            println!("   2. Elevation is not it — this process is elevated, so");
+                            println!("      cause 1 is the one to check.");
+                        }
                         println!();
                     }
                     // A refusal is not a reason to stop watching. Retry
@@ -841,9 +853,16 @@ mod app {
         println!("  copy failures             {failures}");
         if rolls_seen == 0 && timeouts > 50 {
             println!();
-            println!("  Every copy went unanswered and no roll was ever seen. The cursor was");
-            println!("  not resting on an item, so there was nothing for Ctrl+C to copy.");
-            println!("  Hover the item first, then press Ctrl+Shift+F10.");
+            println!("  Every copy went unanswered and no roll was ever seen. Either the");
+            println!("  cursor was never on an item, or the key never reached the client.");
+            if clipboard::process_is_elevated() == Some(false) {
+                println!();
+                println!("  This process is not elevated. Sending input to an elevated window");
+                println!("  is blocked regardless of whether a hook is installed, so --no-hook");
+                println!("  does not remove the Administrator requirement — only the hook.");
+                println!("  Rerun this same command from an elevated terminal to tell the two");
+                println!("  causes apart.");
+            }
             println!();
         }
         println!("  cursor on a different item {different_item}  (skipped, baseline reset)");
@@ -1364,7 +1383,14 @@ mod app {
         println!();
         if options.no_hook {
             println!("  hook       none — press Ctrl+Shift+F10 to start and stop monitoring");
-            println!("  elevation  not required, because no mouse hook is installed.");
+            match clipboard::process_is_elevated() {
+                Some(true) => println!("  elevation  elevated (still needed: Ctrl+C has to reach the client)"),
+                Some(false) => {
+                    println!("  elevation  NOT elevated — no hook is installed, but sending Ctrl+C");
+                    println!("             to an elevated client is blocked all the same.");
+                }
+                None => println!("  elevation  could not be determined"),
+            }
         } else {
             match clipboard::process_is_elevated() {
                 Some(true) => println!("  elevation  this process IS running as Administrator."),
