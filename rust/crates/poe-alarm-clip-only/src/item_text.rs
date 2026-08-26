@@ -15,6 +15,8 @@ pub struct ParsedItem {
     pub rarity: Option<String>,
     /// Item level value as written, when present.
     pub item_level: Option<String>,
+    /// Item class as written, when present.
+    pub item_class: Option<String>,
     /// True when the dump carried a corruption marker.
     pub corrupted: bool,
 }
@@ -97,6 +99,13 @@ const FLAG_LINES: &[&str] = &[
 ];
 
 const ITEM_LEVEL_KEYS: &[&str] = &["itemlevel:", "物品等級:", "物品等级:"];
+const ITEM_CLASS_KEYS: &[&str] = &[
+    "itemclass:",
+    "物品類別:",
+    "物品类别:",
+    "物品種類:",
+    "物品种类:",
+];
 const RARITY_KEYS: &[&str] = &["rarity:", "稀有度:"];
 const CORRUPTED_KEYS: &[&str] = &["corrupted", "已腐化"];
 
@@ -196,6 +205,9 @@ pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
             if let Some(value) = value_after_key(line, RARITY_KEYS) {
                 parsed.rarity = Some(value.to_string());
             }
+            if let Some(value) = value_after_key(line, ITEM_CLASS_KEYS) {
+                parsed.item_class = Some(value.to_string());
+            }
             if starts_with_any(&compact(line), CORRUPTED_KEYS) {
                 parsed.corrupted = true;
             }
@@ -252,6 +264,37 @@ pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
     }
     parsed.affix_lines = affix_lines;
     Ok(parsed)
+}
+
+impl ParsedItem {
+    /// Fields that survive any amount of crafting on one physical item.
+    ///
+    /// The name is not one of them — prefixes and suffixes rewrite it every
+    /// reroll — and neither is the level requirement, which rises with affix
+    /// tier. Class and item level do not move, so a change here means the
+    /// cursor is over a different item, not that the item was rerolled.
+    /// Rarity is deliberately excluded so a regal or alchemy still reads as
+    /// the same item.
+    #[must_use]
+    pub fn identity(&self) -> (Option<&str>, Option<&str>) {
+        (self.item_class.as_deref(), self.item_level.as_deref())
+    }
+
+    /// True when `other` describes the same physical item.
+    ///
+    /// Unknown identity on either side is treated as a match: refusing to
+    /// evaluate on missing metadata would drop real rolls, and the caller
+    /// still has fail-closed for anything it cannot read at all.
+    #[must_use]
+    pub fn is_same_item_as(&self, other: &Self) -> bool {
+        let (left_class, left_level) = self.identity();
+        let (right_class, right_level) = other.identity();
+        let agrees = |left: Option<&str>, right: Option<&str>| match (left, right) {
+            (Some(left), Some(right)) => left == right,
+            _ => true,
+        };
+        agrees(left_class, right_class) && agrees(left_level, right_level)
+    }
 }
 
 /// Cheap guard used before timing a sample: does this payload even look like an
@@ -456,5 +499,56 @@ mod tests {
     fn full_width_colons_fold_to_ascii_for_key_matching() {
         assert_eq!(compact("物品等級：83"), "物品等級:83");
         assert_eq!(compact("Item Level: 83"), "itemlevel:83");
+    }
+
+    #[test]
+    fn rerolling_preserves_item_identity() {
+        let first = parse(TRADITIONAL_ABYSS_JEWEL).expect("parses");
+        // A reroll rewrites the name and the affixes but not class or ilvl.
+        let rerolled = TRADITIONAL_ABYSS_JEWEL
+            .replace("放電的殺戮之眼珠寶", "火花的殺戮之眼珠寶")
+            .replace(
+                "錘和權杖攻擊附加 2(2-4) 至 42(40-43) 閃電攻擊",
+                "+29(26-30) 最大生命",
+            );
+        let second = parse(&rerolled).expect("parses");
+        assert!(first.is_same_item_as(&second));
+        assert_ne!(first.affix_lines, second.affix_lines);
+    }
+
+    #[test]
+    fn a_different_item_level_is_a_different_item() {
+        let first = parse(TRADITIONAL_ABYSS_JEWEL).expect("parses");
+        let other = parse(&TRADITIONAL_ABYSS_JEWEL.replace("物品等級：83", "物品等級：72"))
+            .expect("parses");
+        assert!(!first.is_same_item_as(&other));
+    }
+
+    #[test]
+    fn a_different_class_is_a_different_item() {
+        let first = parse(TRADITIONAL_ABYSS_JEWEL).expect("parses");
+        let other = parse(&TRADITIONAL_ABYSS_JEWEL.replace("物品種類：深淵珠寶", "物品種類：戒指"))
+            .expect("parses");
+        assert!(!first.is_same_item_as(&other));
+    }
+
+    #[test]
+    fn rarity_changing_still_reads_as_the_same_item() {
+        // Regal orb: magic -> rare must not look like the cursor moved.
+        let first = parse(TRADITIONAL_ABYSS_JEWEL).expect("parses");
+        let regaled =
+            parse(&TRADITIONAL_ABYSS_JEWEL.replace("稀有度：魔法", "稀有度：稀有")).expect("parses");
+        assert!(first.is_same_item_as(&regaled));
+    }
+
+    #[test]
+    fn missing_metadata_does_not_claim_a_mismatch() {
+        let known = parse(TRADITIONAL_ABYSS_JEWEL).expect("parses");
+        let english = parse(ENGLISH_MAGIC_RING).expect("parses");
+        assert_eq!(english.item_class.as_deref(), Some("Rings"));
+        let mut blank = english.clone();
+        blank.item_class = None;
+        blank.item_level = None;
+        assert!(known.is_same_item_as(&blank));
     }
 }

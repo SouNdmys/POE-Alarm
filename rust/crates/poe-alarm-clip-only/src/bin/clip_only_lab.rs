@@ -48,7 +48,10 @@ mod app {
         self, ClipboardError, KeyMethod, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground,
     };
     use poe_alarm_clip_only::stats::{LatencySamples, format_millis};
-    use poe_alarm_clip_only::{LabProfile, Verdict, describes_same_roll, evaluate_payload};
+    use poe_alarm_clip_only::{
+        LabProfile, ParsedItem, Verdict, describes_same_roll, evaluate_item, evaluate_payload,
+        item_text,
+    };
 
     const STATE_IDLE: u8 = 0;
     const STATE_DECIDING: u8 = 1;
@@ -622,7 +625,10 @@ mod app {
 
         let mut last_click: Option<Instant> = None;
         let mut last_text: Option<String> = None;
+        let mut last_item: Option<ParsedItem> = None;
         let mut armed = false;
+        let mut different_item = 0_u64;
+        let mut unreadable = 0_u64;
         let mut rolls_seen = 0_u64;
         let mut hits = 0_u64;
         let mut failures = 0_u64;
@@ -659,6 +665,7 @@ mod app {
                 );
                 if !armed {
                     last_text = None;
+                    last_item = None;
                     last_poll_at = None;
                     if STATE.load(Ordering::Acquire) != STATE_IDLE {
                         release();
@@ -715,8 +722,41 @@ mod app {
                 continue;
             }
 
+            let item = match item_text::parse(&outcome.text) {
+                Ok(item) => item,
+                Err(_) => {
+                    // Readable clipboard, unreadable item. Leave the baseline
+                    // alone so the real roll is still waiting to be judged.
+                    unreadable += 1;
+                    std::thread::sleep(interval);
+                    continue;
+                }
+            };
+
+            // The text changing is not proof the *same* item was rerolled. A
+            // cursor that drifted onto another item also changes it, and
+            // accepting that would judge the wrong affixes and, worse, adopt
+            // them as the baseline — after which the real roll never gets
+            // looked at again. That is a silently missed alarm, which
+            // fail-closed cannot catch because the payload was perfectly valid.
+            if let Some(previous) = &last_item
+                && !previous.is_same_item_as(&item)
+            {
+                different_item += 1;
+                println!(
+                    "  [cursor moved] now over a different item ({} / ilvl {}) — not judged",
+                    item.item_class.as_deref().unwrap_or("?"),
+                    item.item_level.as_deref().unwrap_or("?")
+                );
+                last_text = Some(outcome.text);
+                last_item = Some(item);
+                std::thread::sleep(interval);
+                continue;
+            }
+
             let first_read = last_text.is_none();
             last_text = Some(outcome.text.clone());
+            last_item = Some(item.clone());
             if first_read {
                 // Nothing to compare against yet; this only establishes state.
                 continue;
@@ -728,7 +768,7 @@ mod app {
             if let Some(gap) = gap {
                 staleness.push(gap);
             }
-            let verdict = evaluate_payload(&profile.rules, &outcome.text);
+            let verdict = evaluate_item(&profile.rules, item);
             println!(
                 "  roll {rolls_seen:<4} seen {:<9} {:<5} ({} lines)",
                 format_millis(since_click),
@@ -759,6 +799,8 @@ mod app {
         println!("  rolls seen                {rolls_seen}");
         println!("  hits                      {hits}");
         println!("  copy failures             {failures}");
+        println!("  cursor on a different item {different_item}  (skipped, baseline reset)");
+        println!("  unparsable payloads       {unreadable}");
         println!(
             "  clicks swallowed          {}  (only a hit blocks anything)",
             SWALLOWED.load(Ordering::Relaxed)

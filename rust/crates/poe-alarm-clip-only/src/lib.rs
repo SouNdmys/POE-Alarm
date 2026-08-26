@@ -146,10 +146,16 @@ impl Verdict {
 /// Parses a clipboard payload and runs it through the compiled rules.
 #[must_use]
 pub fn evaluate_payload(rules: &CompiledRuleSet, payload: &str) -> Verdict {
-    let item = match item_text::parse(payload) {
-        Ok(item) => item,
-        Err(error) => return Verdict::Unreadable(error),
-    };
+    match item_text::parse(payload) {
+        Ok(item) => evaluate_item(rules, item),
+        Err(error) => Verdict::Unreadable(error),
+    }
+}
+
+/// Runs an already-parsed item through the compiled rules, so a caller that
+/// needed the parse for other reasons does not pay for it twice.
+#[must_use]
+pub fn evaluate_item(rules: &CompiledRuleSet, item: ParsedItem) -> Verdict {
     let evaluation = Box::new(rules.evaluate(&item.affix_lines));
     if evaluation.is_match {
         Verdict::Hit { item, evaluation }
