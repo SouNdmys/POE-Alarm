@@ -359,12 +359,18 @@ mod app {
                     }
                     *baseline = Some(outcome.text);
 
+                    let modifiers = outcome.suppressed_modifiers;
                     println!(
-                        "  #{index:<4} copies {copies:<3} first {:<8} verdict {:<8} {:<5} ({} lines)",
+                        "  #{index:<4} copies {copies:<3} first {:<8} verdict {:<8} {:<5} ({} lines){}",
                         format_millis(first_copy.unwrap_or_default()),
                         format_millis(decided),
                         verdict.label(),
-                        verdict.affix_count()
+                        verdict.affix_count(),
+                        if modifiers.any() {
+                            format!("  [held {modifiers}]")
+                        } else {
+                            String::new()
+                        }
                     );
 
                     match verdict {
@@ -689,7 +695,9 @@ mod app {
         println!("  clipboard check — {samples} copies, {} keys", options.key_method);
         println!();
         println!("  Switch to the game and hover the item you are rolling.");
-        println!("  Do not hold a currency orb on the cursor for this test.");
+        println!("  Reproduce real crafting conditions: hold Shift with the orb on the");
+        println!("  cursor, exactly as when you spam. Held modifiers are lifted around");
+        println!("  each Ctrl+C and restored afterwards, and this checks that works.");
         println!();
         for remaining in (1..=5).rev() {
             println!("  starting in {remaining}...");
@@ -707,6 +715,7 @@ mod app {
         let mut latencies = LatencySamples::with_capacity(samples);
         let mut failures: Vec<String> = Vec::new();
         let mut first_text: Option<String> = None;
+        let mut with_modifiers = 0_usize;
 
         for index in 0..samples {
             if !game_is_foreground() {
@@ -717,6 +726,9 @@ mod app {
                 Ok(outcome) => {
                     if first_text.is_none() {
                         first_text = Some(outcome.text.clone());
+                    }
+                    if outcome.suppressed_modifiers.any() {
+                        with_modifiers += 1;
                     }
                     latencies.push(outcome.total());
                 }
@@ -733,6 +745,9 @@ mod app {
         println!("=== clipboard check ===");
         println!("  succeeded  {}/{samples}", latencies.len());
         println!("  failed     {}", failures.len());
+        println!(
+            "  copies that had to lift a held modifier  {with_modifiers}"
+        );
         println!("{}", latencies.summary("round trip"));
         for failure in &failures {
             println!("    {failure}");

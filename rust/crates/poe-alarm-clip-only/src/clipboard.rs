@@ -162,6 +162,8 @@ pub struct CopyOutcome {
     pub read_time: Duration,
     /// How many `OpenClipboard` attempts the read needed.
     pub open_attempts: u32,
+    /// Modifiers the user was physically holding, which had to be lifted.
+    pub suppressed_modifiers: HeldModifiers,
 }
 
 impl CopyOutcome {
@@ -201,9 +203,11 @@ impl std::fmt::Display for KeyMethod {
     }
 }
 
-/// Set 1 scan codes for the two keys involved.
+/// Set 1 scan codes for the keys involved.
 const SCAN_LCONTROL: u16 = 0x1D;
 const SCAN_C: u16 = 0x2E;
+const SCAN_LSHIFT: u16 = 0x2A;
+const SCAN_LALT: u16 = 0x38;
 
 /// Sends a synthetic Ctrl+C to the foreground window.
 pub fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
@@ -235,12 +239,31 @@ pub fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
             },
         }
     };
-    let inputs = [
+    // Continuous crafting is done with Shift held, which is exactly when we
+    // need to copy. The physical Shift is part of the system keyboard state, so
+    // a synthetic Ctrl+C arrives at the client as Ctrl+Shift+C and copies
+    // nothing. Lift the offending modifiers for the duration and put them back,
+    // so the user's held keys survive the round trip.
+    let held = held_modifiers();
+    let mut inputs = Vec::with_capacity(8);
+    if held.shift {
+        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, true));
+    }
+    if held.alt {
+        inputs.push(key(VK_MENU, SCAN_LALT, true));
+    }
+    inputs.extend([
         key(VK_CONTROL, SCAN_LCONTROL, false),
         key(VK_C, SCAN_C, false),
         key(VK_C, SCAN_C, true),
         key(VK_CONTROL, SCAN_LCONTROL, true),
-    ];
+    ]);
+    if held.alt {
+        inputs.push(key(VK_MENU, SCAN_LALT, false));
+    }
+    if held.shift {
+        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, false));
+    }
     let expected = inputs.len() as u32;
     // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
     let delivered = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
@@ -325,6 +348,7 @@ pub fn copy_hovered_item(
     method: KeyMethod,
 ) -> Result<CopyOutcome, ClipboardError> {
     let baseline = sequence_number();
+    let held = held_modifiers();
     let started = Instant::now();
     send_ctrl_c(method)?;
 
@@ -353,6 +377,7 @@ pub fn copy_hovered_item(
     })?;
     Ok(CopyOutcome {
         text,
+        suppressed_modifiers: held,
         client_round_trip,
         read_time: read_started.elapsed(),
         open_attempts,
