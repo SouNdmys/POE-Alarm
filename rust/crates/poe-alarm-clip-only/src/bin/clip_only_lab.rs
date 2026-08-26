@@ -99,8 +99,13 @@ mod app {
         pub copy_timeout_ms: u64,
         /// Overall deadline from the click.
         pub deadline_ms: u64,
-        /// Pause between copies while waiting for the craft to resolve.
+        /// First pause between copies while waiting for the craft to resolve.
+        /// Grows geometrically up to `poll_gap_max_ms`: a tight loop sends the
+        /// client ~80 copies a second, each one also toggling the held Shift,
+        /// which is both wasteful and a plausible way to disturb the game.
         pub poll_gap_ms: u64,
+        /// Ceiling for the backoff.
+        pub poll_gap_max_ms: u64,
         /// Delay before the very first copy, to skip a doomed early attempt.
         pub first_delay_ms: u64,
         /// How Ctrl+C is synthesized.
@@ -119,7 +124,8 @@ mod app {
                 budget_ms: 120,
                 copy_timeout_ms: 600,
                 deadline_ms: 1_500,
-                poll_gap_ms: 0,
+                poll_gap_ms: 12,
+                poll_gap_max_ms: 60,
                 first_delay_ms: 0,
                 key_method: KeyMethod::VirtualKey,
                 unlock_after_ms: 4_000,
@@ -260,6 +266,14 @@ mod app {
         STATE.store(STATE_IDLE, Ordering::Release);
     }
 
+    /// Sleeps for the current gap and widens it for the next attempt.
+    fn back_off(gap: &mut u64, options: &Options) {
+        if *gap > 0 {
+            std::thread::sleep(Duration::from_millis(*gap));
+        }
+        *gap = (*gap * 3 / 2).clamp(1, options.poll_gap_max_ms.max(1));
+    }
+
     /// One click: poll the clipboard until the item text changes, then judge.
     fn handle_roll(
         profile: &LabProfile,
@@ -275,6 +289,7 @@ mod app {
         let mut copies = 0_u32;
         let mut first_copy: Option<Duration> = None;
         let mut last_error: Option<ClipboardError> = None;
+        let mut gap = options.poll_gap_ms;
 
         if options.first_delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(options.first_delay_ms));
@@ -319,9 +334,7 @@ mod app {
                 // when the whole deadline expires.
                 Err(error) if error.is_transient() => {
                     last_error = Some(error);
-                    if options.poll_gap_ms > 0 {
-                        std::thread::sleep(Duration::from_millis(options.poll_gap_ms));
-                    }
+                    back_off(&mut gap, options);
                     continue;
                 }
                 Err(error) => {
@@ -344,11 +357,7 @@ mod app {
                 // item looked like before the orb landed.
                 None => *baseline = Some(outcome.text),
                 // The server has not resolved the craft yet. Ask again.
-                Some(true) => {
-                    if options.poll_gap_ms > 0 {
-                        std::thread::sleep(Duration::from_millis(options.poll_gap_ms));
-                    }
-                }
+                Some(true) => back_off(&mut gap, options),
                 Some(false) => {
                     let verdict = evaluate_payload(&profile.rules, &outcome.text);
                     let decided = click_at.elapsed();
@@ -388,7 +397,14 @@ mod app {
                             println!("  ==========================================================");
                             lock("target affix reached", false);
                         }
-                        Verdict::Miss { .. } => release(),
+                        Verdict::Miss { .. } => {
+                            if copies > 12 {
+                                println!(
+                                    "        note: {copies} copies for one roll — the craft took a while"
+                                );
+                            }
+                            release();
+                        }
                         Verdict::Unreadable(error) => {
                             totals.fail_closed += 1;
                             lock(&format!("clipboard payload unreadable: {error}"), true);
@@ -670,6 +686,7 @@ mod app {
                 "--copy-timeout-ms" => options.copy_timeout_ms = value()?,
                 "--deadline-ms" => options.deadline_ms = value()?,
                 "--poll-gap-ms" => options.poll_gap_ms = value()?,
+                "--poll-gap-max-ms" => options.poll_gap_max_ms = value()?,
                 "--first-delay-ms" => options.first_delay_ms = value()?,
                 "--unlock-after-ms" => options.unlock_after_ms = value()?,
                 "--test-copy" => options.test_copy = Some(value()? as usize),
