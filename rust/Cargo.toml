@@ -5,6 +5,7 @@ members = [
     "crates/poe-alarm-app",
     "crates/poe-alarm-app-win",
     "crates/poe-alarm-clip-only",
+    "crates/poe-alarm-clipboard",
     "crates/poe-alarm-core",
     "crates/poe-alarm-monitoring",
     "crates/poe-alarm-ocr-paddle",
