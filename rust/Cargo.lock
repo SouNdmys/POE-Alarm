@@ -4208,9 +4208,18 @@ dependencies = [
 name = "poe-alarm-clip-only"
 version = "1.0.0"
 dependencies = [
+ "poe-alarm-clipboard",
  "poe-alarm-core",
+ "poe-alarm-platform-win",
  "poe-alarm-settings",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "poe-alarm-clipboard"
+version = "1.0.0"
+dependencies = [
+ "poe-alarm-core",
 ]
 
 [[package]]
@@ -4226,7 +4235,6 @@ name = "poe-alarm-monitoring"
 version = "1.0.0"
 dependencies = [
  "poe-alarm-core",
- "poe-alarm-vision",
 ]
 
 [[package]]

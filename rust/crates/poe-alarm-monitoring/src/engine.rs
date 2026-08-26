@@ -1,51 +1,19 @@
 use std::collections::HashSet;
-use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use poe_alarm_core::RuleEvaluationResult;
-use poe_alarm_vision::{
-    BlueMaskSettings, BlueTextMask, CaptureError, CaptureRegion, CapturedFrame, ScreenCapture,
-    build_blue_mask_into,
-};
 
 use crate::{
-    CancellationToken, EventSink, MonitorClock, MonitorDetection, MonitorEvent, MonitorPlan,
-    MonitorSnapshot, MonitorState, OcrRecognizer, PreparedFrame, RecognitionResult, ScanPace,
-    SessionId, StartError, StopError, StructuredOcrSupport,
+    AffixSource, CancellationToken, EventSink, MonitorClock, MonitorDetection, MonitorEvent,
+    MonitorPlan, MonitorSnapshot, MonitorState, RecognitionResult, ScanPace, SessionId, StartError,
+    StopError, StructuredOcrSupport,
 };
 
-/// Capture boundary used by the platform-neutral worker.
-pub trait FrameCapture: Send + 'static {
-    type Error: fmt::Display + Send + 'static;
-
-    fn capture_into(
-        &mut self,
-        region: CaptureRegion,
-        destination: &mut CapturedFrame,
-    ) -> Result<(), Self::Error>;
-}
-
-impl<T> FrameCapture for T
-where
-    T: ScreenCapture + Send + 'static,
-{
-    type Error = CaptureError;
-
-    fn capture_into(
-        &mut self,
-        region: CaptureRegion,
-        destination: &mut CapturedFrame,
-    ) -> Result<(), Self::Error> {
-        ScreenCapture::capture_into(self, region, destination)
-    }
-}
-
-struct Resources<C, R, K> {
-    capture: C,
-    recognizer: R,
+struct Resources<S, K> {
+    source: S,
     clock: K,
 }
 
@@ -123,44 +91,31 @@ impl SessionControl {
 /// `stop` invalidates the current session and requests OCR cancellation before it waits for the
 /// worker. Consequently an OCR result that returns after stop began cannot claim MatchFound or
 /// emit a detection.
-pub struct Monitor<C, R, K, E>
+pub struct Monitor<S, K, E>
 where
-    C: FrameCapture,
-    R: OcrRecognizer,
+    S: AffixSource,
     K: MonitorClock,
     E: EventSink,
 {
-    resources: Option<Resources<C, R, K>>,
-    worker: Option<JoinHandle<Resources<C, R, K>>>,
+    resources: Option<Resources<S, K>>,
+    worker: Option<JoinHandle<Resources<S, K>>>,
     shared: Arc<SharedState>,
     events: Arc<E>,
-    mask_settings: BlueMaskSettings,
 }
 
-impl<C, R, K, E> Monitor<C, R, K, E>
+impl<S, K, E> Monitor<S, K, E>
 where
-    C: FrameCapture,
-    R: OcrRecognizer,
+    S: AffixSource,
     K: MonitorClock,
     E: EventSink,
 {
-    pub fn new(capture: C, recognizer: R, clock: K, events: E) -> Self {
+    pub fn new(source: S, clock: K, events: E) -> Self {
         Self {
-            resources: Some(Resources {
-                capture,
-                recognizer,
-                clock,
-            }),
+            resources: Some(Resources { source, clock }),
             worker: None,
             shared: Arc::new(SharedState::default()),
             events: Arc::new(events),
-            mask_settings: BlueMaskSettings::default(),
         }
-    }
-
-    pub fn with_mask_settings(mut self, settings: BlueMaskSettings) -> Self {
-        self.mask_settings = settings;
-        self
     }
 
     pub fn state(&self) -> MonitorState {
@@ -181,11 +136,7 @@ where
             .map(|session| session.id)
     }
 
-    pub fn start(
-        &mut self,
-        plan: MonitorPlan,
-        region: CaptureRegion,
-    ) -> Result<SessionId, StartError> {
+    pub fn start(&mut self, plan: MonitorPlan) -> Result<SessionId, StartError> {
         self.reap_finished()?;
 
         {
@@ -207,7 +158,7 @@ where
                 .resources
                 .as_ref()
                 .expect("idle monitor retains its worker resources")
-                .recognizer
+                .source
                 .structured_support()
                 == StructuredOcrSupport::Unsupported
         {
@@ -234,18 +185,9 @@ where
             .expect("idle monitor retains its worker resources");
         let shared = Arc::clone(&self.shared);
         let events = Arc::clone(&self.events);
-        let mask_settings = self.mask_settings;
         let session_id = session.id;
         self.worker = Some(thread::spawn(move || {
-            run_worker(
-                resources,
-                plan,
-                region,
-                mask_settings,
-                session,
-                shared,
-                events,
-            )
+            run_worker(resources, plan, session, shared, events)
         }));
         Ok(session_id)
     }
@@ -320,10 +262,9 @@ where
     }
 }
 
-impl<C, R, K, E> Drop for Monitor<C, R, K, E>
+impl<S, K, E> Drop for Monitor<S, K, E>
 where
-    C: FrameCapture,
-    R: OcrRecognizer,
+    S: AffixSource,
     K: MonitorClock,
     E: EventSink,
 {
@@ -334,80 +275,74 @@ where
     }
 }
 
-fn run_worker<C, R, K, E>(
-    mut resources: Resources<C, R, K>,
+fn run_worker<S, K, E>(
+    mut resources: Resources<S, K>,
     plan: MonitorPlan,
-    region: CaptureRegion,
-    mask_settings: BlueMaskSettings,
     session: Arc<SessionControl>,
     shared: Arc<SharedState>,
     events: Arc<E>,
-) -> Resources<C, R, K>
+) -> Resources<S, K>
 where
-    C: FrameCapture,
-    R: OcrRecognizer,
+    S: AffixSource,
     K: MonitorClock,
     E: EventSink,
 {
-    run_loop(
-        &mut resources,
-        &plan,
-        region,
-        mask_settings,
-        &session,
-        &shared,
-        events.as_ref(),
-    );
+    run_loop(&mut resources, &plan, &session, &shared, events.as_ref());
     // Match callbacks synchronously latch the alert before returning. This release therefore
     // relinquishes only the monitor's short pre-recognition request.
     session.release_guard(events.as_ref());
     resources
 }
 
-fn run_loop<C, R, K, E>(
-    resources: &mut Resources<C, R, K>,
+fn run_loop<S, K, E>(
+    resources: &mut Resources<S, K>,
     plan: &MonitorPlan,
-    region: CaptureRegion,
-    mask_settings: BlueMaskSettings,
     session: &SessionControl,
     shared: &SharedState,
     events: &E,
 ) where
-    C: FrameCapture,
-    R: OcrRecognizer,
+    S: AffixSource,
     K: MonitorClock,
     E: EventSink,
 {
-    let mut frame = CapturedFrame::default();
-    let mut blue_mask = BlueTextMask::default();
-    let mut accepted: Option<(u64, Vec<String>)> = None;
     let mut scan_count = 0_u64;
 
     while is_running(shared, session.id, &session.cancellation) {
-        let capture_started = resources.clock.now();
-        if let Err(error) = resources.capture.capture_into(region, &mut frame) {
-            fault(shared, session, events, scan_count, error.to_string());
+        let read_started = resources.clock.now();
+
+        // Armed before the reading rather than after, because with a source
+        // that answers in milliseconds the reading *is* the decision point.
+        if !session.request_guard(shared, events) {
             return;
         }
+
+        let reading = match resources.source.read(plan, &session.cancellation) {
+            Ok(reading) => reading,
+            Err(error) => {
+                fault(shared, session, events, scan_count, error.to_string());
+                return;
+            }
+        };
+        let read_elapsed = resources.clock.now().saturating_sub(read_started);
+
+        // Stop linearizes by invalidating this session before it waits for a
+        // reading. Never evaluate or publish evidence that returned after that
+        // point.
         if !is_running(shared, session.id, &session.cancellation) {
             return;
         }
+        scan_count = scan_count.saturating_add(1);
 
-        build_blue_mask_into(&frame, mask_settings, &mut blue_mask);
-        let capture_elapsed = resources.clock.now().saturating_sub(capture_started);
-        let fingerprint = blue_mask.fingerprint();
-
-        if let Some((accepted_fingerprint, accepted_lines)) = &accepted
-            && fingerprint == *accepted_fingerprint
-        {
-            scan_count = scan_count.saturating_add(1);
+        // The source reports that the item has not moved since the previous
+        // reading, so evaluation would reach the verdict it already reached.
+        if reading.was_cached {
             session.release_guard(events);
             let snapshot = running_snapshot(
                 session.id,
                 scan_count,
-                capture_elapsed,
-                Duration::ZERO,
-                accepted_lines.clone(),
+                read_elapsed,
+                reading.total_elapsed(),
+                reading.lines,
                 true,
             );
             emit_running(shared, session, events, MonitorEvent::Snapshot(snapshot));
@@ -417,45 +352,7 @@ fn run_loop<C, R, K, E>(
             continue;
         }
 
-        if !session.request_guard(shared, events) {
-            return;
-        }
-
-        let prepared = PreparedFrame {
-            frame: &frame,
-            blue_mask: &blue_mask,
-            semantic_fingerprint: fingerprint,
-        };
-        let recognition = match plan {
-            MonitorPlan::Quick(target) => {
-                resources
-                    .recognizer
-                    .recognize_quick(prepared, target, &session.cancellation)
-            }
-            MonitorPlan::Structured(rules) => resources.recognizer.recognize_structured(
-                prepared,
-                rules.targets(),
-                &session.cancellation,
-            ),
-        };
-        let recognition = match recognition {
-            Ok(result) => result,
-            Err(error) => {
-                fault(shared, session, events, scan_count, error.to_string());
-                return;
-            }
-        };
-        scan_count = scan_count.saturating_add(1);
-
-        // Stop linearizes by invalidating this session before it waits for OCR. Never evaluate or
-        // publish evidence that returned after that point.
-        if !is_running(shared, session.id, &session.cancellation) {
-            return;
-        }
-
-        if let Some(detection) =
-            evaluate(plan, &recognition, session.id, scan_count, capture_elapsed)
-        {
+        if let Some(detection) = evaluate(plan, &reading, session.id, scan_count, read_elapsed) {
             if !try_claim_match(shared, session) {
                 return;
             }
@@ -465,27 +362,21 @@ fn run_loop<C, R, K, E>(
             return;
         }
 
+        let pace = if reading.requires_rescan {
+            ScanPace::ProgressiveYield
+        } else {
+            session.release_guard(events);
+            ScanPace::UncachedDelay
+        };
         let snapshot = running_snapshot(
             session.id,
             scan_count,
-            capture_elapsed,
-            recognition.total_elapsed(),
-            recognition.lines.clone(),
-            recognition.was_cached,
+            read_elapsed,
+            reading.total_elapsed(),
+            reading.lines,
+            reading.was_cached,
         );
         emit_running(shared, session, events, MonitorEvent::Snapshot(snapshot));
-
-        let pace = if recognition.requires_rescan {
-            ScanPace::ProgressiveYield
-        } else {
-            accepted = Some((fingerprint, recognition.lines));
-            session.release_guard(events);
-            if recognition.was_cached {
-                ScanPace::CachedDelay
-            } else {
-                ScanPace::UncachedDelay
-            }
-        };
         resources.clock.pace(pace, &session.cancellation);
     }
 }

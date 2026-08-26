@@ -1,41 +1,35 @@
-//! Clipboard-only affix recognition. No pixels are read at any point.
+//! Field harness for the clipboard recognition path.
 //!
-//! The previous experiment used a screen fingerprint to answer "did the orb
-//! land yet", which dragged in a capture region, a blue mask, and a tolerance
-//! threshold — three things to configure and three things to get wrong. All of
-//! that existed to save one clipboard round trip.
+//! Everything of substance now lives in the production crates: parsing in
+//! `poe-alarm-clipboard`, the Win32 capture in `poe-alarm-platform-win`. This
+//! crate is the thin shell that drives them from a console so the behaviour can
+//! be measured against a running client — which is the one thing a unit test
+//! cannot do.
 //!
-//! This version deletes it. The clipboard text answers both questions by
-//! itself: if the text differs from the text before the click, the roll landed,
-//! and the text *is* the affix list. There is no region to select, no mask to
-//! tune, no threshold to calibrate, and nothing to recalibrate when the scene
-//! behind the tooltip changes.
-//!
-//! The cost is one or more extra Ctrl+C round trips while the server is still
-//! resolving the craft. Whether that lands inside the OCR pipeline's budget is
-//! exactly what the binary measures.
+//! Keeping it pointed at the production code is deliberate. A copy would let
+//! the harness and the shipped path drift, and then a good field run would
+//! prove nothing about what users actually get.
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
-pub mod item_text;
 pub mod stats;
 
-#[cfg(windows)]
-pub mod clipboard;
+/// The Win32 capture surface, under the name the harness has always used.
+pub use poe_alarm_platform_win as clipboard;
 
-use std::fmt;
-
+use poe_alarm_clipboard::{ModFilter, ParsedItem};
 use poe_alarm_core::{CompiledRuleSet, RuleEvaluationResult};
 use poe_alarm_settings::SettingsStore;
+use std::fmt;
 
-pub use item_text::{ItemTextError, ParsedItem};
+pub use poe_alarm_clipboard::{ItemTextError, ModGroup, ModKind, parse};
 pub use stats::{LatencySamples, format_millis};
 
-/// Everything the lab needs from the user's real configuration.
+/// Everything the harness needs from the user's real configuration.
 ///
-/// Notably absent: a capture region. This pipeline never looks at the screen,
-/// so the one piece of setup that had to be re-done whenever the UI moved is
-/// simply not part of it.
+/// Notably absent: a capture region. This path never looks at the screen, so
+/// the one piece of setup that had to be redone whenever the UI moved is not
+/// part of it.
 pub struct LabProfile {
     /// Rules compiled from the user's saved rule set.
     pub rules: CompiledRuleSet,
@@ -47,7 +41,7 @@ pub struct LabProfile {
     pub settings_path: String,
 }
 
-/// Why the lab could not build a profile from saved settings.
+/// Why the harness could not build a profile from saved settings.
 #[derive(Debug)]
 pub enum ProfileError {
     /// The settings file could not be located or opened.
@@ -101,12 +95,12 @@ impl LabProfile {
 pub enum Verdict {
     /// The payload parsed and the rules matched.
     Hit {
-        item: ParsedItem,
+        item: Box<ParsedItem>,
         evaluation: Box<RuleEvaluationResult>,
     },
     /// The payload parsed and the rules did not match.
     Miss {
-        item: ParsedItem,
+        item: Box<ParsedItem>,
         evaluation: Box<RuleEvaluationResult>,
     },
     /// The payload could not be read as an item.
@@ -119,7 +113,7 @@ impl Verdict {
         matches!(self, Self::Hit { .. })
     }
 
-    /// True when the lab could not form an opinion, which must fail closed.
+    /// True when no opinion could be formed, which callers must fail closed on.
     #[must_use]
     pub fn is_undecided(&self) -> bool {
         matches!(self, Self::Unreadable(_))
@@ -134,11 +128,36 @@ impl Verdict {
         }
     }
 
+    /// Modifier lines the rules were run against.
     #[must_use]
-    pub fn affix_count(&self) -> usize {
+    pub fn line_count(&self) -> usize {
         match self {
-            Self::Hit { item, .. } | Self::Miss { item, .. } => item.affix_lines.len(),
+            Self::Hit { item, .. } | Self::Miss { item, .. } => {
+                item.groups.iter().map(|group| group.lines.len()).sum()
+            }
             Self::Unreadable(_) => 0,
+        }
+    }
+
+    /// Modifiers the rules were run against, as distinct physical affixes.
+    #[must_use]
+    pub fn modifier_count(&self) -> usize {
+        match self {
+            Self::Hit { item, .. } | Self::Miss { item, .. } => item.groups.len(),
+            Self::Unreadable(_) => 0,
+        }
+    }
+
+    /// Every modifier line, flattened, for display.
+    #[must_use]
+    pub fn lines(&self) -> Vec<&str> {
+        match self {
+            Self::Hit { item, .. } | Self::Miss { item, .. } => item
+                .groups
+                .iter()
+                .flat_map(|group| group.lines.iter().map(String::as_str))
+                .collect(),
+            Self::Unreadable(_) => Vec::new(),
         }
     }
 }
@@ -146,17 +165,22 @@ impl Verdict {
 /// Parses a clipboard payload and runs it through the compiled rules.
 #[must_use]
 pub fn evaluate_payload(rules: &CompiledRuleSet, payload: &str) -> Verdict {
-    match item_text::parse(payload) {
+    match parse(payload, ModFilter::default()) {
         Ok(item) => evaluate_item(rules, item),
         Err(error) => Verdict::Unreadable(error),
     }
 }
 
-/// Runs an already-parsed item through the compiled rules, so a caller that
-/// needed the parse for other reasons does not pay for it twice.
+/// Runs an already-parsed item through the compiled rules.
+///
+/// Uses `evaluate_with_identity`, the same entry point the shipped OCR path
+/// takes, so a modifier rendered across several lines counts once rather than
+/// satisfying two conditions.
 #[must_use]
 pub fn evaluate_item(rules: &CompiledRuleSet, item: ParsedItem) -> Verdict {
-    let evaluation = Box::new(rules.evaluate(&item.affix_lines));
+    let (lines, identities) = item.render();
+    let evaluation = Box::new(rules.evaluate_with_identity(&lines, &[], &identities));
+    let item = Box::new(item);
     if evaluation.is_match {
         Verdict::Hit { item, evaluation }
     } else {
@@ -166,12 +190,10 @@ pub fn evaluate_item(rules: &CompiledRuleSet, item: ParsedItem) -> Verdict {
 
 /// Whether two clipboard payloads describe the same item state.
 ///
-/// This is the entire change detector. It replaces the capture region, the
-/// blue mask, the fingerprint, and the tolerance threshold, and unlike all of
-/// them it cannot be thrown off by anything drawn behind the tooltip.
-/// Compares line by line, ignoring trailing whitespace and blank lines, so a
-/// cosmetic difference never reads as a reroll. Allocation-free: both sides are
-/// borrowed straight out of the payloads.
+/// This is the change detector. It replaces the capture region, the blue mask,
+/// the fingerprint and the tolerance threshold that the first experiment
+/// needed, and unlike all of them nothing drawn behind the tooltip can disturb
+/// it. Allocation-free: both sides are borrowed straight out of the payloads.
 #[must_use]
 pub fn describes_same_roll(previous: &str, current: &str) -> bool {
     meaningful_lines(previous).eq(meaningful_lines(current))
@@ -193,26 +215,25 @@ mod tests {
     };
 
     fn life_rule() -> CompiledRuleSet {
-        let condition = AffixCondition::new(
-            "life",
-            "+# to maximum Life",
-            vec![NumericConstraint::at_least(40.0)],
-        );
-        let group = AcceptableResultGroup {
-            name: "life".to_string(),
-            mode: ResultGroupMode::All,
-            required_count: 1,
-            conditions: vec![condition],
-        };
         CompiledRuleSet::compile(RuleSetDefinition {
             schema_version: CURRENT_SCHEMA_VERSION,
             name: "lab".to_string(),
-            groups: vec![group],
+            groups: vec![AcceptableResultGroup {
+                name: "life".to_string(),
+                mode: ResultGroupMode::All,
+                required_count: 1,
+                conditions: vec![AffixCondition::new(
+                    "life",
+                    "+# to maximum Life",
+                    vec![NumericConstraint::at_least(40.0)],
+                )],
+            }],
         })
         .expect("rule compiles")
     }
 
     const ROLLED_HIGH: &str = concat!(
+        "Item Class: Rings\r\n",
         "Rarity: Magic\r\n",
         "Coral Ring\r\n",
         "--------\r\n",
@@ -222,6 +243,7 @@ mod tests {
     );
 
     const ROLLED_LOW: &str = concat!(
+        "Item Class: Rings\r\n",
         "Rarity: Magic\r\n",
         "Coral Ring\r\n",
         "--------\r\n",
@@ -232,7 +254,9 @@ mod tests {
 
     #[test]
     fn matching_payload_is_a_hit() {
-        assert!(evaluate_payload(&life_rule(), ROLLED_HIGH).is_hit());
+        let verdict = evaluate_payload(&life_rule(), ROLLED_HIGH);
+        assert!(verdict.is_hit(), "{:?}", verdict.lines());
+        assert_eq!(verdict.modifier_count(), 1);
     }
 
     #[test]
@@ -258,13 +282,9 @@ mod tests {
     }
 
     #[test]
-    fn cosmetic_line_ending_differences_are_not_a_new_roll() {
+    fn cosmetic_differences_are_not_a_new_roll() {
         let unix = ROLLED_HIGH.replace("\r\n", "\n");
         assert!(describes_same_roll(ROLLED_HIGH, &unix));
-    }
-
-    #[test]
-    fn trailing_blank_lines_are_not_a_new_roll() {
         let padded = format!("{ROLLED_HIGH}\r\n\r\n");
         assert!(describes_same_roll(ROLLED_HIGH, &padded));
     }

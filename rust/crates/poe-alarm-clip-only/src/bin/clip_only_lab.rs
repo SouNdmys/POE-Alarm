@@ -50,9 +50,9 @@ mod app {
     };
     use poe_alarm_clip_only::stats::{LatencySamples, format_millis};
     use poe_alarm_clip_only::{
-        LabProfile, ParsedItem, Verdict, describes_same_roll, evaluate_item, evaluate_payload,
-        item_text,
+        LabProfile, Verdict, describes_same_roll, evaluate_item, evaluate_payload, parse,
     };
+    use poe_alarm_clipboard::{ModFilter, ParsedItem};
 
     const STATE_IDLE: u8 = 0;
     const STATE_DECIDING: u8 = 1;
@@ -471,7 +471,7 @@ mod app {
                         format_millis(first_copy.unwrap_or_default()),
                         format_millis(decided),
                         verdict.label(),
-                        verdict.affix_count(),
+                        verdict.line_count(),
                         if modifiers.any() {
                             format!("  [held {modifiers}]")
                         } else {
@@ -488,8 +488,10 @@ mod app {
                             if let Some(group) = evaluation.matched_group() {
                                 println!("   matched group: {}", group.name);
                             }
-                            for line in &item.affix_lines {
-                                println!("     {line}");
+                            for group in &item.groups {
+                                for (index, line) in group.lines.iter().enumerate() {
+                                    println!("     {} {line}", if index == 0 { "-" } else { " " });
+                                }
                             }
                             println!("  ==========================================================");
                             lock("target affix reached", false);
@@ -782,7 +784,7 @@ mod app {
                 continue;
             }
 
-            let item = match item_text::parse(&outcome.text) {
+            let item = match parse(&outcome.text, ModFilter::default()) {
                 Ok(item) => item,
                 Err(_) => {
                     // Readable clipboard, unreadable item. Leave the baseline
@@ -833,7 +835,7 @@ mod app {
                 "  roll {rolls_seen:<4} seen {:<9} {:<5} ({} lines)",
                 format_millis(since_click),
                 verdict.label(),
-                verdict.affix_count()
+                verdict.line_count()
             );
 
             if let Verdict::Hit { item, evaluation } = verdict {
@@ -844,8 +846,11 @@ mod app {
                 if let Some(group) = evaluation.matched_group() {
                     println!("   matched group: {}", group.name);
                 }
-                for line in &item.affix_lines {
-                    println!("     {line}");
+                for group in &item.groups {
+                    for (index, line) in group.lines.iter().enumerate() {
+                        // Indented continuation marks a hybrid as one modifier.
+                        println!("     {} {line}", if index == 0 { "-" } else { " " });
+                    }
                 }
                 println!("   Press Ctrl+Shift+F12 to release.");
                 println!("  ==========================================================");
@@ -1334,13 +1339,21 @@ mod app {
             for line in text.lines().take(14) {
                 println!("    | {line}");
             }
-            let parsed = poe_alarm_clip_only::item_text::parse(text);
+            let parsed = parse(text, ModFilter::default());
             println!();
             match parsed {
                 Ok(item) => {
-                    println!("  parsed {} affix lines:", item.affix_lines.len());
-                    for line in &item.affix_lines {
-                        println!("    {line}");
+                    println!(
+                        "  parsed {} modifiers ({} lines):",
+                        item.groups.len(),
+                        item.groups.iter().map(|group| group.lines.len()).sum::<usize>()
+                    );
+                    for group in &item.groups {
+                        for (index, line) in group.lines.iter().enumerate() {
+                            // A modifier rendered across lines prints as one
+                            // block, so a hybrid is visibly one affix.
+                            println!("    {} {line}", if index == 0 { "-" } else { " " });
+                        }
                     }
                 }
                 Err(error) => println!("  NOTE: could not parse that payload: {error}"),
@@ -1383,7 +1396,7 @@ mod app {
         // Asked for explicitly, or already elevated and therefore a no-op.
         if options.elevate && clipboard::process_is_elevated() == Some(false) {
             println!("Requesting Administrator — accept the prompt to continue in a new window.");
-            match clipboard::relaunch_elevated() {
+            match clipboard::relaunch_elevated(&["--elevate"]) {
                 Ok(()) => return,
                 Err(error) => {
                     eprintln!("Could not relaunch elevated: {error}");
