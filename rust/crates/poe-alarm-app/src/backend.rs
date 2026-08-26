@@ -596,7 +596,7 @@ fn resolve_alert_wave(
             Err(error) => eprintln!("custom alert sound was rejected: {error}"),
         }
     }
-    poe_alarm_app_win::built_in_alert_wave()
+    poe_alarm_platform_win::built_in_alert_wave()
         .map(|wave| (wave, settings.custom_alert_sound_path.is_some()))
         .map_err(|error| format!("could not build the bundled alert sound: {error}"))
 }

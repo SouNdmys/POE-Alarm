@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $Version = '0.1.0',
-    [string] $ExecutablePath = 'rust/target/release/poe-alarm-app-win.exe',
+    [string] $ExecutablePath = 'rust/target/release/poe-alarm-app.exe',
     [Parameter(Mandatory = $true)]
     [string] $VcRedistDirectory,
     [string] $OutputRoot = 'artifacts/rust-preview',
@@ -72,7 +72,7 @@ function Find-Dumpbin {
 
 function Get-NormalCargoPackages([string] $RepositoryRoot) {
     $cargoLines = & cargo tree --manifest-path (Join-Path $RepositoryRoot 'rust/Cargo.toml') `
-        -p poe-alarm-app-win --target x86_64-pc-windows-msvc -e normal --prefix none `
+        -p poe-alarm-app --target x86_64-pc-windows-msvc -e normal --prefix none `
         --format '{p}|{l}|{r}'
     if ($LASTEXITCODE -ne 0) { throw 'cargo tree failed' }
     $packages = foreach ($line in $cargoLines) {
@@ -141,7 +141,7 @@ Push-Location $RepositoryRoot
 try {
     if ($Version -ne '0.1.0') { throw 'this script is intentionally pinned to Rust Preview 0.1.0' }
     if (-not $SkipBuild) {
-        & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app-win --release --locked
+        & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app --release --locked
         if ($LASTEXITCODE -ne 0) { throw 'release build failed' }
     }
 

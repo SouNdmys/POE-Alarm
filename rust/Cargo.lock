@@ -4126,28 +4126,12 @@ dependencies = [
  "gpui",
  "gpui-component",
  "poe-alarm-alert-win",
- "poe-alarm-app-win",
  "poe-alarm-core",
  "poe-alarm-platform-win",
  "poe-alarm-runtime",
  "poe-alarm-settings",
  "windows 0.61.3",
  "winresource",
-]
-
-[[package]]
-name = "poe-alarm-app-win"
-version = "1.0.0"
-dependencies = [
- "embed-resource",
- "poe-alarm-alert-win",
- "poe-alarm-core",
- "poe-alarm-platform-win",
- "poe-alarm-runtime",
- "poe-alarm-settings",
- "serde_json",
- "sha2 0.10.9",
- "windows 0.61.3",
 ]
 
 [[package]]
@@ -4187,6 +4171,7 @@ dependencies = [
 name = "poe-alarm-platform-win"
 version = "0.1.0"
 dependencies = [
+ "sha2 0.10.9",
  "windows 0.61.3",
 ]
 

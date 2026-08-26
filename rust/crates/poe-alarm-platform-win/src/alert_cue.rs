@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use poe_alarm_platform_win::{ValidatedWave, WaveValidationError};
+use crate::wave::{ValidatedWave, WaveValidationError};
 
 const SAMPLE_RATE: u32 = 44_100;
 const CHANNELS: u16 = 1;
@@ -9,6 +9,7 @@ const DURATION_SECONDS: f64 = 2.15;
 
 /// Generates the same original, self-contained cue shipped by the .NET 1.0 release.
 /// No game audio or network asset is used.
+#[must_use]
 pub fn built_in_alert_wave() -> Result<ValidatedWave, WaveValidationError> {
     ValidatedWave::from_bytes("built-in-alert.wav", built_in_alert_wave_bytes())
 }

@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/poe-alarm-alert-win",
     "crates/poe-alarm-app",
-    "crates/poe-alarm-app-win",
     "crates/poe-alarm-clip-only",
     "crates/poe-alarm-clipboard",
     "crates/poe-alarm-core",

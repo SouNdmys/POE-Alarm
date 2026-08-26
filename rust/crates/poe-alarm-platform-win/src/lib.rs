@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+mod alert_cue;
 mod clipboard;
 mod error;
 mod geometry;
@@ -21,6 +22,7 @@ mod wave;
 #[cfg(windows)]
 mod win32;
 
+pub use alert_cue::built_in_alert_wave;
 pub use clipboard::{
     ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
     copy_hovered_item, describes_game, foreground_process_outranks_us,
