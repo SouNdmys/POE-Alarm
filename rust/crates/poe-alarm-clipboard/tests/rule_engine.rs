@@ -6,7 +6,7 @@
 //! number no modifier on the item actually rolled. OCR could only ever see
 //! that merged figure. These tests pin down that the clipboard path does not.
 
-use poe_alarm_clipboard::{ModFilter, parse};
+use poe_alarm_clipboard::parse;
 use poe_alarm_core::rules::CURRENT_SCHEMA_VERSION;
 use poe_alarm_core::{
     AcceptableResultGroup, AffixCondition, CompiledRuleSet, NumericConstraint, ResultGroupMode,
@@ -33,7 +33,7 @@ fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
 /// Parses the bow and evaluates `conditions` the way production will: with the
 /// band identities, so one physical modifier can satisfy at most one condition.
 fn evaluate(conditions: Vec<AffixCondition>) -> RuleEvaluationResult {
-    let item = parse(BOW, ModFilter::default()).expect("bow parses");
+    let item = parse(BOW).expect("bow parses");
     let (lines, identities) = item.render();
     rules(conditions).evaluate_with_identity(&lines, &[], &identities)
 }
@@ -139,20 +139,28 @@ fn one_modifier_cannot_satisfy_two_conditions() {
 }
 
 #[test]
-fn excluded_modifier_kinds_cannot_trigger_a_rule() {
-    // `增加 25(21-25)% 暴擊率` belongs to the crafted suffix, which the default
-    // filter drops, and `增加 200% 能力值需求` is an enchantment.
+fn a_modifier_matches_whatever_the_client_says_produced_it() {
+    // `增加 25(21-25)% 暴擊率` belongs to a bench-crafted suffix and
+    // `增加 200% 能力值需求` to an enchantment. Both reach the rules.
+    //
+    // These used to be excluded, on the theory that a crafting bench is not
+    // something you roll for. The theory is fine and the mechanism was not:
+    // POE1 has more modifier sources than can be enumerated, exclusion depends
+    // on recognising the word the client used for each one, and a word this
+    // parser has not seen would silently stop an alarm from firing on an item
+    // worth real money. A false alarm costs a glance. Nothing else here is
+    // allowed to cost more than that.
     let result = evaluate(vec![AffixCondition::new(
         "crafted-crit",
         "增加 (21—25)% 暴擊率",
         vec![NumericConstraint::ignored()],
     )]);
-    assert!(!result.is_match, "crafted suffix must not be visible");
+    assert!(result.is_match, "a crafted suffix is still a modifier");
 
     let result = evaluate(vec![AffixCondition::new(
         "enchant",
         "增加 #% 能力值需求",
         vec![NumericConstraint::ignored()],
     )]);
-    assert!(!result.is_match, "enchantment must not be visible");
+    assert!(result.is_match, "an enchantment is still a modifier");
 }

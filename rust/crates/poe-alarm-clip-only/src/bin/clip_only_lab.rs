@@ -51,7 +51,7 @@ mod app {
     use poe_alarm_clip_only::{
         LabProfile, Verdict, describes_same_roll, evaluate_item, evaluate_payload, parse,
     };
-    use poe_alarm_clipboard::{ModFilter, ParsedItem};
+    use poe_alarm_clipboard::ParsedItem;
 
     const STATE_IDLE: u8 = 0;
     const STATE_DECIDING: u8 = 1;
@@ -794,7 +794,7 @@ mod app {
                 continue;
             }
 
-            let item = match parse(&outcome.text, ModFilter::default()) {
+            let item = match parse(&outcome.text) {
                 Ok(item) => item,
                 Err(_) => {
                     // Readable clipboard, unreadable item. Leave the baseline
@@ -1379,7 +1379,7 @@ mod app {
             for line in text.lines().take(14) {
                 println!("    | {line}");
             }
-            let parsed = parse(text, ModFilter::default());
+            let parsed = parse(text);
             println!();
             match parsed {
                 Ok(item) => {

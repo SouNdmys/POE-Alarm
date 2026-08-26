@@ -2,9 +2,16 @@
 //!
 //! The client separates sections with a run of dashes and always lays them out
 //! in the same order: header, properties, requirements, sockets, item level,
-//! enchantments, implicits, explicits, flags, vendor note. Only two of those
-//! are wanted, so the job is to find them without enumerating the rest — the
-//! property keys alone run to dozens and differ per item class.
+//! enchantments, implicits, explicits, flags, vendor note. Everything from the
+//! item level onwards that holds modifiers is wanted — no kind is filtered out,
+//! because POE1 has more modifier sources than can be enumerated and one this
+//! parser fails to recognise must still be matchable.
+//!
+//! So the job is to reject the sections that hold no modifiers at all, without
+//! enumerating what they contain: the property keys alone run to dozens and
+//! differ per item class. Every rejection rule here is therefore structural —
+//! a colon, a full stop, a dash run — rather than a word list that GGG can
+//! invalidate next league.
 //!
 //! When `{ ... }` annotations are present that is trivial: the annotated
 //! sections are the modifier sections, and nothing else needs identifying.
@@ -15,7 +22,7 @@ use crate::classify::{
     ModKind, annotation_name, annotation_tier, classify_annotation, is_annotation,
     strip_inline_markers,
 };
-use crate::{ItemTextError, ModFilter, ModGroup, ParsedItem};
+use crate::{ItemTextError, ModGroup, ParsedItem};
 
 const ITEM_CLASS_KEYS: &[&str] = &[
     "itemclass:",
@@ -120,6 +127,18 @@ fn is_decoration(line: &str) -> bool {
     trimmed.starts_with('(') || trimmed.starts_with('\u{ff08}')
 }
 
+/// A `key: value` line, which is a property rather than a modifier.
+///
+/// Maps put `Monster Level: 83` in its own section after the item level, where
+/// it would otherwise read as a modifier. Judged by shape rather than keyword —
+/// property names run to dozens per item class, differ per locale, and a
+/// keyword list would rot the moment GGG adds one. The colon alone is enough:
+/// not one of the 340 annotated modifier lines in the corpus contains one, and
+/// this is only ever applied where every line in a section agrees.
+fn is_property(line: &str) -> bool {
+    line.contains(':') || line.contains('\u{ff1a}')
+}
+
 /// A line that names how the item is used, which is never a modifier.
 fn names_a_usage(line: &str) -> bool {
     let lowered = line.trim().to_lowercase();
@@ -129,14 +148,14 @@ fn names_a_usage(line: &str) -> bool {
 /// Usage or flavour text, judged for a whole section at a time.
 ///
 /// Only ever applied where every line in a section agrees, because the client
-/// always gives usage text its own section — and because the last half of this
-/// is a guess. Plenty of real modifiers are long sentences with no numbers in
-/// them: "Monsters Maim on Hit with Attacks", "Area contains Labyrinth Hazards".
+/// always gives usage text its own section.
 ///
-/// Getting this wrong is not a cosmetic miss. An unrecognised trailing section
-/// is taken for the explicit one, which demotes the real modifiers to implicits
-/// and drops them — a quiver whose only trailer was 持弓時才可裝備。 lost all
-/// six of its affixes.
+/// There used to be a "long and carrying no numbers" guess here too. It ate
+/// "Monsters Maim on Hit with Attacks" and "Area contains Labyrinth Hazards",
+/// and then ate a map's one-line implicit section whole. Nothing here may rest
+/// on a guess: an unrecognised section is taken for the explicit one, which
+/// demotes the real modifiers and drops them, and a rule that silently stops
+/// firing costs the user an item.
 fn is_prose(line: &str) -> bool {
     let trimmed = line.trim();
     if names_a_usage(trimmed) {
@@ -145,10 +164,7 @@ fn is_prose(line: &str) -> bool {
     // The client never ends a modifier with a full stop and always ends usage
     // text with one. Checked against all 340 annotated modifier lines in the
     // four corpora: not one of them ends with a stop.
-    if trimmed.ends_with('。') || trimmed.ends_with('.') || trimmed.ends_with('!') {
-        return true;
-    }
-    trimmed.chars().count() > 24 && !trimmed.chars().any(|character| character.is_ascii_digit())
+    trimmed.ends_with('。') || trimmed.ends_with('.') || trimmed.ends_with('!')
 }
 
 /// Sections, trimmed and stripped of empty lines, in document order.
@@ -169,7 +185,7 @@ fn split_sections(payload: &str) -> Vec<Vec<&str>> {
     sections
 }
 
-pub fn parse(payload: &str, filter: ModFilter) -> Result<ParsedItem, ItemTextError> {
+pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
     let normalized = payload.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.lines().any(is_separator) {
         return Err(ItemTextError::NotAnItem);
@@ -210,7 +226,8 @@ pub fn parse(payload: &str, filter: ModFilter) -> Result<ParsedItem, ItemTextErr
             }
             // A section carrying no annotation while others do cannot hold
             // explicit affixes — the client annotates every one of those.
-            // Left as Explicit it would pollute the default filter.
+            // This is a label, nothing more: no kind has gated matching
+            // since the filter was removed.
             let positional = if annotated || index != last {
                 ModKind::Implicit
             } else {
@@ -222,7 +239,7 @@ pub fn parse(payload: &str, filter: ModFilter) -> Result<ParsedItem, ItemTextErr
 
     parsed.groups = groups
         .into_iter()
-        .filter(|group| filter.accepts(group.kind) && !group.lines.is_empty())
+        .filter(|group| !group.lines.is_empty())
         .collect();
 
     if parsed.groups.is_empty() {
@@ -294,6 +311,7 @@ fn modifier_sections<'a>(sections: &'a [Vec<&'a str>]) -> Vec<&'a Vec<&'a str>> 
             !starts_with_any(&compact(first), TRAILER_KEYS)
                 && !section.iter().all(|line| is_flag(line))
                 && !section.iter().all(|line| is_prose(line))
+                && !section.iter().all(|line| is_property(line))
         })
         .collect()
 }
@@ -353,7 +371,7 @@ mod tests {
 
     #[test]
     fn bow_metadata_reads_from_ascii_colon_keys() {
-        let item = parse(BOW, ModFilter::default()).expect("parses");
+        let item = parse(BOW).expect("parses");
         assert_eq!(item.item_class.as_deref(), Some("弓"));
         assert_eq!(item.rarity.as_deref(), Some("稀有"));
         assert_eq!(item.item_level.as_deref(), Some("90"));
@@ -362,26 +380,38 @@ mod tests {
     }
 
     #[test]
-    fn bow_keeps_only_explicit_modifiers() {
-        let item = parse(BOW, ModFilter::default()).expect("parses");
+    fn bow_keeps_every_modifier_the_client_annotated() {
+        // Nothing is filtered by kind. POE1 has more modifier sources than can
+        // be enumerated, and one this parser fails to recognise must still be
+        // matchable — a rule that silently stops firing costs the user an item.
+        let item = parse(BOW).expect("parses");
         let kinds: Vec<ModKind> = item.groups.iter().map(|group| group.kind).collect();
         assert_eq!(
             kinds,
             vec![
+                ModKind::Enchant,
+                ModKind::Enchant,
                 ModKind::Prefix,
                 ModKind::Prefix,
                 ModKind::Prefix,
                 ModKind::Suffix,
                 ModKind::Suffix,
-            ],
-            "the three enchantment lines and the crafted suffix must be dropped"
+                ModKind::Crafted,
+            ]
         );
+    }
+
+    fn group_starting_with<'a>(item: &'a ParsedItem, prefix: &str) -> &'a ModGroup {
+        item.groups
+            .iter()
+            .find(|group| group.lines[0].starts_with(prefix))
+            .unwrap_or_else(|| panic!("no modifier starts with {prefix}"))
     }
 
     #[test]
     fn bow_groups_the_hybrid_prefix_as_one_modifier() {
-        let item = parse(BOW, ModFilter::default()).expect("parses");
-        let hybrid = &item.groups[2];
+        let item = parse(BOW).expect("parses");
+        let hybrid = group_starting_with(&item, "增加 79");
         assert_eq!(
             hybrid.lines,
             vec![
@@ -397,37 +427,34 @@ mod tests {
     fn bow_lists_both_physical_prefixes_separately() {
         // The tooltip merges these into a single 258% line, which belongs to no
         // modifier on the item. Keeping them apart is the whole point.
-        let item = parse(BOW, ModFilter::default()).expect("parses");
-        assert_eq!(item.groups[1].lines, vec!["增加 179(170-179)% 物理傷害"]);
-        assert_eq!(item.groups[2].lines[0], "增加 79(75-79)% 物理傷害");
-    }
-
-    #[test]
-    fn bow_renders_a_blank_line_between_modifiers() {
-        let item = parse(BOW, ModFilter::default()).expect("parses");
-        let (lines, identities) = item.render();
-        // Five modifiers, six lines of text, four separators between them.
-        assert_eq!(identities.len(), 6);
-        assert_eq!(lines.iter().filter(|line| line.is_empty()).count(), 4);
-        // The hybrid's two lines are adjacent and share a band.
-        let hybrid: Vec<&str> = identities
-            .iter()
-            .filter(|identity| identity.physical_band_id == "clip:2")
-            .map(|identity| lines[identity.line_index].as_str())
-            .collect();
+        let item = parse(BOW).expect("parses");
         assert_eq!(
-            hybrid,
-            vec!["增加 79(75-79)% 物理傷害", "+186(175-200) 命中值"]
+            group_starting_with(&item, "增加 179").lines,
+            vec!["增加 179(170-179)% 物理傷害"]
+        );
+        assert_eq!(
+            group_starting_with(&item, "增加 79").lines[0],
+            "增加 79(75-79)% 物理傷害"
         );
     }
 
     #[test]
-    fn crafted_modifiers_return_when_the_filter_asks_for_them() {
-        let filter = ModFilter {
-            crafted: true,
-            ..ModFilter::default()
-        };
-        let item = parse(BOW, filter).expect("parses");
+    fn bow_renders_a_blank_line_between_modifiers() {
+        let item = parse(BOW).expect("parses");
+        let (lines, identities) = item.render();
+        // Eight modifiers, ten lines of text — the hybrid prefix and the
+        // crafted suffix carry two each — and seven separators between them.
+        assert_eq!(identities.len(), 10);
+        assert_eq!(lines.iter().filter(|line| line.is_empty()).count(), 7);
+        // The hybrid's two lines are adjacent and share a band.
+        let hybrid_band = &identities[4].physical_band_id;
+        assert_eq!(&identities[5].physical_band_id, hybrid_band);
+        assert_ne!(&identities[3].physical_band_id, hybrid_band);
+    }
+
+    #[test]
+    fn a_crafted_modifier_still_reaches_the_rules() {
+        let item = parse(BOW).expect("parses");
         let crafted = item
             .groups
             .iter()
@@ -443,12 +470,8 @@ mod tests {
     }
 
     #[test]
-    fn enchantments_return_when_the_filter_asks_for_them() {
-        let filter = ModFilter {
-            enchant: true,
-            ..ModFilter::default()
-        };
-        let item = parse(BOW, filter).expect("parses");
+    fn enchantments_still_reach_the_rules() {
+        let item = parse(BOW).expect("parses");
         let enchants: Vec<&ModGroup> = item
             .groups
             .iter()
@@ -461,9 +484,6 @@ mod tests {
 
     #[test]
     fn rejects_a_payload_that_is_not_an_item() {
-        assert_eq!(
-            parse("just some text", ModFilter::default()),
-            Err(ItemTextError::NotAnItem)
-        );
+        assert_eq!(parse("just some text"), Err(ItemTextError::NotAnItem));
     }
 }

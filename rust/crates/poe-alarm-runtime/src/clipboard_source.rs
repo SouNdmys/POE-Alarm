@@ -10,7 +10,7 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use poe_alarm_clipboard::{ModFilter, ParsedItem, parse};
+use poe_alarm_clipboard::{ParsedItem, parse};
 use poe_alarm_monitoring::{
     AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
 };
@@ -46,7 +46,6 @@ impl fmt::Display for SourceError {
 
 /// Affix source backed by the client's own item text.
 pub struct ClipboardSource {
-    filter: ModFilter,
     key_method: KeyMethod,
     /// The last payload judged, used to answer "has this item moved".
     last_payload: Option<String>,
@@ -64,7 +63,6 @@ impl ClipboardSource {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            filter: ModFilter::default(),
             key_method: KeyMethod::default(),
             last_payload: None,
             last_item: None,
@@ -120,7 +118,7 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        let Ok(item) = parse(&outcome.text, self.filter) else {
+        let Ok(item) = parse(&outcome.text) else {
             // Readable clipboard, unreadable item — the cursor is over
             // something that is not an item. Leave the baseline alone so the
             // roll being waited on is still pending.

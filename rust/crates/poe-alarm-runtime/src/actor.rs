@@ -7,7 +7,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poe_alarm_alert_win::AlertServiceConfig;
-use poe_alarm_clipboard::ModFilter;
 use poe_alarm_core::LogicalAffixMatch;
 use poe_alarm_monitoring::{
     EventSink, Monitor, MonitorDetection, MonitorEvent, MonitorPlan, RecognitionResult, SystemClock,
@@ -892,8 +891,7 @@ fn check_item_text(
     compiled: &CompiledRuntimeSettings,
 ) -> Result<ItemCheckReport, BackendError> {
     let parse_started = Instant::now();
-    let item = poe_alarm_clipboard::parse(text, ModFilter::default())
-        .map_err(|error| BackendError(error.to_string()))?;
+    let item = poe_alarm_clipboard::parse(text).map_err(|error| BackendError(error.to_string()))?;
     let modifier_count = item.groups.len();
     let (lines, physical_line_identities) = item.render();
     let parse_elapsed = parse_started.elapsed();

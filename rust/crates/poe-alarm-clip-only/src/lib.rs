@@ -17,7 +17,7 @@ pub mod stats;
 /// The Win32 capture surface, under the name the harness has always used.
 pub use poe_alarm_platform_win as clipboard;
 
-use poe_alarm_clipboard::{ModFilter, ParsedItem};
+use poe_alarm_clipboard::ParsedItem;
 use poe_alarm_core::{CompiledRuleSet, RuleEvaluationResult};
 use poe_alarm_settings::SettingsStore;
 use std::fmt;
@@ -165,7 +165,7 @@ impl Verdict {
 /// Parses a clipboard payload and runs it through the compiled rules.
 #[must_use]
 pub fn evaluate_payload(rules: &CompiledRuleSet, payload: &str) -> Verdict {
-    match parse(payload, ModFilter::default()) {
+    match parse(payload) {
         Ok(item) => evaluate_item(rules, item),
         Err(error) => Verdict::Unreadable(error),
     }

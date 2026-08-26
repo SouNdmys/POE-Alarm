@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use poe_alarm_clipboard::{ModFilter, ModKind, ParsedItem, parse};
+use poe_alarm_clipboard::{ModKind, ParsedItem, parse};
 
 const CORPUS_FILES: &[&str] = &[
     "poe1/zh-tw.txt",
@@ -186,15 +186,14 @@ fn the_parser_classifies_every_annotation_in_the_corpus_the_way_a_person_would()
     assert!(checked >= 200, "only checked {checked} annotations");
 }
 
-fn parsed(case: &Case, filter: ModFilter) -> ParsedItem {
-    parse(&case.text, filter)
-        .unwrap_or_else(|error| panic!("{}: parse failed: {error}", case.label))
+fn parsed(case: &Case) -> ParsedItem {
+    parse(&case.text).unwrap_or_else(|error| panic!("{}: parse failed: {error}", case.label))
 }
 
 #[test]
 fn every_item_in_the_corpus_parses() {
     for case in all_cases() {
-        let item = parsed(&case, ModFilter::default());
+        let item = parsed(&case);
         assert!(
             !item.groups.is_empty(),
             "{}: no modifiers survived the filter",
@@ -208,32 +207,32 @@ fn every_item_in_the_corpus_parses() {
     }
 }
 
-/// Every line the client wrote under an annotation is accounted for.
+/// Every line the client wrote under an annotation reaches the rules.
 ///
-/// Either it reaches the rules, or the filter turned it down for a category the
-/// client itself named. Nothing may simply vanish. This is the invariant the
-/// tool actually rests on: a false alarm costs a glance, a missed roll costs the
-/// item, and the user does not have to care what a given annotation word means
-/// as long as the affix they typed in gets found.
+/// Not "most of them", and not "the ones we classified as affixes" — all of
+/// them. POE1 has more modifier sources than anyone can enumerate, and a source
+/// GGG adds next league is one this parser will not recognise. If recognition
+/// gated matching, that unknown source would silently stop an alarm from
+/// firing on an item worth real money. So it does not gate anything.
 ///
 /// Deliberately compares LINES, not counts. A count comparison held while whole
 /// affixes were being deleted as flavour text and whole items were losing every
 /// modifier to a mis-read trailing section.
+///
+/// One-directional on purpose. Extra lines are not a defect: the client leaves
+/// some real modifiers unannotated — quality types like "Quality does not
+/// increase Physical Damage" carry no `{ ... }` at all — and a user is entitled
+/// to track those too.
 #[test]
 fn no_annotated_modifier_line_vanishes_unaccounted() {
-    let filter = ModFilter::default();
     let mut checked = 0_usize;
     for case in all_cases() {
         let annotated = annotated_lines(&case.text);
         if annotated.is_empty() {
             continue;
         }
-        let expected: BTreeSet<&str> = annotated
-            .iter()
-            .filter(|(kind, _)| filter.accepts(*kind))
-            .map(|(_, line)| *line)
-            .collect();
-        let item = parsed(&case, filter);
+        let expected: BTreeSet<&str> = annotated.iter().map(|(_, line)| *line).collect();
+        let item = parsed(&case);
         let actual: BTreeSet<&str> = item
             .groups
             .iter()
@@ -241,15 +240,9 @@ fn no_annotated_modifier_line_vanishes_unaccounted() {
             .collect();
 
         let lost: Vec<_> = expected.difference(&actual).collect();
-        let invented: Vec<_> = actual.difference(&expected).collect();
         assert!(
             lost.is_empty(),
             "{}: these lines never reached the rules: {lost:#?}",
-            case.label
-        );
-        assert!(
-            invented.is_empty(),
-            "{}: these lines were not annotated as matchable: {invented:#?}",
             case.label
         );
         checked += 1;
@@ -258,28 +251,22 @@ fn no_annotated_modifier_line_vanishes_unaccounted() {
 }
 
 #[test]
-fn kept_group_count_matches_the_explicit_annotations() {
-    // The client states how many prefixes and suffixes an item has. Anything
-    // else the parser emits is something it invented, and anything missing is
-    // something it dropped.
-    let filter = ModFilter::default();
+fn every_annotation_produces_at_least_one_group() {
+    // Weaker than an equality, and it has to be: the client annotates most
+    // modifiers but not all, so the parser legitimately emits more groups than
+    // there are annotations.
     for case in all_cases() {
         let annotations = annotation_kinds(&case.text);
         if annotations.is_empty() {
             continue;
         }
-        let expected = annotations
-            .iter()
-            .filter(|kind| filter.accepts(**kind))
-            .count();
-        let item = parsed(&case, filter);
-        assert_eq!(
-            item.groups.len(),
-            expected,
-            "{}: expected {expected} explicit modifiers, got {}\nkinds: {:?}",
+        let item = parsed(&case);
+        assert!(
+            item.groups.len() >= annotations.len(),
+            "{}: client annotated {} modifiers, parser produced only {}",
             case.label,
-            item.groups.len(),
-            annotations
+            annotations.len(),
+            item.groups.len()
         );
     }
 }
@@ -296,7 +283,7 @@ fn no_kept_line_is_decoration_or_carries_an_inline_marker() {
         "(unmet)",
     ];
     for case in all_cases() {
-        for group in &parsed(&case, ModFilter::default()).groups {
+        for group in &parsed(&case).groups {
             for line in &group.lines {
                 let trimmed = line.trim_start();
                 assert!(
@@ -325,7 +312,7 @@ fn no_kept_line_is_decoration_or_carries_an_inline_marker() {
 #[test]
 fn rendered_lines_and_identities_stay_aligned() {
     for case in all_cases() {
-        let item = parsed(&case, ModFilter::default());
+        let item = parsed(&case);
         let (lines, identities) = item.render();
         let text_lines = lines.iter().filter(|line| !line.is_empty()).count();
         assert_eq!(
@@ -360,7 +347,7 @@ fn annotated_items_report_authoritative_grouping() {
             continue;
         }
         assert!(
-            parsed(&case, ModFilter::default()).grouping_is_authoritative,
+            parsed(&case).grouping_is_authoritative,
             "{}: annotations present but grouping was reported as inferred",
             case.label
         );
@@ -371,7 +358,7 @@ fn annotated_items_report_authoritative_grouping() {
 fn identity_is_stable_across_items_of_the_same_class_and_level() {
     let cases = all_cases();
     for case in &cases {
-        let item = parsed(case, ModFilter::default());
+        let item = parsed(case);
         assert!(
             item.is_same_item_as(&item),
             "{}: an item must match itself",
@@ -381,8 +368,8 @@ fn identity_is_stable_across_items_of_the_same_class_and_level() {
     // Two dumps differing in item level are different items.
     let mut differing = 0;
     for window in cases.windows(2) {
-        let left = parsed(&window[0], ModFilter::default());
-        let right = parsed(&window[1], ModFilter::default());
+        let left = parsed(&window[0]);
+        let right = parsed(&window[1]);
         if left.identity() != right.identity() && !left.is_same_item_as(&right) {
             differing += 1;
         }
@@ -399,7 +386,7 @@ fn corpus_exercises_multi_line_modifiers() {
     let mut widest = 0;
     let mut total_groups = 0;
     for case in all_cases() {
-        for group in &parsed(&case, ModFilter::default()).groups {
+        for group in &parsed(&case).groups {
             total_groups += 1;
             if group.lines.len() > 1 {
                 hybrids += 1;

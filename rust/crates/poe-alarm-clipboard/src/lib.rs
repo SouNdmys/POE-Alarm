@@ -93,48 +93,6 @@ impl std::fmt::Display for ItemTextError {
 
 impl std::error::Error for ItemTextError {}
 
-/// Which kinds of modifier the caller wants evaluated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ModFilter {
-    /// Naturally rolled prefixes and suffixes, including fractured ones.
-    pub explicit: bool,
-    /// Bench-crafted modifiers. They occupy an affix slot, but cannot appear on
-    /// an item being rerolled, so they are off by default.
-    pub crafted: bool,
-    /// Innate modifiers. Off by default: the OCR path never saw them, and a
-    /// ring whose implicit grants life would otherwise satisfy a life rule
-    /// forever.
-    pub implicit: bool,
-    /// Enchantments from the labyrinth or an altar.
-    pub enchant: bool,
-}
-
-impl Default for ModFilter {
-    fn default() -> Self {
-        Self {
-            explicit: true,
-            crafted: false,
-            implicit: false,
-            enchant: false,
-        }
-    }
-}
-
-impl ModFilter {
-    /// Whether a group of this kind survives the filter.
-    #[must_use]
-    pub fn accepts(self, kind: ModKind) -> bool {
-        match kind {
-            ModKind::Prefix | ModKind::Suffix | ModKind::Fractured | ModKind::Explicit => {
-                self.explicit
-            }
-            ModKind::Crafted => self.crafted,
-            ModKind::Implicit => self.implicit,
-            ModKind::Enchant => self.enchant,
-        }
-    }
-}
-
 impl ParsedItem {
     /// Fields that survive any amount of crafting on one physical item.
     ///
@@ -205,9 +163,17 @@ impl ParsedItem {
     }
 }
 
-/// Parses a clipboard payload, keeping the modifier kinds `filter` accepts.
-pub fn parse(payload: &str, filter: ModFilter) -> Result<ParsedItem, ItemTextError> {
-    sections::parse(payload, filter)
+/// Parses a clipboard payload into every modifier the client listed.
+///
+/// Nothing is filtered by kind, and that is deliberate. Whether a line is a
+/// prefix, an implicit or bench-crafted is a label the client happens to
+/// provide; making matching depend on it would mean a new crafting source
+/// GGG ships tomorrow could silently stop an alarm from firing. A false alarm
+/// costs a glance. A missed roll costs the item.
+///
+/// [`ModGroup::kind`] survives for display only.
+pub fn parse(payload: &str) -> Result<ParsedItem, ItemTextError> {
+    sections::parse(payload)
 }
 
 /// Cheap guard used before timing a copy: does this payload even look like an
@@ -269,16 +235,5 @@ mod tests {
         let (lines, identities) = ParsedItem::default().render();
         assert!(lines.is_empty());
         assert!(identities.is_empty());
-    }
-
-    #[test]
-    fn default_filter_keeps_only_explicit_modifiers() {
-        let filter = ModFilter::default();
-        assert!(filter.accepts(ModKind::Prefix));
-        assert!(filter.accepts(ModKind::Suffix));
-        assert!(filter.accepts(ModKind::Fractured));
-        assert!(!filter.accepts(ModKind::Crafted));
-        assert!(!filter.accepts(ModKind::Implicit));
-        assert!(!filter.accepts(ModKind::Enchant));
     }
 }

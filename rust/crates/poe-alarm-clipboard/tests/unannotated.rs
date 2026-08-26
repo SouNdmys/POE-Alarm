@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use poe_alarm_clipboard::{ModFilter, ParsedItem, parse};
+use poe_alarm_clipboard::{ParsedItem, parse};
 
 const HYBRID_BOW: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
@@ -82,10 +82,10 @@ fn no_tracked_modifier_is_ever_lost_without_annotations() {
     let mut compared = 0_usize;
     for (name, corpus) in CORPORA {
         for (index, dump) in items(corpus).into_iter().enumerate() {
-            let Ok(annotated) = parse(&dump, ModFilter::default()) else {
+            let Ok(annotated) = parse(&dump) else {
                 continue;
             };
-            let Ok(flat) = parse(&without_annotations(&dump), ModFilter::default()) else {
+            let Ok(flat) = parse(&without_annotations(&dump)) else {
                 panic!("{name} item {index}: the flat dump must still parse");
             };
             let annotated_lines = lines_of(&annotated);
@@ -106,7 +106,7 @@ fn no_tracked_modifier_is_ever_lost_without_annotations() {
 
 #[test]
 fn annotations_keep_a_hybrid_modifier_whole() {
-    let item = parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses");
+    let item = parse(HYBRID_BOW).expect("fixture parses");
     let hybrid = item
         .groups
         .iter()
@@ -119,8 +119,8 @@ fn annotations_keep_a_hybrid_modifier_whole() {
 
 #[test]
 fn without_annotations_a_hybrid_splits_into_two_modifiers() {
-    let annotated = parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses");
-    let flat = parse(&without_annotations(HYBRID_BOW), ModFilter::default()).expect("parses");
+    let annotated = parse(HYBRID_BOW).expect("fixture parses");
+    let flat = parse(&without_annotations(HYBRID_BOW)).expect("parses");
 
     assert!(
         annotated.groups.iter().any(|group| group.lines.len() > 1),
@@ -134,26 +134,4 @@ fn without_annotations_a_hybrid_splits_into_two_modifiers() {
     // that one physical modifier produced them, which is what stops a rule
     // asking for two modifiers being satisfied by one.
     assert!(flat.groups.len() > annotated.groups.len());
-}
-
-#[test]
-fn without_annotations_a_bench_crafted_modifier_is_read_as_rolled() {
-    let annotated = lines_of(&parse(HYBRID_BOW, ModFilter::default()).expect("fixture parses"));
-    let flat =
-        lines_of(&parse(&without_annotations(HYBRID_BOW), ModFilter::default()).expect("ok"));
-
-    // The bow's crafted suffix — { 已大師工藝 後綴 "工藝之" } — contributes these
-    // two lines. Excluded by default when the client says it is crafted.
-    for crafted in ["+21(20-24) 力量和智慧", "增加 25(21-25)% 暴擊率"] {
-        assert!(
-            !annotated.contains(crafted),
-            "a crafted line must not reach the rules: {crafted}"
-        );
-        assert!(
-            flat.contains(crafted),
-            "without annotations a crafted line is indistinguishable from a roll: {crafted}"
-        );
-    }
-    assert_eq!(annotated.len(), 6);
-    assert_eq!(flat.len(), 8);
 }
