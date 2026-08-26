@@ -16,7 +16,7 @@ use poe_alarm_core::{AcceptableResultGroup, AffixCondition, ResultGroupMode, Rul
 use poe_alarm_monitoring::{
     AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
 };
-use poe_alarm_settings::{AppSettings, GameProfileSettings, RuleEditorMode, ScreenRegion};
+use poe_alarm_settings::{AppSettings, RuleEditorMode};
 
 use crate::{
     AffixSourceFactory, AlertLatchStatus, AlertPresentation, BackendError, BoxedAffixSource,
@@ -234,10 +234,6 @@ impl ProtectionService for FakeProtection {
 
 fn quick_settings() -> AppSettings {
     let mut settings = AppSettings::default();
-    settings.profiles.poe1 = GameProfileSettings {
-        capture_region: Some(ScreenRegion::new(0, 0, 64, 64)),
-        ..GameProfileSettings::default()
-    };
     settings.profiles.poe1.selected_rules_mut().target_affix =
         "+#% to Critical Hit Chance".to_owned();
     settings
