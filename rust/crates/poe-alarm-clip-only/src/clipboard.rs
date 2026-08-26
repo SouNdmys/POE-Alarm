@@ -537,6 +537,77 @@ pub fn foreground_process_outranks_us() -> bool {
     !readable
 }
 
+/// Why a relaunch-as-administrator attempt did not happen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ElevateError {
+    /// The user dismissed the UAC prompt.
+    Declined,
+    /// The executable path could not be determined.
+    NoExecutablePath,
+    /// ShellExecute refused for some other reason.
+    Failed(i32),
+}
+
+impl std::fmt::Display for ElevateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Declined => formatter.write_str("the elevation prompt was declined"),
+            Self::NoExecutablePath => formatter.write_str("could not locate this executable"),
+            Self::Failed(code) => write!(formatter, "ShellExecute failed with code {code}"),
+        }
+    }
+}
+
+/// Relaunches this executable elevated, carrying the current arguments over.
+///
+/// Deliberately not a manifest `requireAdministrator`: that would put a UAC
+/// prompt in front of every user, including the majority whose client is not
+/// elevated and who therefore need no privileges at all. Elevation is asked
+/// for only once it is known to be necessary.
+///
+/// The elevated process gets a fresh console; the caller is expected to exit.
+pub fn relaunch_elevated() -> Result<(), ElevateError> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::HSTRING;
+
+    const SE_ERR_ACCESSDENIED: isize = 5;
+
+    let executable = std::env::current_exe().map_err(|_| ElevateError::NoExecutablePath)?;
+    // Every flag this binary accepts is a bare token or a number, so joining
+    // with spaces round-trips them exactly.
+    let arguments = std::env::args()
+        .skip(1)
+        .filter(|argument| argument != "--elevate")
+        .collect::<Vec<_>>()
+        .join(" ");
+    let directory = std::env::current_dir().unwrap_or_default();
+
+    let operation = HSTRING::from("runas");
+    let file = HSTRING::from(executable.as_os_str());
+    let parameters = HSTRING::from(arguments);
+    let working_directory = HSTRING::from(directory.as_os_str());
+
+    // SAFETY: every pointer is a live HSTRING for the duration of the call.
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            &operation,
+            &file,
+            &parameters,
+            &working_directory,
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW returns a value above 32 on success and an error code below.
+    let code = result.0 as isize;
+    match code {
+        code if code > 32 => Ok(()),
+        SE_ERR_ACCESSDENIED => Err(ElevateError::Declined),
+        code => Err(ElevateError::Failed(code as i32)),
+    }
+}
+
 /// True when the foreground window looks like a Path of Exile client.
 ///
 /// The lab never intercepts input unless this holds, so a stuck state machine

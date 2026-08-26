@@ -150,6 +150,8 @@ mod app {
         /// interception policy are independent choices and conflating them was
         /// what made this feel unusable.
         pub block_first: bool,
+        /// Relaunch elevated at startup instead of running as invoked.
+        pub elevate: bool,
         /// Skip the mouse hook entirely and gate polling on a hotkey.
         ///
         /// The hook only ever answered "is the user crafting", and a hotkey
@@ -182,6 +184,7 @@ mod app {
                 observe: false,
                 block_first: false,
                 no_hook: false,
+                elevate: false,
                 active_window_ms: 1_200,
                 watch_interval_ms: 40,
             }
@@ -687,7 +690,8 @@ mod app {
                 );
                 if armed && clipboard::foreground_process_outranks_us() {
                     println!("  [!] the game outranks this process — injected input cannot reach");
-                    println!("      it, so nothing will ever be read. Relaunch elevated.");
+                    println!("      it, so nothing will ever be read. Quit and rerun with");
+                    println!("      --elevate to get there in one step.");
                 }
                 if !armed {
                     last_text = None;
@@ -1221,11 +1225,23 @@ mod app {
                 "--observe" => options.observe = true,
                 "--block-first" => options.block_first = true,
                 "--no-hook" => options.no_hook = true,
+                "--elevate" => options.elevate = true,
                 "--active-window-ms" => options.active_window_ms = value()?,
                 "--watch-interval-ms" => options.watch_interval_ms = value()?,
                 "--help" | "-h" => {
                     println!(
-                        "usage: clip-only-lab [--test-copy N] [--scancode] [--budget-ms N] [--first-delay-ms N] [--poll-gap-ms N] [--copy-timeout-ms N] [--deadline-ms N] [--unlock-after-ms N]"
+                        "usage: clip-only-lab [OPTIONS]
+
+  --elevate               relaunch as Administrator (needed only when the
+                          client itself runs elevated)
+  --no-hook               install no mouse hook; Ctrl+Shift+F10 gates polling
+  --watch-interval-ms N   poll gap while crafting (default 15)
+  --copy-timeout-ms N     per-copy deadline (default 25) — sets detection lag
+  --block-first           block every click until a verdict (~2.9 presses/orb)
+  --observe               measure craft latency, blocking nothing
+  --test-copy N           check Ctrl+C alone, no hook and no rules
+  --scancode              send scan codes instead of virtual keys
+  --budget-ms N           latency to score against (default 120)"
                     );
                     std::process::exit(0);
                 }
@@ -1264,7 +1280,7 @@ mod app {
             println!("  >> The game outranks this process: its token cannot be read from here,");
             println!("  >> which only happens when it runs at a higher integrity level. Input");
             println!("  >> injected from here will not reach it, so every copy below will time");
-            println!("  >> out. Relaunch this from an elevated terminal.");
+            println!("  >> out. Quit and rerun with --elevate.");
             println!();
         }
 
@@ -1364,6 +1380,19 @@ mod app {
             eprintln!("{error}");
             std::process::exit(2);
         });
+        // Asked for explicitly, or already elevated and therefore a no-op.
+        if options.elevate && clipboard::process_is_elevated() == Some(false) {
+            println!("Requesting Administrator — accept the prompt to continue in a new window.");
+            match clipboard::relaunch_elevated() {
+                Ok(()) => return,
+                Err(error) => {
+                    eprintln!("Could not relaunch elevated: {error}");
+                    eprintln!("Continuing unelevated; injected input will not reach an");
+                    eprintln!("elevated client.");
+                }
+            }
+        }
+
         let profile = match LabProfile::load_release() {
             Ok(profile) => profile,
             Err(error) => {
