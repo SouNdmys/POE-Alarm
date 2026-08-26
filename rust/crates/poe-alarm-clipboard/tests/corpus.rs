@@ -6,6 +6,7 @@
 //! checks assert invariants that must hold for all of them, and let a
 //! disagreement point at the item that broke.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use poe_alarm_clipboard::{ModFilter, ModKind, ParsedItem, parse};
@@ -111,6 +112,49 @@ fn expected_kind(annotation: &str) -> ModKind {
     }
 }
 
+/// Pairs every modifier line with the annotation that introduced it.
+///
+/// Decoration lines - the parenthesised explanations the client appends, like
+/// `(Maimed enemies have 30% reduced Movement Speed)` - are not modifiers and
+/// are left out.
+fn annotated_lines(text: &str) -> Vec<(ModKind, &str)> {
+    // Status and influence tags sit directly after the last modifier with no
+    // separator, so they have to be named. Listed here literally rather than
+    // borrowed from the parser, for the same reason `expected_kind` is: a test
+    // that reuses the code under test proves only self-consistency.
+    const TAGS: &[&str] = &[
+        "Searing Exarch Item",
+        "Eater of Worlds Item",
+        "Shaper Item",
+        "Elder Item",
+        "Crusader Item",
+        "Redeemer Item",
+        "Hunter Item",
+        "Warlord Item",
+        "Fractured Item",
+        "Synthesised Item",
+        "Corrupted",
+        "Mirrored",
+        "Unidentified",
+    ];
+    let mut pairs = Vec::new();
+    let mut current: Option<ModKind> = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('{') {
+            current = Some(expected_kind(line));
+        } else if line.is_empty() || line.chars().all(|c| c == '-') {
+            current = None;
+        } else if let Some(kind) = current
+            && !line.starts_with('(')
+            && !line.starts_with('\u{ff08}')
+            && !TAGS.contains(&line)
+        {
+            pairs.push((kind, line));
+        }
+    }
+    pairs
+}
+
 fn annotation_kinds(text: &str) -> Vec<ModKind> {
     text.lines()
         .map(str::trim)
@@ -162,6 +206,55 @@ fn every_item_in_the_corpus_parses() {
             case.label
         );
     }
+}
+
+/// Every line the client wrote under an annotation is accounted for.
+///
+/// Either it reaches the rules, or the filter turned it down for a category the
+/// client itself named. Nothing may simply vanish. This is the invariant the
+/// tool actually rests on: a false alarm costs a glance, a missed roll costs the
+/// item, and the user does not have to care what a given annotation word means
+/// as long as the affix they typed in gets found.
+///
+/// Deliberately compares LINES, not counts. A count comparison held while whole
+/// affixes were being deleted as flavour text and whole items were losing every
+/// modifier to a mis-read trailing section.
+#[test]
+fn no_annotated_modifier_line_vanishes_unaccounted() {
+    let filter = ModFilter::default();
+    let mut checked = 0_usize;
+    for case in all_cases() {
+        let annotated = annotated_lines(&case.text);
+        if annotated.is_empty() {
+            continue;
+        }
+        let expected: BTreeSet<&str> = annotated
+            .iter()
+            .filter(|(kind, _)| filter.accepts(*kind))
+            .map(|(_, line)| *line)
+            .collect();
+        let item = parsed(&case, filter);
+        let actual: BTreeSet<&str> = item
+            .groups
+            .iter()
+            .flat_map(|group| group.lines.iter().map(String::as_str))
+            .collect();
+
+        let lost: Vec<_> = expected.difference(&actual).collect();
+        let invented: Vec<_> = actual.difference(&expected).collect();
+        assert!(
+            lost.is_empty(),
+            "{}: these lines never reached the rules: {lost:#?}",
+            case.label
+        );
+        assert!(
+            invented.is_empty(),
+            "{}: these lines were not annotated as matchable: {invented:#?}",
+            case.label
+        );
+        checked += 1;
+    }
+    assert!(checked >= 40, "only checked {checked} annotated items");
 }
 
 #[test]
