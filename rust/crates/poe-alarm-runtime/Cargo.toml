@@ -14,7 +14,3 @@ poe-alarm-monitoring = { path = "../poe-alarm-monitoring" }
 poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
 poe-alarm-settings = { path = "../poe-alarm-settings" }
 poe-alarm-vision = { path = "../poe-alarm-vision" }
-
-[[bin]]
-name = "poe-alarm-runtime-soak"
-path = "src/bin/runtime_soak.rs"

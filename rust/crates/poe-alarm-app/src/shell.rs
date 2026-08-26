@@ -311,7 +311,8 @@ impl AppShell {
                     self.push_log(LogKind::Meta, self.t().log_selection_cancelled.to_owned());
                 }
                 PlatformEvent::RegionSelectionFailed => {
-                    self.notice = Some((StatusKind::Error, self.t().notice_selection_failed.into()));
+                    self.notice =
+                        Some((StatusKind::Error, self.t().notice_selection_failed.into()));
                 }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
@@ -663,7 +664,11 @@ impl AppShell {
         let slots = Self::slot_count(&template).max(cond.numeric_constraints.len());
         let rows: Vec<(NumericConstraintMode, String, String)> = (0..slots)
             .map(|ix| {
-                let nc = cond.numeric_constraints.get(ix).cloned().unwrap_or_default();
+                let nc = cond
+                    .numeric_constraints
+                    .get(ix)
+                    .cloned()
+                    .unwrap_or_default();
                 let min = match nc.mode {
                     NumericConstraintMode::Exactly => nc.expected,
                     _ => nc.minimum,
@@ -916,7 +921,12 @@ impl AppShell {
             .tree
             .iter()
             .position(|n| matches!(n.node, NodeRef::Condition(..)))
-            .or_else(|| self.s.tree.iter().position(|n| matches!(n.node, NodeRef::Group(_))));
+            .or_else(|| {
+                self.s
+                    .tree
+                    .iter()
+                    .position(|n| matches!(n.node, NodeRef::Group(_)))
+            });
         self.s.selected = target.unwrap_or(0);
         self.sync_editor_from_selection(window, cx);
         cx.notify();
@@ -950,7 +960,12 @@ impl AppShell {
     }
 
     /// "指定条数"步进(±1,夹在 1..=词缀数)。
-    pub fn adjust_required_count(&mut self, delta: i64, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn adjust_required_count(
+        &mut self,
+        delta: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
             NodeRef::Game => return,
@@ -972,7 +987,12 @@ impl AppShell {
     }
 
     /// 数值行的比较方式切换,随手写回并自动保存。
-    pub fn set_value_row_mode(&mut self, ix: usize, mode: NumericConstraintMode, cx: &mut Context<Self>) {
+    pub fn set_value_row_mode(
+        &mut self,
+        ix: usize,
+        mode: NumericConstraintMode,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(row) = self.s.value_rows.get_mut(ix) {
             row.mode = mode;
             if self.apply_editor_to_selection(cx) {
@@ -1119,15 +1139,15 @@ impl AppShell {
             {
                 let _ = this.update(cx, |this: &mut AppShell, cx| {
                     if let Some(backend) = &mut this.backend {
-                        backend.settings.custom_alert_sound_path =
-                            Some(path.display().to_string());
+                        backend.settings.custom_alert_sound_path = Some(path.display().to_string());
                     }
                     this.invalidate_runtime();
                     this.persist();
-                    let message = this
-                        .t()
-                        .log_sound_changed_fmt
-                        .replacen("{}", &path.display().to_string(), 1);
+                    let message = this.t().log_sound_changed_fmt.replacen(
+                        "{}",
+                        &path.display().to_string(),
+                        1,
+                    );
                     this.push_log(LogKind::Meta, message);
                     cx.notify();
                 });
@@ -1303,13 +1323,35 @@ impl AppShell {
             .child(caption(text.game_label))
             .child(
                 seg(div())
-                    .child(chip("pf-poe1", "POE 1", game == GameProfile::Poe1, cx, |t, w, cx| {
-                        t.switch_profile(Some(poe_alarm_settings::GameProfile::Poe1), None, w, cx)
-                    }))
+                    .child(chip(
+                        "pf-poe1",
+                        "POE 1",
+                        game == GameProfile::Poe1,
+                        cx,
+                        |t, w, cx| {
+                            t.switch_profile(
+                                Some(poe_alarm_settings::GameProfile::Poe1),
+                                None,
+                                w,
+                                cx,
+                            )
+                        },
+                    ))
                     .child(
-                        chip("pf-poe2", "POE 2", game == GameProfile::Poe2, cx, |t, w, cx| {
-                            t.switch_profile(Some(poe_alarm_settings::GameProfile::Poe2), None, w, cx)
-                        })
+                        chip(
+                            "pf-poe2",
+                            "POE 2",
+                            game == GameProfile::Poe2,
+                            cx,
+                            |t, w, cx| {
+                                t.switch_profile(
+                                    Some(poe_alarm_settings::GameProfile::Poe2),
+                                    None,
+                                    w,
+                                    cx,
+                                )
+                            },
+                        )
                         .border_l_1()
                         .border_color(c(HAIRLINE)),
                     ),

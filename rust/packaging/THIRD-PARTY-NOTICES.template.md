@@ -1,25 +1,9 @@
 # POE Alarm Rust Preview — Third-Party Notices
 
 This archive is the native Rust preview of POE Alarm. It does not contain the .NET desktop
-runtime, Tauri, WebView, Node.js, Python, or the Paddle framework.
-
-## PP-OCRv5 mobile recognition model and dictionary
-
-- Project: PaddleOCR / PaddlePaddle
-- Source: https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx
-- License: Apache License 2.0
-- Included license: `licenses/PaddlePaddle-Apache-2.0.txt`
-
-The model and dictionary are used locally for bounded OCR verification. POE Alarm is not
-affiliated with or endorsed by PaddlePaddle.
-
-## ONNX Runtime 1.28.0
-
-- Project: Microsoft ONNX Runtime
-- Source: https://github.com/microsoft/onnxruntime
-- License: MIT, with upstream third-party notices
-- Included files: `licenses/ONNX-Runtime-MIT.txt` and
-  `licenses/ONNX-Runtime-ThirdPartyNotices.txt`
+runtime, Tauri, WebView, Node.js, Python, a machine-learning runtime, or any recognition
+model. Affixes are read from the item text the game client itself writes to the clipboard,
+so there is nothing to recognise and nothing to ship for it.
 
 ## Microsoft Visual C++ runtime
 

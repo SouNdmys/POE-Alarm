@@ -3,9 +3,7 @@
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND};
-use windows::Win32::Security::{
-    GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
-};
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
     GetClipboardSequenceNumber, OpenClipboard,
@@ -256,7 +254,8 @@ fn available_formats() -> Vec<String> {
 
 pub(crate) fn held_modifiers() -> HeldModifiers {
     // SAFETY: takes a virtual key code and returns a bitfield.
-    let down = |vk: VIRTUAL_KEY| (unsafe { GetAsyncKeyState(i32::from(vk.0)) } as u16 & 0x8000) != 0;
+    let down =
+        |vk: VIRTUAL_KEY| (unsafe { GetAsyncKeyState(i32::from(vk.0)) } as u16 & 0x8000) != 0;
     HeldModifiers {
         control: down(VK_CONTROL),
         shift: down(VK_SHIFT),
@@ -322,7 +321,8 @@ pub(crate) fn foreground_process_outranks_us() -> bool {
         return false;
     }
     // SAFETY: a refused open simply yields Err.
-    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
+    else {
         return true;
     };
     let mut token = HANDLE::default();

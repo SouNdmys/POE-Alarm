@@ -9,9 +9,8 @@ use poe_alarm_core::{
     LogicalAffixMatch, NumericConstraint, ResultGroupMode, RuleSetDefinition,
 };
 use poe_alarm_monitoring::{
-    CancellationToken, EventSink, Monitor, MonitorClock, MonitorDetection,
-    MonitorEvent, AffixSource, MonitorPlan, MonitorState, RecognitionResult,
-    ScanPace, StructuredOcrSupport,
+    AffixSource, CancellationToken, EventSink, Monitor, MonitorClock, MonitorDetection,
+    MonitorEvent, MonitorPlan, MonitorState, RecognitionResult, ScanPace, StructuredOcrSupport,
 };
 
 const WAIT_LIMIT: Duration = Duration::from_secs(2);
@@ -67,7 +66,10 @@ impl FakeOcr {
         )
     }
 
-    fn run_step(&mut self, cancellation: &CancellationToken) -> Result<RecognitionResult, TestError> {
+    fn run_step(
+        &mut self,
+        cancellation: &CancellationToken,
+    ) -> Result<RecognitionResult, TestError> {
         {
             let mut trace = self
                 .trace
@@ -503,9 +505,7 @@ fn quick_and_structured_use_distinct_single_request_routes() {
     let (clock, _) = GatedClock::new();
     let structured_events = RecordingEvents::default();
     let mut structured = Monitor::new(ocr, clock, structured_events.clone());
-    structured
-        .start(MonitorPlan::Structured(rules))
-        .unwrap();
+    structured.start(MonitorPlan::Structured(rules)).unwrap();
     structured_events.wait_until(|events| {
         events
             .iter()

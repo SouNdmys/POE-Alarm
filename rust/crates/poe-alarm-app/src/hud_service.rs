@@ -8,8 +8,8 @@ use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
 use poe_alarm_platform_win::{
-    CaptureAffinity, HudInteractionMode, HudWindow, HudWindowConfig, HudWindowPolicy, RectI,
-    SizeI, resolve_hud_position,
+    CaptureAffinity, HudInteractionMode, HudWindow, HudWindowConfig, HudWindowPolicy, RectI, SizeI,
+    resolve_hud_position,
 };
 
 use crate::backend::PlatformEvent;
@@ -56,8 +56,9 @@ impl HudService {
             let size = SizeI::new(HUD_WIDTH, HUD_HEIGHT).expect("HUD size is positive");
             let work = work_area();
             let native_placement = match (placement.relative_x, placement.relative_y) {
-                (Some(x), Some(y)) => poe_alarm_platform_win::HudPlacement::manual(x, y)
-                    .unwrap_or_default(),
+                (Some(x), Some(y)) => {
+                    poe_alarm_platform_win::HudPlacement::manual(x, y).unwrap_or_default()
+                }
                 _ => poe_alarm_platform_win::HudPlacement::Automatic,
             };
             let origin = resolve_hud_position(work, size, native_placement, None);

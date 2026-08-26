@@ -1,7 +1,7 @@
 //! Non-blocking application runtime for native POE Alarm.
 //!
 //! The Win32 UI owns only a bounded command sender and a non-blocking event
-//! receiver. Capture, OCR, monitor shutdown, screenshot replay and alert
+//! receiver. Reading the item under the cursor, monitor shutdown and alert
 //! coordination run on background threads. There is intentionally no careful
 //! or yellow-alert mode in this runtime.
 
@@ -18,7 +18,9 @@ mod protection;
 mod tests;
 
 pub use actor::{ProductionRuntimeConfig, RuntimeHandle, RuntimeSendError};
-pub use backend::BackendError;
+pub use backend::{
+    AffixSourceFactory, BackendError, BoxedAffixSource, DynamicSource, ProductionSourceFactory,
+};
 pub use clipboard_source::{ClipboardSource, SourceError};
 pub use compile::{
     CompiledRuntimeSettings, SettingsFieldError, SettingsValidationError, compile_settings,

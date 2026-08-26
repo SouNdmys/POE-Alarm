@@ -66,10 +66,7 @@ pub enum ClipboardError {
     /// `SendInput` did not deliver the whole key sequence.
     InputRejected { delivered: u32, expected: u32 },
     /// A Win32 call failed outright.
-    Os {
-        operation: &'static str,
-        code: i32,
-    },
+    Os { operation: &'static str, code: i32 },
     /// This build has no clipboard support.
     Unsupported,
 }
@@ -83,7 +80,10 @@ impl std::fmt::Display for ClipboardError {
                 waited.as_secs_f64() * 1_000.0
             ),
             Self::Busy { attempts } => {
-                write!(formatter, "clipboard stayed locked across {attempts} attempts")
+                write!(
+                    formatter,
+                    "clipboard stayed locked across {attempts} attempts"
+                )
             }
             Self::NoTextFormat { formats } => {
                 if formats.is_empty() {
@@ -407,12 +407,19 @@ mod tests {
             .is_transient()
         );
         assert!(ClipboardError::EmptyText.is_transient());
-        assert!(ClipboardError::NoTextFormat { formats: Vec::new() }.is_transient());
-        assert!(!ClipboardError::InputRejected {
-            delivered: 0,
-            expected: 4
-        }
-        .is_transient());
+        assert!(
+            ClipboardError::NoTextFormat {
+                formats: Vec::new()
+            }
+            .is_transient()
+        );
+        assert!(
+            !ClipboardError::InputRejected {
+                delivered: 0,
+                expected: 4
+            }
+            .is_transient()
+        );
         assert!(
             !ClipboardError::Os {
                 operation: "GlobalLock",

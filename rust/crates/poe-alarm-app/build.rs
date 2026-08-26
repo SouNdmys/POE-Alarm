@@ -5,7 +5,10 @@ fn main() {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("assets/poe-alarm.ico");
         resource.set("ProductName", "POE Alarm");
-        resource.set("FileDescription", "POE Alarm — OCR crafting alarm for Path of Exile");
+        resource.set(
+            "FileDescription",
+            "POE Alarm — OCR crafting alarm for Path of Exile",
+        );
         resource.set("LegalCopyright", "\u{a9} SouNd");
         if let Err(error) = resource.compile() {
             println!("cargo:warning=windows resource compilation failed: {error}");

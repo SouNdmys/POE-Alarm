@@ -49,7 +49,11 @@ impl AppShell {
         };
 
         let primary_label = self.t().primary_label(self.s.run);
-        let game_crumb = match self.backend.as_ref().map(|b| b.settings.selected_game_profile) {
+        let game_crumb = match self
+            .backend
+            .as_ref()
+            .map(|b| b.settings.selected_game_profile)
+        {
             Some(poe_alarm_settings::GameProfile::Poe1) => "POE1",
             _ => "POE2",
         };
@@ -288,8 +292,7 @@ impl AppShell {
             r#"Add-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
         const OCR_VERIFY_COMMAND: &str =
             r#"Get-WindowsCapability -Online -Name "Language.OCR~~~zh-TW~0.0.1.0""#;
-        const OCR_DOC_URL: &str =
-            "https://learn.microsoft.com/zh-cn/windows-hardware/manufacture/desktop/add-language-packs-to-windows";
+        const OCR_DOC_URL: &str = "https://learn.microsoft.com/zh-cn/windows-hardware/manufacture/desktop/add-language-packs-to-windows";
         const REPO_URL: &str = "https://github.com/SouNdmys/POE-Alarm";
         const CONTACT: &str = "soundmys1994@gmail.com";
 
@@ -339,15 +342,16 @@ impl AppShell {
                 .text_color(c(TEXT_PRIMARY))
                 .child(text)
         };
-        let link = |id: &'static str, label: &'static str, url: &'static str, cx: &mut Context<Self>| {
-            div()
-                .id(id)
-                .text_size(fs(FS_11_5))
-                .text_color(c(ACCENT_TEXT))
-                .hover(|s| s.bg(c(HOVER)))
-                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(url)))
-                .child(label)
-        };
+        let link =
+            |id: &'static str, label: &'static str, url: &'static str, cx: &mut Context<Self>| {
+                div()
+                    .id(id)
+                    .text_size(fs(FS_11_5))
+                    .text_color(c(ACCENT_TEXT))
+                    .hover(|s| s.bg(c(HOVER)))
+                    .on_click(cx.listener(move |_, _, _, cx| cx.open_url(url)))
+                    .child(label)
+            };
 
         let t = self.t();
         let steps = {
@@ -415,13 +419,15 @@ impl AppShell {
                                                 t.help_copy,
                                                 cx,
                                             )
-                                            .on_click(cx.listener(|_, _, _, cx| {
-                                                cx.write_to_clipboard(
-                                                    gpui::ClipboardItem::new_string(
-                                                        OCR_INSTALL_COMMAND.to_owned(),
-                                                    ),
-                                                );
-                                            })),
+                                            .on_click(
+                                                cx.listener(|_, _, _, cx| {
+                                                    cx.write_to_clipboard(
+                                                        gpui::ClipboardItem::new_string(
+                                                            OCR_INSTALL_COMMAND.to_owned(),
+                                                        ),
+                                                    );
+                                                }),
+                                            ),
                                         ),
                                 )
                                 .child(line(t.help_ocr_verify))
@@ -438,13 +444,15 @@ impl AppShell {
                                                 t.help_copy,
                                                 cx,
                                             )
-                                            .on_click(cx.listener(|_, _, _, cx| {
-                                                cx.write_to_clipboard(
-                                                    gpui::ClipboardItem::new_string(
-                                                        OCR_VERIFY_COMMAND.to_owned(),
-                                                    ),
-                                                );
-                                            })),
+                                            .on_click(
+                                                cx.listener(|_, _, _, cx| {
+                                                    cx.write_to_clipboard(
+                                                        gpui::ClipboardItem::new_string(
+                                                            OCR_VERIFY_COMMAND.to_owned(),
+                                                        ),
+                                                    );
+                                                }),
+                                            ),
                                         ),
                                 )
                                 .child(
@@ -453,7 +461,12 @@ impl AppShell {
                                         .items_center()
                                         .gap_2()
                                         .child(line(t.help_ocr_settings_path))
-                                        .child(link("help-ms-doc", t.help_ocr_doc_link, OCR_DOC_URL, cx)),
+                                        .child(link(
+                                            "help-ms-doc",
+                                            t.help_ocr_doc_link,
+                                            OCR_DOC_URL,
+                                            cx,
+                                        )),
                                 ),
                         )
                         .child(section(t.help_about_title))
@@ -465,10 +478,11 @@ impl AppShell {
                                     div()
                                         .text_size(fs(FS_11_5))
                                         .text_color(c(TEXT_SECONDARY))
-                                        .child(SharedString::from(
-                                            t.help_about_fmt
-                                                .replacen("{}", env!("CARGO_PKG_VERSION"), 1),
-                                        )),
+                                        .child(SharedString::from(t.help_about_fmt.replacen(
+                                            "{}",
+                                            env!("CARGO_PKG_VERSION"),
+                                            1,
+                                        ))),
                                 )
                                 .child(
                                     div()
@@ -504,19 +518,25 @@ impl AppShell {
             Some(b) => (
                 b.settings.keep_hud_visible,
                 b.settings.allow_overlay_capture,
-                b.sound_label().unwrap_or_else(|| t.sound_builtin.to_owned()),
+                b.sound_label()
+                    .unwrap_or_else(|| t.sound_builtin.to_owned()),
                 b.settings.ui_language.starts_with("en"),
             ),
             None => (true, true, "—".to_owned(), false),
         };
         let (region, ocr) = match &self.backend {
             Some(b) => (
-                b.region_label().unwrap_or_else(|| t.region_unset.to_owned()),
+                b.region_label()
+                    .unwrap_or_else(|| t.region_unset.to_owned()),
                 b.ocr_language_label(),
             ),
             None => ("—".to_owned(), "—".to_owned()),
         };
-        let hotkey_index = self.backend.as_ref().map(|b| b.start_hotkey_index()).unwrap_or(0);
+        let hotkey_index = self
+            .backend
+            .as_ref()
+            .map(|b| b.start_hotkey_index())
+            .unwrap_or(0);
         let label = |caption: &'static str| {
             div()
                 .w(px(LABEL_COL))
@@ -817,27 +837,25 @@ impl AppShell {
                 // "指定条数"步进 + 真实条数;其他模式只显示共 N 条。
                 let summary = self.selected_group_summary();
                 let total = summary.map(|(_, _, n)| n).unwrap_or(0);
-                let stepper = |id: &'static str,
-                               label: &'static str,
-                               delta: i64,
-                               cx: &mut Context<Self>| {
-                    div()
-                        .id(id)
-                        .w(px(20.))
-                        .h(px(20.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .border_1()
-                        .border_color(c(HAIRLINE))
-                        .text_size(fs(FS_11_5))
-                        .text_color(c(TEXT_SECONDARY))
-                        .hover(|s| s.bg(c(HOVER)))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.adjust_required_count(delta, window, cx);
-                        }))
-                        .child(label)
-                };
+                let stepper =
+                    |id: &'static str, label: &'static str, delta: i64, cx: &mut Context<Self>| {
+                        div()
+                            .id(id)
+                            .w(px(20.))
+                            .h(px(20.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .border_1()
+                            .border_color(c(HAIRLINE))
+                            .text_size(fs(FS_11_5))
+                            .text_color(c(TEXT_SECONDARY))
+                            .hover(|s| s.bg(c(HOVER)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.adjust_required_count(delta, window, cx);
+                            }))
+                            .child(label)
+                    };
                 let mut wrap = div()
                     .flex_none()
                     .h_flex()
@@ -858,9 +876,11 @@ impl AppShell {
                         )
                         .child(stepper("wb-req-inc", "+", 1, cx));
                 }
-                wrap.child(SharedString::from(
-                    t.total_conditions_fmt.replacen("{}", &total.to_string(), 1),
-                ))
+                wrap.child(SharedString::from(t.total_conditions_fmt.replacen(
+                    "{}",
+                    &total.to_string(),
+                    1,
+                )))
             });
 
         // 完整词缀模板(左 2px accent 竖条 = 「这是被匹配的原文」)
@@ -921,7 +941,13 @@ impl AppShell {
                         .py(px(6.))
                         .child(t.numeric_column),
                 )
-                .child(div().flex_1().px(px(10.)).py(px(6.)).child(t.comparison_column))
+                .child(
+                    div()
+                        .flex_1()
+                        .px(px(10.))
+                        .py(px(6.))
+                        .child(t.comparison_column),
+                )
                 .child(
                     div()
                         .w(px(110.))
@@ -1021,9 +1047,11 @@ impl AppShell {
                         .text_size(fs(FS_12))
                         .text_color(c(TEXT_META))
                         .whitespace_nowrap()
-                        .child(SharedString::from(
-                            t.numeric_slot_fmt.replacen("{}", &(ix + 1).to_string(), 1),
-                        )),
+                        .child(SharedString::from(t.numeric_slot_fmt.replacen(
+                            "{}",
+                            &(ix + 1).to_string(),
+                            1,
+                        ))),
                 )
                 .child(div().flex_1().px(px(10.)).py(px(4.)).child(picker))
                 .child(bound_cell(&row.min, uses_min))
@@ -1061,16 +1089,28 @@ impl AppShell {
                     )
                     .child(div().flex_1().h(px(1.)).bg(c(HAIRLINE_SOFT)))
                     .child(
-                        button("wb-del-cond", LedgerButton::Destructive, t.delete_condition, cx)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.remove_selected_condition(window, cx)
-                            })),
+                        button(
+                            "wb-del-cond",
+                            LedgerButton::Destructive,
+                            t.delete_condition,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.remove_selected_condition(window, cx)
+                        })),
                     )
                     .child(
-                        button("wb-del-group", LedgerButton::Destructive, t.delete_result, cx)
-                            .on_click(cx.listener(|this, _, window, cx| {
+                        button(
+                            "wb-del-group",
+                            LedgerButton::Destructive,
+                            t.delete_result,
+                            cx,
+                        )
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
                                 this.remove_selected_group(window, cx)
-                            })),
+                            }),
+                        ),
                     ),
             )
             .child(table)

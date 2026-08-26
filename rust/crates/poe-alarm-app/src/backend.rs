@@ -237,12 +237,15 @@ impl Backend {
 
     /// 自定义提示音文件名;使用内置音效时为 None(占位文案由界面按语言提供)。
     pub fn sound_label(&self) -> Option<String> {
-        self.settings.custom_alert_sound_path.as_deref().map(|path| {
-            std::path::Path::new(path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_owned())
-        })
+        self.settings
+            .custom_alert_sound_path
+            .as_deref()
+            .map(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_owned())
+            })
     }
 
     /// 更新状态浮窗内容(非 Windows 为空操作)。
@@ -370,10 +373,7 @@ impl Backend {
             let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
             alert.allow_overlay_capture = self.settings.allow_overlay_capture;
             match poe_alarm_runtime::RuntimeHandle::start_production(
-                poe_alarm_runtime::ProductionRuntimeConfig {
-                    alert,
-                    paddle: None,
-                },
+                poe_alarm_runtime::ProductionRuntimeConfig { alert },
             ) {
                 Ok(handle) => break (handle, fell_back),
                 Err(e) => {
@@ -419,15 +419,19 @@ impl Backend {
         }
     }
 
-    /// 识别截图:用当前设置在 runtime 里回放存档截图。
+    /// 检查物品文本:用当前设置跡跑一次规则判定。
+    ///
+    /// 文件里存的是 Ctrl+C 原文而不再是截图。
     #[cfg(windows)]
     pub fn test_screenshot(&mut self, path: std::path::PathBuf) -> Result<(), String> {
         self.ensure_runtime()?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let settings = self.settings.clone().normalize();
         let request = poe_alarm_runtime::ScreenshotRequest::new(
             poe_alarm_runtime::RuntimeRequestId(1),
             settings,
-            path,
+            text,
         );
         self.runtime
             .as_ref()
@@ -556,8 +560,9 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
         // SAFETY: standard thread message loop; the manager lives for the loop's duration.
         while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
             if message.message == WM_APP_SET_START_HOTKEY {
-                if let Some(option) =
-                    StartMonitoringHotKey::OPTIONS.get(message.wParam.0).copied()
+                if let Some(option) = StartMonitoringHotKey::OPTIONS
+                    .get(message.wParam.0)
+                    .copied()
                     && let Err(error) = manager.reconfigure_start(option)
                 {
                     eprintln!("start hotkey reconfiguration failed: {error}");

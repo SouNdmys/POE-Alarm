@@ -199,11 +199,7 @@ mod tests {
             MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN
         );
 
-        settings
-            .profiles
-            .poe2
-            .selected_rules_mut()
-            .rule_editor_mode = RuleEditorMode::Structured;
+        settings.profiles.poe2.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
         settings
             .profiles
             .poe2
@@ -234,11 +230,7 @@ mod tests {
     #[test]
     fn structured_rules_are_compiled_once() {
         let mut settings = valid_settings();
-        settings
-            .profiles
-            .poe1
-            .selected_rules_mut()
-            .rule_editor_mode = RuleEditorMode::Structured;
+        settings.profiles.poe1.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
         settings
             .profiles
             .poe1

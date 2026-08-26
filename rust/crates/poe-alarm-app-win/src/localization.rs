@@ -483,9 +483,8 @@ impl TextCatalog {
         self,
         is_match: bool,
         lines: &[String],
-        load_ms: f64,
-        preprocessing_ms: f64,
-        recognition_ms: f64,
+        modifier_count: usize,
+        parse_ms: f64,
         evaluation_ms: f64,
     ) -> String {
         let outcome = match (self.language, is_match) {
@@ -496,36 +495,37 @@ impl TextCatalog {
         };
         let timing = match self.language {
             UiLanguage::SimplifiedChinese => format!(
-                "读取 {load_ms:.1} 毫秒  ·  画面处理 {preprocessing_ms:.1} 毫秒  ·  文字识别 {recognition_ms:.1} 毫秒  ·  规则判断 {evaluation_ms:.1} 毫秒"
+                "读出 {modifier_count} 条词缀  ·  解析 {parse_ms:.1} 毫秒  ·  规则判断 {evaluation_ms:.1} 毫秒"
             ),
             UiLanguage::English => format!(
-                "Load {load_ms:.1} ms  ·  preprocessing {preprocessing_ms:.1} ms  ·  recognition {recognition_ms:.1} ms  ·  rule check {evaluation_ms:.1} ms"
+                "{modifier_count} modifiers  ·  parse {parse_ms:.1} ms  ·  rule check {evaluation_ms:.1} ms"
             ),
         };
         let line_heading = match self.language {
-            UiLanguage::SimplifiedChinese => "识别到的文字：",
-            UiLanguage::English => "Recognized text:",
+            UiLanguage::SimplifiedChinese => "规则看到的词缀：",
+            UiLanguage::English => "Modifiers the rules saw:",
         };
+        // A blank entry is a group boundary, not an empty modifier. Drawing it
+        // as a rule keeps the grouping visible instead of looking like a bug.
         let recognized = if lines.is_empty() {
             match self.language {
-                UiLanguage::SimplifiedChinese => "（没有识别到文字）".to_owned(),
-                UiLanguage::English => "(No text was recognized)".to_owned(),
+                UiLanguage::SimplifiedChinese => "（这件物品没有词缀）".to_owned(),
+                UiLanguage::English => "(This item has no modifiers)".to_owned(),
             }
         } else {
-            lines.join("\r\n")
+            lines
+                .iter()
+                .map(|line| {
+                    if line.is_empty() {
+                        "----"
+                    } else {
+                        line.as_str()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\r\n")
         };
         format!("{outcome}\r\n{timing}\r\n{line_heading}\r\n{recognized}")
-    }
-
-    pub fn screenshot_full_image_fallback(self) -> &'static str {
-        match self.language {
-            UiLanguage::SimplifiedChinese => {
-                "提示：保存的识别区域不在这张截图内，本次改为识别整张截图。"
-            }
-            UiLanguage::English => {
-                "Note: The saved capture area is outside this image, so the whole screenshot was analyzed."
-            }
-        }
     }
 
     pub fn hud_status(self, status: MonitorStatus) -> &'static str {
@@ -896,8 +896,7 @@ mod tests {
             zh.hud_empty_target().to_owned(),
             zh.structured_rule_summary("命中方案", 2, 4),
             zh.hud_placement_instruction().to_owned(),
-            zh.screenshot_report(false, &[], 1.0, 2.0, 3.0, 4.0),
-            zh.screenshot_full_image_fallback().to_owned(),
+            zh.screenshot_report(false, &[], 3, 1.0, 2.0),
         ];
         for text in zh_dynamic {
             assert!(
@@ -922,8 +921,7 @@ mod tests {
             en.hud_empty_target().to_owned(),
             en.structured_rule_summary("Match options", 2, 4),
             en.hud_placement_instruction().to_owned(),
-            en.screenshot_report(false, &[], 1.0, 2.0, 3.0, 4.0),
-            en.screenshot_full_image_fallback().to_owned(),
+            en.screenshot_report(false, &[], 3, 1.0, 2.0),
         ];
         for text in en_dynamic {
             assert!(!text.chars().any(is_han), "{text}");

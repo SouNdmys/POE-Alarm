@@ -254,8 +254,14 @@ mod tests {
         assert_eq!(identities[1].line_index, 2);
         assert_eq!(identities[2].line_index, 3);
         // The hybrid's two lines share a band; the standalone prefix does not.
-        assert_eq!(identities[1].physical_band_id, identities[2].physical_band_id);
-        assert_ne!(identities[0].physical_band_id, identities[1].physical_band_id);
+        assert_eq!(
+            identities[1].physical_band_id,
+            identities[2].physical_band_id
+        );
+        assert_ne!(
+            identities[0].physical_band_id,
+            identities[1].physical_band_id
+        );
     }
 
     #[test]

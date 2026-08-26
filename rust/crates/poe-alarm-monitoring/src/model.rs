@@ -1,11 +1,11 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::CancellationToken;
 use poe_alarm_core::{
     AssistedModifierObservation, CompiledRuleSet, FullLineAffixMatcher, LogicalAffixMatch,
     PhysicalLineIdentity, RuleEvaluationResult,
 };
-use crate::CancellationToken;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MonitorState {

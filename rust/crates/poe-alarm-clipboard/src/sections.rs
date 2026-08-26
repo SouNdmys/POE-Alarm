@@ -64,7 +64,13 @@ pub fn is_separator(line: &str) -> bool {
 fn compact(line: &str) -> String {
     line.chars()
         .filter(|character| !character.is_whitespace())
-        .map(|character| if character == '\u{ff1a}' { ':' } else { character })
+        .map(|character| {
+            if character == '\u{ff1a}' {
+                ':'
+            } else {
+                character
+            }
+        })
         .flat_map(char::to_lowercase)
         .collect()
 }

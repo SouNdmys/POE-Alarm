@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use poe_alarm_monitoring::{MonitorSnapshot, MonitorState};
@@ -38,11 +37,17 @@ pub enum RuntimeState {
     Stopped,
 }
 
+/// One offline rule check against item text the user supplied.
+///
+/// The OCR build took a PNG path here and replayed the whole capture pipeline
+/// over it. Item text needs no replay: the client already wrote down exactly
+/// what the item is, so the check is a parse and an evaluation.
 #[derive(Clone, Debug)]
 pub struct ScreenshotRequest {
     pub request_id: RuntimeRequestId,
     pub settings: AppSettings,
-    pub path: PathBuf,
+    /// Raw Ctrl+C item text, verbatim.
+    pub text: String,
 }
 
 impl ScreenshotRequest {
@@ -50,12 +55,12 @@ impl ScreenshotRequest {
     pub fn new(
         request_id: RuntimeRequestId,
         settings: AppSettings,
-        path: impl Into<PathBuf>,
+        text: impl Into<String>,
     ) -> Self {
         Self {
             request_id,
             settings,
-            path: path.into(),
+            text: text.into(),
         }
     }
 }
@@ -138,12 +143,13 @@ pub struct ScreenshotEvaluation {
 pub struct ScreenshotReport {
     pub request_id: RuntimeRequestId,
     pub generation: RuntimeGeneration,
-    pub requested_region: CaptureRegion,
-    pub used_full_image_fallback: bool,
+    /// Modifier lines exactly as the rule engine saw them. A blank entry marks
+    /// the boundary between two physical modifiers, which is the one place the
+    /// engine refuses to join lines across.
     pub lines: Vec<String>,
-    pub load_elapsed: Duration,
-    pub preprocessing_elapsed: Duration,
-    pub recognition_elapsed: Duration,
+    /// How many physical modifiers the item text resolved to.
+    pub modifier_count: usize,
+    pub parse_elapsed: Duration,
     pub evaluation_elapsed: Duration,
     pub evaluation: ScreenshotEvaluation,
 }

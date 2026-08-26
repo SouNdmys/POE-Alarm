@@ -273,9 +273,7 @@ impl HudWindow {
 
     /// 取走最近一次用户拖动结束后的窗口左上角(屏幕坐标)。
     pub fn take_user_move(&mut self) -> Option<PointI> {
-        self.native
-            .take_user_move()
-            .map(|(x, y)| PointI::new(x, y))
+        self.native.take_user_move().map(|(x, y)| PointI::new(x, y))
     }
 }
 

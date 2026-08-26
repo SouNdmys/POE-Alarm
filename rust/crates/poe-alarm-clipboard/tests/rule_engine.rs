@@ -13,7 +13,8 @@ use poe_alarm_core::{
     RuleEvaluationResult, RuleSetDefinition,
 };
 
-const BOW: &str = include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
+const BOW: &str =
+    include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
 
 fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
     CompiledRuleSet::compile(RuleSetDefinition {
@@ -52,7 +53,10 @@ fn a_poedb_template_matches_the_rolled_value_with_its_tier_range() {
 #[test]
 fn a_numeric_floor_reads_the_rolled_value_not_the_range_bounds() {
     let result = evaluate(vec![physical(vec![NumericConstraint::at_least(179.0)])]);
-    assert!(result.is_match, "179 is the rolled value and meets the floor");
+    assert!(
+        result.is_match,
+        "179 is the rolled value and meets the floor"
+    );
 
     let result = evaluate(vec![physical(vec![NumericConstraint::at_least(180.0)])]);
     assert!(!result.is_match, "nothing on the bow rolled above 179");
@@ -78,10 +82,7 @@ fn a_hybrid_template_matches_the_two_lines_of_one_modifier() {
     let result = evaluate(vec![AffixCondition::new(
         "hybrid",
         "增加 (75—79)% 物理傷害\n+(175—200) 命中值",
-        vec![
-            NumericConstraint::ignored(),
-            NumericConstraint::ignored(),
-        ],
+        vec![NumericConstraint::ignored(), NumericConstraint::ignored()],
     )]);
     assert!(result.is_match);
 }
@@ -94,10 +95,7 @@ fn two_separate_modifiers_are_never_joined_into_one() {
     let result = evaluate(vec![AffixCondition::new(
         "bogus-hybrid",
         "增加 (170—179)% 物理傷害\n增加 (75—79)% 物理傷害",
-        vec![
-            NumericConstraint::ignored(),
-            NumericConstraint::ignored(),
-        ],
+        vec![NumericConstraint::ignored(), NumericConstraint::ignored()],
     )]);
     assert!(
         !result.is_match,
@@ -110,16 +108,32 @@ fn one_modifier_cannot_satisfy_two_conditions() {
     // Both conditions canonicalize to `增加 #% 物理傷害`. The bow has two such
     // prefixes, so both should be satisfied — by different modifiers.
     let result = evaluate(vec![
-        AffixCondition::new("high", "增加 #% 物理傷害", vec![NumericConstraint::at_least(170.0)]),
-        AffixCondition::new("low", "增加 #% 物理傷害", vec![NumericConstraint::at_least(75.0)]),
+        AffixCondition::new(
+            "high",
+            "增加 #% 物理傷害",
+            vec![NumericConstraint::at_least(170.0)],
+        ),
+        AffixCondition::new(
+            "low",
+            "增加 #% 物理傷害",
+            vec![NumericConstraint::at_least(75.0)],
+        ),
     ]);
     assert!(result.is_match);
 
     // Only one modifier clears 170, so two conditions demanding it cannot both
     // be met from a single physical modifier.
     let result = evaluate(vec![
-        AffixCondition::new("high", "增加 #% 物理傷害", vec![NumericConstraint::at_least(170.0)]),
-        AffixCondition::new("also-high", "增加 #% 物理傷害", vec![NumericConstraint::at_least(170.0)]),
+        AffixCondition::new(
+            "high",
+            "增加 #% 物理傷害",
+            vec![NumericConstraint::at_least(170.0)],
+        ),
+        AffixCondition::new(
+            "also-high",
+            "增加 #% 物理傷害",
+            vec![NumericConstraint::at_least(170.0)],
+        ),
     ]);
     assert!(!result.is_match);
 }

@@ -10,7 +10,12 @@ use std::path::PathBuf;
 
 use poe_alarm_clipboard::{ModFilter, ModKind, ParsedItem, parse};
 
-const CORPUS_FILES: &[&str] = &["poe1/zh-tw.txt", "poe1/en.txt", "poe2/zh-tw.txt", "poe2/en.txt"];
+const CORPUS_FILES: &[&str] = &[
+    "poe1/zh-tw.txt",
+    "poe1/en.txt",
+    "poe2/zh-tw.txt",
+    "poe2/en.txt",
+];
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

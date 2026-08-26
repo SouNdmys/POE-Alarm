@@ -26,7 +26,6 @@ impl RunPhase {
             RunPhase::Hit => StatusKind::Hit,
         }
     }
-
 }
 
 /// 中央编辑区 tab(词缀条件 / 设置 / 使用说明)。

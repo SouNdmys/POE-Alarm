@@ -512,10 +512,7 @@ impl AppSettings {
         GameProfileSettingsSet {
             poe1: GameProfileSettings {
                 capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
-                rule_profiles: RuleProfileSettingsSet::from_legacy(
-                    &ocr_language,
-                    legacy_rules,
-                ),
+                rule_profiles: RuleProfileSettingsSet::from_legacy(&ocr_language, legacy_rules),
                 ocr_language,
             }
             .normalize(),
@@ -1215,7 +1212,11 @@ mod tests {
         let release = release_settings_path_from(local_app_data);
         fs::create_dir_all(preview.parent().unwrap()).unwrap();
         fs::create_dir_all(release.parent().unwrap()).unwrap();
-        fs::write(&preview, br#"{ "SchemaVersion": 4, "UiLanguage": "zh-CN" }"#).unwrap();
+        fs::write(
+            &preview,
+            br#"{ "SchemaVersion": 4, "UiLanguage": "zh-CN" }"#,
+        )
+        .unwrap();
         fs::write(&release, br#"{ "SchemaVersion": 3 }"#).unwrap();
 
         let store = SettingsStore::release_default_from(local_app_data).unwrap();
@@ -1283,10 +1284,7 @@ mod tests {
         profile.selected_rules_mut().target_affix = "繁中更新".to_owned();
         assert_eq!(profile.rules_for("zh-TW").target_affix, "繁中更新");
         assert_eq!(profile.rules_for("en").target_affix, "english target");
-        assert_eq!(
-            profile.rules_for("unsupported"),
-            profile.rules_for("en")
-        );
+        assert_eq!(profile.rules_for("unsupported"), profile.rules_for("en"));
     }
 
     #[test]
@@ -1647,16 +1645,9 @@ mod tests {
             ..AppSettings::default()
         };
         settings.profiles.poe1.ocr_language = "zh-TW".to_owned();
-        settings
-            .profiles
-            .poe1
-            .rules_for_mut("en")
-            .target_affix = "poe1 english target".to_owned();
-        settings
-            .profiles
-            .poe1
-            .rules_for_mut("zh-TW")
-            .target_affix = "poe1 traditional target".to_owned();
+        settings.profiles.poe1.rules_for_mut("en").target_affix = "poe1 english target".to_owned();
+        settings.profiles.poe1.rules_for_mut("zh-TW").target_affix =
+            "poe1 traditional target".to_owned();
         settings.profiles.poe2 = GameProfileSettings {
             capture_region: Some(ScreenRegion::new(700, 80, 640, 920)),
             ocr_language: "en".to_owned(),
@@ -1732,11 +1723,7 @@ mod tests {
             "poe2 english target"
         );
         assert_eq!(
-            reloaded
-                .profiles
-                .poe2
-                .rules_for("zh-TW")
-                .target_affix,
+            reloaded.profiles.poe2.rules_for("zh-TW").target_affix,
             "poe2 traditional target"
         );
         assert_eq!(

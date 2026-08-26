@@ -1407,11 +1407,15 @@ mod tests {
             .commit_form(valid_quick_form("#% increased Attack Speed"))
             .unwrap();
 
-        state.apply(UiAction::SelectOcrLanguage(
-            OcrLanguage::TraditionalChinese,
-        ));
+        state.apply(UiAction::SelectOcrLanguage(OcrLanguage::TraditionalChinese));
         assert_eq!(state.rule_mode(), RuleMode::Quick);
-        assert!(state.current_profile().selected_rules().target_affix.is_empty());
+        assert!(
+            state
+                .current_profile()
+                .selected_rules()
+                .target_affix
+                .is_empty()
+        );
         state.commit_form(valid_quick_form("+#%暴擊率")).unwrap();
         state.apply(UiAction::SelectRuleMode(RuleMode::MultipleAffixes));
         state
@@ -1426,13 +1430,16 @@ mod tests {
         );
         assert!(state.current_rule_set().is_none());
 
-        state.apply(UiAction::SelectOcrLanguage(
-            OcrLanguage::TraditionalChinese,
-        ));
+        state.apply(UiAction::SelectOcrLanguage(OcrLanguage::TraditionalChinese));
         assert_eq!(state.rule_mode(), RuleMode::MultipleAffixes);
-        assert_eq!(state.current_profile().selected_rules().target_affix, "+#%暴擊率");
         assert_eq!(
-            state.current_condition().map(|condition| condition.template.as_str()),
+            state.current_profile().selected_rules().target_affix,
+            "+#%暴擊率"
+        );
+        assert_eq!(
+            state
+                .current_condition()
+                .map(|condition| condition.template.as_str()),
             Some("+#%暴擊率")
         );
     }

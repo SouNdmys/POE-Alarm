@@ -40,9 +40,8 @@ mod app {
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, MSG, MSLLHOOKSTRUCT,
         PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL,
-        WM_HOTKEY, WM_QUIT,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
+        WM_HOTKEY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
     };
 
     use poe_alarm_clip_only::clipboard::{
@@ -232,8 +231,9 @@ mod app {
         }
 
         match wparam.0 as u32 {
-            WM_LBUTTONDOWN if OBSERVE_ONLY.load(Ordering::Acquire)
-                && STATE.load(Ordering::Acquire) != STATE_LOCKED =>
+            WM_LBUTTONDOWN
+                if OBSERVE_ONLY.load(Ordering::Acquire)
+                    && STATE.load(Ordering::Acquire) != STATE_LOCKED =>
             {
                 if let Some(sender) = CLICK_TX.get() {
                     let _ = sender.try_send(Instant::now());
@@ -386,15 +386,9 @@ mod app {
                     last_error,
                     Some(ClipboardError::NoTextFormat { .. }) | Some(ClipboardError::EmptyText)
                 ) {
-                    println!(
-                        "        The client answered but had nothing to copy. Ctrl+C copies"
-                    );
-                    println!(
-                        "        whatever the cursor is over; holding a currency orb, or"
-                    );
-                    println!(
-                        "        drifting off the item, both produce exactly this."
-                    );
+                    println!("        The client answered but had nothing to copy. Ctrl+C copies");
+                    println!("        whatever the cursor is over; holding a currency orb, or");
+                    println!("        drifting off the item, both produce exactly this.");
                 }
                 return;
             }
@@ -483,7 +477,9 @@ mod app {
                         Verdict::Hit { item, evaluation } => {
                             totals.hits += 1;
                             println!("\x07");
-                            println!("  ==========================================================");
+                            println!(
+                                "  =========================================================="
+                            );
                             println!("   HIT on roll #{index}");
                             if let Some(group) = evaluation.matched_group() {
                                 println!("   matched group: {}", group.name);
@@ -493,7 +489,9 @@ mod app {
                                     println!("     {} {line}", if index == 0 { "-" } else { " " });
                                 }
                             }
-                            println!("  ==========================================================");
+                            println!(
+                                "  =========================================================="
+                            );
                             lock("target affix reached", false);
                         }
                         Verdict::Miss { .. } => {
@@ -550,14 +548,14 @@ mod app {
                             }
                         };
                     std::thread::sleep(Duration::from_millis(delay));
-                    let after =
-                        match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
-                            Ok(outcome) => outcome.text,
-                            Err(_) => {
-                                failures += 1;
-                                continue;
-                            }
-                        };
+                    let after = match clipboard::copy_hovered_item(copy_timeout, options.key_method)
+                    {
+                        Ok(outcome) => outcome.text,
+                        Err(_) => {
+                            failures += 1;
+                            continue;
+                        }
+                    };
 
                     attempts[slot] += 1;
                     observed += 1;
@@ -606,7 +604,9 @@ mod app {
             let bar = "#".repeat((share * 30.0).round() as usize);
             println!(
                 "  {delay:>4}ms   {:>3} / {:<3}          {:>5.1}% {bar}",
-                changed[slot], tried, share * 100.0
+                changed[slot],
+                tried,
+                share * 100.0
             );
             if share >= 0.9 && resolved_by.is_none() {
                 resolved_by = Some(*delay);
@@ -619,14 +619,20 @@ mod app {
                 println!("  no recognizer of any kind can decide sooner, OCR included.");
                 if delay > 150 {
                     println!();
-                    println!("  It is well past the {}ms the OCR path is credited with, which", options.budget_ms);
+                    println!(
+                        "  It is well past the {}ms the OCR path is credited with, which",
+                        options.budget_ms
+                    );
                     println!("  means that number is measuring something other than 'the new");
                     println!("  affixes were readable'. Worth checking before comparing further.");
                 }
             }
             None => {
                 println!("  No delay reached 90%. Either the sample is too small, or the craft");
-                println!("  regularly takes longer than {}ms.", OBSERVE_DELAYS[OBSERVE_DELAYS.len() - 1]);
+                println!(
+                    "  regularly takes longer than {}ms.",
+                    OBSERVE_DELAYS[OBSERVE_DELAYS.len() - 1]
+                );
             }
         }
         let _ = profile;
@@ -746,9 +752,13 @@ mod app {
                             println!("   2. This process is NOT elevated. UIPI stops a");
                             println!("      medium-integrity process from injecting input into an");
                             println!("      elevated window, so if Path of Exile runs as");
-                            println!("      Administrator the Ctrl+C never arrives. --no-hook does");
+                            println!(
+                                "      Administrator the Ctrl+C never arrives. --no-hook does"
+                            );
                             println!("      not avoid this: sending the key needs the elevation,");
-                            println!("      not just the hook. Relaunch from an elevated terminal.");
+                            println!(
+                                "      not just the hook. Relaunch from an elevated terminal."
+                            );
                         } else {
                             println!("   2. Elevation is not it — this process is elevated, so");
                             println!("      cause 1 is the one to check.");
@@ -935,9 +945,7 @@ mod app {
             match clicks.recv_timeout(IDLE_TICK) {
                 Ok(click_at) => {
                     handle_roll(&profile, &mut baseline, &mut totals, click_at, &options);
-                    error_lock_at = ERROR_LOCKED
-                        .load(Ordering::Acquire)
-                        .then(Instant::now);
+                    error_lock_at = ERROR_LOCKED.load(Ordering::Acquire).then(Instant::now);
                 }
                 Err(_) => {
                     let foreground = game_is_foreground();
@@ -965,30 +973,50 @@ mod app {
                             );
                             if blind_heartbeats >= 3 {
                                 println!();
-                                println!("  ============================================================");
-                                println!("   GIVING UP — the hook is installed but receives nothing");
+                                println!(
+                                    "  ============================================================"
+                                );
+                                println!(
+                                    "   GIVING UP — the hook is installed but receives nothing"
+                                );
                                 println!("   while the game is focused.");
                                 println!();
                                 match clipboard::process_is_elevated() {
                                     Some(false) => {
-                                        println!("   This process is NOT elevated and Path of Exile almost");
-                                        println!("   certainly is. Windows skips a low-integrity hook for");
-                                        println!("   input aimed at an elevated window, so no click can");
+                                        println!(
+                                            "   This process is NOT elevated and Path of Exile almost"
+                                        );
+                                        println!(
+                                            "   certainly is. Windows skips a low-integrity hook for"
+                                        );
+                                        println!(
+                                            "   input aimed at an elevated window, so no click can"
+                                        );
                                         println!("   ever reach us.");
                                         println!();
-                                        println!("   Fix: close this window. Press Win, type terminal,");
-                                        println!("   right-click it, choose Run as administrator, then:");
+                                        println!(
+                                            "   Fix: close this window. Press Win, type terminal,"
+                                        );
+                                        println!(
+                                            "   right-click it, choose Run as administrator, then:"
+                                        );
                                         println!(r"     cd <repo>");
                                         println!(r"     rust\target\release\clip-only-lab.exe");
                                         println!("   The title bar must read \"Administrator:\".");
                                     }
                                     _ => {
-                                        println!("   This process IS elevated, so elevation is not the");
-                                        println!("   cause. Check for mouse software or an overlay taking");
+                                        println!(
+                                            "   This process IS elevated, so elevation is not the"
+                                        );
+                                        println!(
+                                            "   cause. Check for mouse software or an overlay taking"
+                                        );
                                         println!("   input below the hook layer.");
                                     }
                                 }
-                                println!("  ============================================================");
+                                println!(
+                                    "  ============================================================"
+                                );
                                 RUNNING.store(false, Ordering::Release);
                                 let thread = HOOK_THREAD_ID.load(Ordering::Acquire);
                                 if thread != 0 {
@@ -1000,13 +1028,15 @@ mod app {
                             }
                         } else {
                             blind_heartbeats = 0;
-                            println!("  [watching] {}  state {}", input_breakdown(), match STATE
-                                .load(Ordering::Acquire)
-                            {
-                                STATE_DECIDING => "deciding",
-                                STATE_LOCKED => "LOCKED",
-                                _ => "idle",
-                            });
+                            println!(
+                                "  [watching] {}  state {}",
+                                input_breakdown(),
+                                match STATE.load(Ordering::Acquire) {
+                                    STATE_DECIDING => "deciding",
+                                    STATE_LOCKED => "LOCKED",
+                                    _ => "idle",
+                                }
+                            );
                         }
                         last_events = events;
                         last_heartbeat = Instant::now();
@@ -1045,9 +1075,7 @@ mod app {
                 swallowed + totals.rolls
             );
             if per_orb > 1.5 {
-                println!(
-                    "  ^ this is the felt cost of block-first at your click rate, not a bug"
-                );
+                println!("  ^ this is the felt cost of block-first at your click rate, not a bug");
             }
         }
         println!();
@@ -1062,7 +1090,9 @@ mod app {
             println!("  work. Likely causes, in order:");
             println!("    - mouse buttons are swapped in Windows, so a physical left click");
             if right_downs > 0 {
-                println!("      arrives as a RIGHT press — and {right_downs} right presses were seen,");
+                println!(
+                    "      arrives as a RIGHT press — and {right_downs} right presses were seen,"
+                );
                 println!("      which fits. Check Settings > Bluetooth & devices > Mouse.");
             } else {
                 println!("      would arrive as a right press (none were seen either)");
@@ -1072,7 +1102,10 @@ mod app {
         }
         println!();
         println!("{}", totals.first_copy.summary("first Ctrl+C round trip"));
-        println!("{}", totals.first_change.summary("click -> text first moved"));
+        println!(
+            "{}",
+            totals.first_change.summary("click -> text first moved")
+        );
         println!("{}", totals.decision.summary("click -> verdict"));
         println!(
             "  stale changes discarded   {} (seen sooner than {}ms, so left over from an earlier craft)",
@@ -1103,7 +1136,10 @@ mod app {
 
         println!();
         println!("  click -> verdict distribution:");
-        println!("{}", totals.decision.histogram(&[40, 60, 80, 100, 120, 200]));
+        println!(
+            "{}",
+            totals.decision.histogram(&[40, 60, 80, 100, 120, 200])
+        );
         println!();
         for budget in [60_u64, 80, 100, options.budget_ms, 150] {
             let share = totals
@@ -1123,7 +1159,10 @@ mod app {
             options.budget_ms
         );
         if totals.fail_closed > totals.rolls / 20 {
-            println!("  But {} of {} rolls failed closed. Fix that before reading the", totals.fail_closed, totals.rolls);
+            println!(
+                "  But {} of {} rolls failed closed. Fix that before reading the",
+                totals.fail_closed, totals.rolls
+            );
             println!("  latency numbers — a fast pipeline that keeps giving up is not faster.");
         } else if within >= 0.99 {
             println!(
@@ -1262,7 +1301,10 @@ mod app {
     /// No hook, no clicks, no rules. If this fails there is no point looking at
     /// anything downstream.
     fn test_copy(options: &Options, samples: usize) {
-        println!("  clipboard check — {samples} copies, {} keys", options.key_method);
+        println!(
+            "  clipboard check — {samples} copies, {} keys",
+            options.key_method
+        );
         println!();
         println!("  Switch to the game and hover the item you are rolling.");
         println!("  Reproduce real crafting conditions: hold Shift with the orb on the");
@@ -1325,9 +1367,7 @@ mod app {
         println!("=== clipboard check ===");
         println!("  succeeded  {}/{samples}", latencies.len());
         println!("  failed     {failure_count}");
-        println!(
-            "  copies that had to lift a held modifier  {with_modifiers}"
-        );
+        println!("  copies that had to lift a held modifier  {with_modifiers}");
         println!("{}", latencies.summary("round trip"));
         for failure in &failures {
             println!("    {failure}");
@@ -1346,7 +1386,10 @@ mod app {
                     println!(
                         "  parsed {} modifiers ({} lines):",
                         item.groups.len(),
-                        item.groups.iter().map(|group| group.lines.len()).sum::<usize>()
+                        item.groups
+                            .iter()
+                            .map(|group| group.lines.len())
+                            .sum::<usize>()
                     );
                     for group in &item.groups {
                         for (index, line) in group.lines.iter().enumerate() {
@@ -1419,7 +1462,10 @@ mod app {
         println!("  game       {}", profile.game_profile);
         println!("  language   {}", profile.ocr_language);
         println!("  groups     {}", profile.rules.definition().groups.len());
-        println!("  budget     {}ms (what your OCR path already meets)", options.budget_ms);
+        println!(
+            "  budget     {}ms (what your OCR path already meets)",
+            options.budget_ms
+        );
         println!();
         println!("  No capture region is used. Nothing on screen is read.");
         println!();
@@ -1440,9 +1486,13 @@ mod app {
         if options.no_hook {
             println!("  hook       none — press Ctrl+Shift+F10 to start and stop monitoring");
             match clipboard::process_is_elevated() {
-                Some(true) => println!("  elevation  elevated (still needed: Ctrl+C has to reach the client)"),
+                Some(true) => {
+                    println!("  elevation  elevated (still needed: Ctrl+C has to reach the client)")
+                }
                 Some(false) => {
-                    println!("  elevation  NOT elevated — no hook is installed, but sending Ctrl+C");
+                    println!(
+                        "  elevation  NOT elevated — no hook is installed, but sending Ctrl+C"
+                    );
                     println!("             to an elevated client is blocked all the same.");
                 }
                 None => println!("  elevation  could not be determined"),
@@ -1453,7 +1503,9 @@ mod app {
                 Some(false) => {
                     println!("  elevation  this process is NOT running as Administrator.");
                     println!();
-                    println!("  >> If Path of Exile runs elevated, the mouse hook will install and");
+                    println!(
+                        "  >> If Path of Exile runs elevated, the mouse hook will install and"
+                    );
                     println!("  >> then receive nothing while the game is focused — which looks");
                     println!("  >> exactly like you never clicked.");
                     println!("  >> Fix: relaunch from an elevated terminal, or pass --no-hook,");

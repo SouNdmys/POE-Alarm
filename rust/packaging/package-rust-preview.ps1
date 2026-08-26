@@ -2,9 +2,6 @@
 param(
     [string] $Version = '0.1.0',
     [string] $ExecutablePath = 'rust/target/release/poe-alarm-app-win.exe',
-    [string] $OnnxRuntimePath = '.packages/microsoft.ml.onnxruntime/1.28.0/runtimes/win-x64/native/onnxruntime.dll',
-    [string] $ModelPath = 'src/PoeAlarm.App/Assets/Ocr/PP-OCRv5_mobile_rec.onnx',
-    [string] $DictionaryPath = 'src/PoeAlarm.App/Assets/Ocr/ppocrv5_dict.txt',
     [Parameter(Mandatory = $true)]
     [string] $VcRedistDirectory,
     [string] $OutputRoot = 'artifacts/rust-preview',
@@ -12,21 +9,13 @@ param(
     [string] $DumpbinPath,
     [switch] $SkipBuild,
     [switch] $SkipExecutableSelfTest,
-    [long] $MaximumUnpackedBytes = 52428800,
-    [long] $MaximumZipBytes = 47185920
+    [long] $MaximumUnpackedBytes = 12582912,
+    [long] $MaximumZipBytes = 6291456
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Expected = @{
-    ModelBytes = 16534782L
-    ModelSha256 = 'DA72DC72CA4DC220DF0DFDE68C1DEDC31C58D3E76A25871122E5056227D50092'
-    DictionaryBytes = 74012L
-    DictionarySha256 = 'D1979E9F794C464C0D2E0B70A7FE14DD978E9DC644C0E71F14158CDF8342AF1B'
-    OnnxRuntimeBytes = 15809848L
-    OnnxRuntimeSha256 = '18370C375F07357FA5874344A9D9AC17E6B6FE1EB18B1DD209D79483B4470257'
-}
 $VcFiles = @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
 $AllowedLicenses = @(
     'MIT', 'MIT OR Apache-2.0', 'Apache-2.0 OR MIT', 'MIT/Apache-2.0',
@@ -157,18 +146,12 @@ try {
     }
 
     $exe = Resolve-ExistingFile $ExecutablePath 'release executable'
-    $ort = Resolve-ExistingFile $OnnxRuntimePath 'ONNX Runtime'
-    $model = Resolve-ExistingFile $ModelPath 'PP-OCRv5 model'
-    $dictionary = Resolve-ExistingFile $DictionaryPath 'PP-OCRv5 dictionary'
     $vcDirectory = Resolve-ExistingDirectory $VcRedistDirectory 'VC Redistributable directory'
     if ($vcDirectory -notmatch '(?i)\\VC\\Redist\\MSVC\\[^\\]+\\x64\\Microsoft\.VC\d+\.CRT$') {
         throw 'VC runtime source must be an official x64 Visual Studio VC/Redist/MSVC/.../Microsoft.VC*.CRT directory'
     }
     if ($vcDirectory -match '(?i)\\Windows\\System32($|\\)') { throw 'System32 is not a redistributable source' }
 
-    Assert-FileHash $model $Expected.ModelBytes $Expected.ModelSha256 'PP-OCRv5 model'
-    Assert-FileHash $dictionary $Expected.DictionaryBytes $Expected.DictionarySha256 'PP-OCRv5 dictionary'
-    Assert-FileHash $ort $Expected.OnnxRuntimeBytes $Expected.OnnxRuntimeSha256 'ONNX Runtime 1.28.0'
 
     $vcItems = foreach ($name in $VcFiles) {
         $path = Resolve-ExistingFile (Join-Path $vcDirectory $name) "VC runtime $name"
@@ -213,7 +196,7 @@ try {
 
     if (-not $DumpbinPath) { $DumpbinPath = Find-Dumpbin }
     $DumpbinPath = Resolve-ExistingFile $DumpbinPath 'dumpbin.exe'
-    $imports = (& $DumpbinPath /dependents $exe) + (& $DumpbinPath /dependents $ort)
+    $imports = & $DumpbinPath /dependents $exe
     if ($LASTEXITCODE -ne 0) { throw 'dumpbin dependency audit failed' }
     $importsText = $imports -join "`n"
     foreach ($required in $VcFiles) {
@@ -242,14 +225,8 @@ try {
     New-Item -ItemType Directory -Path $licenseDirectory | Out-Null
 
     Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'PoeAlarm.exe')
-    Copy-Item -LiteralPath $ort -Destination (Join-Path $stage 'onnxruntime.dll')
-    Copy-Item -LiteralPath $model -Destination (Join-Path $stage 'PP-OCRv5_mobile_rec.onnx')
-    Copy-Item -LiteralPath $dictionary -Destination (Join-Path $stage 'ppocrv5_dict.txt')
     foreach ($vc in $vcItems) { Copy-Item -LiteralPath $vc.Path -Destination (Join-Path $stage $vc.Name) }
     Copy-Item -LiteralPath rust/packaging/licenses/POE-Alarm-MIT.txt -Destination $licenseDirectory
-    Copy-Item -LiteralPath licenses/ONNX-Runtime-MIT.txt -Destination $licenseDirectory
-    Copy-Item -LiteralPath licenses/ONNX-Runtime-ThirdPartyNotices.txt -Destination $licenseDirectory
-    Copy-Item -LiteralPath licenses/PaddlePaddle-Apache-2.0.txt -Destination $licenseDirectory
     Copy-CargoLicenses $packages (Join-Path $licenseDirectory 'rust')
 
     $crateRows = $packages | ForEach-Object { "- ``$($_.Name) $($_.Version)`` — $($_.License) — $($_.Repository)" }
@@ -269,7 +246,7 @@ try {
         -Value $vcProvenance -Encoding utf8NoBOM
 
     $allowedTopFiles = @(
-        'PoeAlarm.exe', 'onnxruntime.dll', 'PP-OCRv5_mobile_rec.onnx', 'ppocrv5_dict.txt',
+        'PoeAlarm.exe',
         'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
         'THIRD-PARTY-NOTICES.md'
     )

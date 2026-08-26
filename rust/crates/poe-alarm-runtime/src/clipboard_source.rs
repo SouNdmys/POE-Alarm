@@ -31,12 +31,15 @@ const COPY_DEADLINE: Duration = Duration::from_millis(25);
 pub enum SourceError {
     /// The client refused or ignored the request.
     Clipboard(ClipboardError),
+    /// A source that is not the clipboard failed.
+    Other(String),
 }
 
 impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
+            Self::Other(detail) => formatter.write_str(detail),
         }
     }
 }

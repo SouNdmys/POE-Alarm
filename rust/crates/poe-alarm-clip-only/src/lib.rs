@@ -211,7 +211,8 @@ mod tests {
     use super::*;
     use poe_alarm_core::rules::CURRENT_SCHEMA_VERSION;
     use poe_alarm_core::{
-        AcceptableResultGroup, AffixCondition, NumericConstraint, ResultGroupMode, RuleSetDefinition,
+        AcceptableResultGroup, AffixCondition, NumericConstraint, ResultGroupMode,
+        RuleSetDefinition,
     };
 
     fn life_rule() -> CompiledRuleSet {

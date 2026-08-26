@@ -552,19 +552,15 @@ impl RuntimeClient for FakeRuntimeClient {
 
     fn test_screenshot(&mut self, request: ScreenshotRequest) -> Result<(), String> {
         let generation = self.next_generation();
-        let compiled = poe_alarm_runtime::compile_settings(&request.settings)
+        poe_alarm_runtime::compile_settings(&request.settings)
             .map_err(|error| error.to_string())?;
         self.events.push_back(RuntimeEvent::ScreenshotCompleted(
             poe_alarm_runtime::ScreenshotReport {
                 request_id: request.request_id,
                 generation,
-                profile: compiled.profile,
-                requested_region: compiled.region,
-                used_full_image_fallback: false,
                 lines: vec!["+#% to Critical Strike Chance".to_owned()],
-                load_elapsed: Duration::from_millis(1),
-                preprocessing_elapsed: Duration::from_millis(2),
-                recognition_elapsed: Duration::from_millis(3),
+                modifier_count: 1,
+                parse_elapsed: Duration::from_millis(1),
                 evaluation_elapsed: Duration::from_millis(1),
                 evaluation: poe_alarm_runtime::ScreenshotEvaluation {
                     is_match: true,
@@ -613,9 +609,7 @@ fn active_rule_summary(settings: &AppSettings, language: UiLanguage) -> String {
     let profile = settings.selected_profile();
     let rules_profile = profile.selected_rules();
     let summary = match rules_profile.rule_editor_mode {
-        poe_alarm_settings::RuleEditorMode::Quick => {
-            rules_profile.target_affix.trim().to_owned()
-        }
+        poe_alarm_settings::RuleEditorMode::Quick => rules_profile.target_affix.trim().to_owned(),
         poe_alarm_settings::RuleEditorMode::Structured => rules_profile
             .structured_rule_set
             .as_ref()
@@ -1249,7 +1243,6 @@ impl WindowState {
             (
                 Box::new(ProductionRuntimeClient::start(ProductionRuntimeConfig {
                     alert,
-                    paddle: None,
                 })?),
                 fell_back,
             )
@@ -1598,20 +1591,10 @@ impl WindowState {
                 self.screenshot_result = self.model.language().text().screenshot_report(
                     report.evaluation.is_match,
                     &report.lines,
-                    report.load_elapsed.as_secs_f64() * 1_000.0,
-                    report.preprocessing_elapsed.as_secs_f64() * 1_000.0,
-                    report.recognition_elapsed.as_secs_f64() * 1_000.0,
+                    report.modifier_count,
+                    report.parse_elapsed.as_secs_f64() * 1_000.0,
                     report.evaluation_elapsed.as_secs_f64() * 1_000.0,
                 );
-                if report.used_full_image_fallback {
-                    self.screenshot_result.push_str("\r\n");
-                    self.screenshot_result.push_str(
-                        self.model
-                            .language()
-                            .text()
-                            .screenshot_full_image_fallback(),
-                    );
-                }
                 self.model.apply(UiAction::BackgroundCompleted(
                     BackgroundCompletion::succeeded(Operation::TestScreenshot),
                 ));
@@ -1703,10 +1686,7 @@ impl WindowState {
         };
         let mut alert = AlertServiceConfig::new(wave);
         alert.allow_overlay_capture = settings.allow_overlay_capture;
-        match ProductionRuntimeClient::start(ProductionRuntimeConfig {
-            alert,
-            paddle: None,
-        }) {
+        match ProductionRuntimeClient::start(ProductionRuntimeConfig { alert }) {
             Ok(runtime) => {
                 self.runtime = Box::new(runtime);
                 self.runtime_alert_key = (
@@ -1921,11 +1901,17 @@ impl WindowState {
             BackgroundCommand::TestScreenshot { config, path } => {
                 let request_id = RuntimeRequestId(self.next_request_id.max(1));
                 self.next_request_id = self.next_request_id.saturating_add(1).max(1);
-                self.runtime.test_screenshot(ScreenshotRequest::new(
-                    request_id,
-                    config.settings,
-                    path,
-                ))
+                // The file now holds saved item text rather than a screenshot.
+                // Reading it here keeps the runtime free of the filesystem.
+                std::fs::read_to_string(&path)
+                    .map_err(|error| format!("could not read {}: {error}", path.display()))
+                    .and_then(|text| {
+                        self.runtime.test_screenshot(ScreenshotRequest::new(
+                            request_id,
+                            config.settings,
+                            text,
+                        ))
+                    })
             }
             BackgroundCommand::SaveSettings(settings) => self
                 .save_worker
@@ -3107,8 +3093,8 @@ impl WindowState {
                     s(168),
                     s(1020),
                 );
-                let show_required_count = combo_selection(self.controls.group_mode)
-                    .is_some_and(|index| index == 2);
+                let show_required_count =
+                    combo_selection(self.controls.group_mode).is_some_and(|index| index == 2);
                 if show_option_layer {
                     draw_label(
                         dc,
@@ -4777,11 +4763,8 @@ mod tests {
     #[test]
     fn hud_summary_and_timer_are_compact_and_stable() {
         let mut settings = AppSettings::default();
-        settings
-            .profiles
-            .poe1
-            .selected_rules_mut()
-            .target_affix = "  +#% to\r\nCritical Hit Chance  ".to_owned();
+        settings.profiles.poe1.selected_rules_mut().target_affix =
+            "  +#% to\r\nCritical Hit Chance  ".to_owned();
         assert_eq!(
             active_rule_summary(&settings, UiLanguage::English),
             "+#% to Critical Hit Chance"
@@ -4846,21 +4829,13 @@ mod tests {
         ));
         let path = directory.join("settings.json");
         let mut settings = AppSettings::default();
-        settings
-            .profiles
-            .poe1
-            .selected_rules_mut()
-            .target_affix = "#% increased Attack Speed".into();
+        settings.profiles.poe1.selected_rules_mut().target_affix =
+            "#% increased Attack Speed".into();
         let outcome = save_settings(&path, &settings);
         assert_eq!(outcome, WorkOutcome::Succeeded, "{outcome:?}");
         let mut store = SettingsStore::new(&path);
         assert_eq!(
-            store
-                .load()
-                .profiles
-                .poe1
-                .selected_rules()
-                .target_affix,
+            store.load().profiles.poe1.selected_rules().target_affix,
             "#% increased Attack Speed"
         );
         let _ = std::fs::remove_file(&path);
@@ -4885,17 +4860,9 @@ mod tests {
         let source = directory.join("release.json");
         let destination = directory.join("preview").join("settings.json");
         let mut settings = AppSettings::default();
-        settings
-            .profiles
-            .poe1
-            .selected_rules_mut()
-            .target_affix = "poe1 target".to_owned();
+        settings.profiles.poe1.selected_rules_mut().target_affix = "poe1 target".to_owned();
         settings.profiles.poe1.capture_region = Some(ScreenRegion::new(10, 20, 300, 400));
-        settings
-            .profiles
-            .poe2
-            .selected_rules_mut()
-            .target_affix = "poe2 target".to_owned();
+        settings.profiles.poe2.selected_rules_mut().target_affix = "poe2 target".to_owned();
         settings.profiles.poe2.capture_region = Some(ScreenRegion::new(-12, 8, 500, 700));
         settings.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
         let mut source_store = SettingsStore::new(&source);
