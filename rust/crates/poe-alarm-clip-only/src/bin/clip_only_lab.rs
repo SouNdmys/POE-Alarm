@@ -26,18 +26,20 @@ fn main() {
 #[cfg(windows)]
 mod app {
     use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
     use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
     use std::time::{Duration, Instant};
 
     use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey, VK_F9, VK_F12,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, MSG, MSLLHOOKSTRUCT,
-        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_HOTKEY,
+        PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL,
+        WM_HOTKEY, WM_QUIT,
         WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
         WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
     };
@@ -69,6 +71,8 @@ mod app {
     /// these auto-release: a diagnostic run must not wedge the mouse after one
     /// bad copy, but a real hit must stay locked until the user looks at it.
     static ERROR_LOCKED: AtomicBool = AtomicBool::new(false);
+    /// Thread running the message pump, so the worker can end the session.
+    static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
     /// Per-message-type counts. "Moves arrive but presses do not" is a real
     /// enough outcome that it needs to be visible rather than inferred: swapped
@@ -368,6 +372,7 @@ mod app {
         let mut last_heartbeat = Instant::now();
         let mut last_events = 0_u64;
         let mut error_lock_at: Option<Instant> = None;
+        let mut blind_heartbeats = 0_u32;
 
         while RUNNING.load(Ordering::Acquire) {
             match clicks.recv_timeout(IDLE_TICK) {
@@ -397,13 +402,47 @@ mod app {
                     if armed && last_heartbeat.elapsed() >= Duration::from_secs(3) {
                         let events = HOOK_EVENTS.load(Ordering::Relaxed);
                         if events == last_events {
+                            blind_heartbeats += 1;
                             println!(
-                                "  [watching] hook saw 0 mouse events in 3s. Move the mouse; if this"
+                                "  [watching] hook saw 0 mouse events in 3s ({blind_heartbeats}/3)."
                             );
-                            println!(
-                                "             keeps printing, run this terminal as Administrator."
-                            );
+                            if blind_heartbeats >= 3 {
+                                println!();
+                                println!("  ============================================================");
+                                println!("   GIVING UP — the hook is installed but receives nothing");
+                                println!("   while the game is focused.");
+                                println!();
+                                match clipboard::process_is_elevated() {
+                                    Some(false) => {
+                                        println!("   This process is NOT elevated and Path of Exile almost");
+                                        println!("   certainly is. Windows skips a low-integrity hook for");
+                                        println!("   input aimed at an elevated window, so no click can");
+                                        println!("   ever reach us.");
+                                        println!();
+                                        println!("   Fix: close this window. Press Win, type terminal,");
+                                        println!("   right-click it, choose Run as administrator, then:");
+                                        println!(r"     cd <repo>");
+                                        println!(r"     rust\target\release\clip-only-lab.exe");
+                                        println!("   The title bar must read \"Administrator:\".");
+                                    }
+                                    _ => {
+                                        println!("   This process IS elevated, so elevation is not the");
+                                        println!("   cause. Check for mouse software or an overlay taking");
+                                        println!("   input below the hook layer.");
+                                    }
+                                }
+                                println!("  ============================================================");
+                                RUNNING.store(false, Ordering::Release);
+                                let thread = HOOK_THREAD_ID.load(Ordering::Acquire);
+                                if thread != 0 {
+                                    // SAFETY: posting WM_QUIT to our own pump thread.
+                                    let _ = unsafe {
+                                        PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0))
+                                    };
+                                }
+                            }
                         } else {
+                            blind_heartbeats = 0;
                             println!("  [watching] {}  state {}", input_breakdown(), match STATE
                                 .load(Ordering::Acquire)
                             {
@@ -800,6 +839,7 @@ mod app {
             }
         }
 
+        HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
         println!("  armed — go craft.");
         println!();
         pump(hook);
