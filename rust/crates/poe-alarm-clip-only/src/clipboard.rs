@@ -42,8 +42,10 @@ pub enum ClipboardError {
     Timeout { waited: Duration },
     /// `OpenClipboard` kept losing to another owner.
     Busy { attempts: u32 },
-    /// The clipboard changed but held no Unicode text.
-    NoText,
+    /// The clipboard changed but offered no Unicode text format at all.
+    NoTextFormat { formats: Vec<String> },
+    /// A Unicode text format existed but was empty.
+    EmptyText,
     /// `SendInput` did not deliver the whole key sequence.
     InputRejected { delivered: u32, expected: u32 },
     /// A Win32 call failed outright.
@@ -64,7 +66,20 @@ impl std::fmt::Display for ClipboardError {
             Self::Busy { attempts } => {
                 write!(formatter, "clipboard stayed locked across {attempts} attempts")
             }
-            Self::NoText => formatter.write_str("clipboard changed but carried no Unicode text"),
+            Self::NoTextFormat { formats } => {
+                if formats.is_empty() {
+                    formatter.write_str("clipboard changed but offered no formats at all")
+                } else {
+                    write!(
+                        formatter,
+                        "clipboard changed but offered no Unicode text; formats present: {}",
+                        formats.join(", ")
+                    )
+                }
+            }
+            Self::EmptyText => {
+                formatter.write_str("clipboard carried Unicode text, but it was empty")
+            }
             Self::InputRejected {
                 delivered,
                 expected,
@@ -79,7 +94,62 @@ impl std::fmt::Display for ClipboardError {
     }
 }
 
+impl ClipboardError {
+    /// True when retrying inside the same deadline is worthwhile. A missing
+    /// payload usually means the client had nothing to give *yet*, which is a
+    /// state the very next copy can leave.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Timeout { .. } | Self::Busy { .. } | Self::NoTextFormat { .. } | Self::EmptyText
+        )
+    }
+}
+
 impl std::error::Error for ClipboardError {}
+
+/// Names of the formats currently on the clipboard, for diagnosing a client
+/// that answered with something other than text.
+#[must_use]
+pub fn available_formats() -> Vec<String> {
+    use windows::Win32::System::DataExchange::{EnumClipboardFormats, GetClipboardFormatNameW};
+
+    let mut names = Vec::new();
+    // SAFETY: enumeration requires the clipboard open; failure leaves the list
+    // empty rather than reporting anything false.
+    if unsafe { OpenClipboard(Some(HWND::default())) }.is_err() {
+        return names;
+    }
+    let mut format = 0_u32;
+    loop {
+        // SAFETY: the clipboard is open on this thread.
+        format = unsafe { EnumClipboardFormats(format) };
+        if format == 0 {
+            break;
+        }
+        let mut buffer = [0_u16; 128];
+        // SAFETY: buffer length is passed with the slice.
+        let written = unsafe { GetClipboardFormatNameW(format, &mut buffer) };
+        if written > 0 {
+            names.push(String::from_utf16_lossy(&buffer[..written as usize]));
+        } else {
+            names.push(match format {
+                1 => "CF_TEXT".to_string(),
+                13 => "CF_UNICODETEXT".to_string(),
+                16 => "CF_LOCALE".to_string(),
+                7 => "CF_OEMTEXT".to_string(),
+                other => format!("#{other}"),
+            });
+        }
+        if names.len() >= 12 {
+            break;
+        }
+    }
+    // SAFETY: the clipboard is open on this thread.
+    let _ = unsafe { CloseClipboard() };
+    names
+}
 
 /// A completed round trip.
 #[derive(Clone, Debug)]
@@ -209,10 +279,10 @@ fn read_open_clipboard() -> Result<String, ClipboardError> {
     // an invalid handle.
     let handle: HANDLE = match unsafe { GetClipboardData(CF_UNICODETEXT) } {
         Ok(handle) => handle,
-        Err(_) => return Err(ClipboardError::NoText),
+        Err(_) => return Err(ClipboardError::NoTextFormat { formats: Vec::new() }),
     };
     if handle.0.is_null() {
-        return Err(ClipboardError::NoText);
+        return Err(ClipboardError::NoTextFormat { formats: Vec::new() });
     }
     let global = HGLOBAL(handle.0);
     // SAFETY: `global` came from the clipboard and stays valid until we close it.
@@ -240,7 +310,7 @@ fn read_open_clipboard() -> Result<String, ClipboardError> {
     // SAFETY: matches the GlobalLock above.
     let _ = unsafe { GlobalUnlock(global) };
     if text.is_empty() {
-        return Err(ClipboardError::NoText);
+        return Err(ClipboardError::EmptyText);
     }
     Ok(text)
 }
@@ -275,7 +345,12 @@ pub fn copy_hovered_item(
     let client_round_trip = started.elapsed();
 
     let read_started = Instant::now();
-    let (text, open_attempts) = read_text(60)?;
+    let (text, open_attempts) = read_text(60).map_err(|error| match error {
+        ClipboardError::NoTextFormat { .. } => ClipboardError::NoTextFormat {
+            formats: available_formats(),
+        },
+        other => other,
+    })?;
     Ok(CopyOutcome {
         text,
         client_round_trip,

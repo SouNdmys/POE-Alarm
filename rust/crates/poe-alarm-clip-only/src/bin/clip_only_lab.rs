@@ -45,7 +45,7 @@ mod app {
     };
 
     use poe_alarm_clip_only::clipboard::{
-        self, KeyMethod, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground,
+        self, ClipboardError, KeyMethod, SYNTHETIC_INPUT_SIGNATURE, game_is_foreground,
     };
     use poe_alarm_clip_only::stats::{LatencySamples, format_millis};
     use poe_alarm_clip_only::{LabProfile, Verdict, describes_same_roll, evaluate_payload};
@@ -274,6 +274,7 @@ mod app {
         let copy_timeout = Duration::from_millis(options.copy_timeout_ms);
         let mut copies = 0_u32;
         let mut first_copy: Option<Duration> = None;
+        let mut last_error: Option<ClipboardError> = None;
 
         if options.first_delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(options.first_delay_ms));
@@ -282,19 +283,47 @@ mod app {
         loop {
             if click_at.elapsed() >= deadline {
                 totals.fail_closed += 1;
+                let detail = match &last_error {
+                    Some(error) => format!("last error: {error}"),
+                    None => "the text never changed".to_string(),
+                };
                 lock(
                     &format!(
-                        "item text never changed within {}ms across {copies} copies",
+                        "gave up after {copies} copies in {}ms — {detail}",
                         options.deadline_ms
                     ),
                     true,
                 );
+                if matches!(
+                    last_error,
+                    Some(ClipboardError::NoTextFormat { .. }) | Some(ClipboardError::EmptyText)
+                ) {
+                    println!(
+                        "        The client answered but had nothing to copy. Ctrl+C copies"
+                    );
+                    println!(
+                        "        whatever the cursor is over; holding a currency orb, or"
+                    );
+                    println!(
+                        "        drifting off the item, both produce exactly this."
+                    );
+                }
                 return;
             }
 
             copies += 1;
             let outcome = match clipboard::copy_hovered_item(copy_timeout, options.key_method) {
                 Ok(outcome) => outcome,
+                // A missing payload usually means the client had nothing to
+                // give yet, which the next copy can fix. Only give up on it
+                // when the whole deadline expires.
+                Err(error) if error.is_transient() => {
+                    last_error = Some(error);
+                    if options.poll_gap_ms > 0 {
+                        std::thread::sleep(Duration::from_millis(options.poll_gap_ms));
+                    }
+                    continue;
+                }
                 Err(error) => {
                     totals.fail_closed += 1;
                     lock(&format!("clipboard round trip failed: {error}"), true);
