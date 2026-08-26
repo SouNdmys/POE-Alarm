@@ -1,3 +1,4 @@
+mod clipboard;
 mod hotkeys;
 mod hud;
 mod mouse_hook;
@@ -5,6 +6,11 @@ mod region_overlay;
 mod self_test;
 mod wave;
 
+pub(crate) use clipboard::{
+    clipboard_sequence_number, copy_hovered_item, foreground_process_outranks_us,
+    foreground_window_description, held_modifiers, process_is_elevated, read_clipboard_text,
+    relaunch_elevated,
+};
 pub(crate) use hotkeys::{register_hot_key, unregister_hot_key};
 pub(crate) use hud::NativeHudWindow;
 pub(crate) use mouse_hook::NativePendingMouseGuard;

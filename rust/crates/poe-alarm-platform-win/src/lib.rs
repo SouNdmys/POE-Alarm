@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+mod clipboard;
 mod error;
 mod geometry;
 mod handle;
@@ -20,6 +21,12 @@ mod wave;
 #[cfg(windows)]
 mod win32;
 
+pub use clipboard::{
+    ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
+    copy_hovered_item, describes_game, foreground_process_outranks_us,
+    foreground_window_description, game_is_foreground, held_modifiers, process_is_elevated,
+    read_text, relaunch_elevated, sequence_number,
+};
 pub use error::PlatformError;
 pub use geometry::{PointI, RectI, SizeI};
 pub use handle::NativeWindowHandle;

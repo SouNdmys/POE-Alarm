@@ -1,0 +1,373 @@
+//! Native half of the clipboard capture path.
+
+use std::time::{Duration, Instant};
+
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND};
+use windows::Win32::Security::{
+    GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
+    GetClipboardSequenceNumber, OpenClipboard,
+};
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_MENU,
+    VK_SHIFT,
+};
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, SW_SHOWNORMAL,
+};
+use windows::core::HSTRING;
+
+use crate::clipboard::{
+    ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
+};
+
+/// `CF_UNICODETEXT`. Spelled out so the crate need not take the OLE feature.
+const CF_UNICODETEXT: u32 = 13;
+
+/// How long the tight spin runs before the wait falls back to sleeping. Keeps
+/// the common case sub-millisecond without pinning a core through the tail.
+const SPIN_WINDOW: Duration = Duration::from_millis(4);
+
+/// Set 1 scan codes for the keys involved.
+const SCAN_LCONTROL: u16 = 0x1D;
+const SCAN_C: u16 = 0x2E;
+const SCAN_LSHIFT: u16 = 0x2A;
+const SCAN_LALT: u16 = 0x38;
+
+pub(crate) fn clipboard_sequence_number() -> u32 {
+    // SAFETY: no arguments, no output buffer.
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+/// Sends a synthetic Ctrl+C to the foreground window.
+///
+/// Modifiers the user is physically holding are lifted for the duration and
+/// pressed back afterwards. Continuous crafting holds Shift, and without this
+/// the client receives Ctrl+Shift+C and copies nothing.
+fn send_ctrl_c(method: KeyMethod, held: HeldModifiers) -> Result<(), ClipboardError> {
+    let key = |vk: VIRTUAL_KEY, scan: u16, up: bool| {
+        let mut flags = if up {
+            KEYEVENTF_KEYUP
+        } else {
+            KEYBD_EVENT_FLAGS(0)
+        };
+        if method == KeyMethod::ScanCode {
+            flags |= KEYEVENTF_SCANCODE;
+        }
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: if method == KeyMethod::ScanCode {
+                        VIRTUAL_KEY(0)
+                    } else {
+                        vk
+                    },
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: SYNTHETIC_INPUT_SIGNATURE,
+                },
+            },
+        }
+    };
+
+    let mut inputs = Vec::with_capacity(8);
+    if held.shift {
+        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, true));
+    }
+    if held.alt {
+        inputs.push(key(VK_MENU, SCAN_LALT, true));
+    }
+    inputs.extend([
+        key(VK_CONTROL, SCAN_LCONTROL, false),
+        key(VK_C, SCAN_C, false),
+        key(VK_C, SCAN_C, true),
+        key(VK_CONTROL, SCAN_LCONTROL, true),
+    ]);
+    if held.alt {
+        inputs.push(key(VK_MENU, SCAN_LALT, false));
+    }
+    if held.shift {
+        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, false));
+    }
+
+    let expected = inputs.len() as u32;
+    // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
+    let delivered = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+    if delivered == expected {
+        Ok(())
+    } else {
+        Err(ClipboardError::InputRejected {
+            delivered,
+            expected,
+        })
+    }
+}
+
+pub(crate) fn copy_hovered_item(
+    timeout: Duration,
+    method: KeyMethod,
+) -> Result<CopyOutcome, ClipboardError> {
+    let baseline = clipboard_sequence_number();
+    let held = held_modifiers();
+    let started = Instant::now();
+    send_ctrl_c(method, held)?;
+
+    loop {
+        if clipboard_sequence_number() != baseline {
+            break;
+        }
+        let waited = started.elapsed();
+        if waited >= timeout {
+            return Err(ClipboardError::Timeout { waited });
+        }
+        if waited < SPIN_WINDOW {
+            std::hint::spin_loop();
+        } else {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let client_round_trip = started.elapsed();
+
+    let read_started = Instant::now();
+    let (text, open_attempts) = read_clipboard_text(60).map_err(|error| match error {
+        ClipboardError::NoTextFormat { .. } => ClipboardError::NoTextFormat {
+            formats: available_formats(),
+        },
+        other => other,
+    })?;
+    Ok(CopyOutcome {
+        text,
+        client_round_trip,
+        read_time: read_started.elapsed(),
+        open_attempts,
+        suppressed_modifiers: held,
+    })
+}
+
+pub(crate) fn read_clipboard_text(max_attempts: u32) -> Result<(String, u32), ClipboardError> {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        // SAFETY: a default window handle asks for the current task to own it.
+        let opened = unsafe { OpenClipboard(Some(HWND::default())) };
+        if opened.is_ok() {
+            let result = read_open_clipboard();
+            // SAFETY: the clipboard is open on this thread.
+            let _ = unsafe { CloseClipboard() };
+            return result.map(|text| (text, attempts));
+        }
+        if attempts >= max_attempts {
+            return Err(ClipboardError::Busy { attempts });
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Reads `CF_UNICODETEXT` from an already-open clipboard.
+fn read_open_clipboard() -> Result<String, ClipboardError> {
+    // SAFETY: the clipboard is open; a missing format returns Err rather than
+    // an invalid handle.
+    let Ok(handle) = (unsafe { GetClipboardData(CF_UNICODETEXT) }) else {
+        return Err(ClipboardError::NoTextFormat {
+            formats: Vec::new(),
+        });
+    };
+    if handle.0.is_null() {
+        return Err(ClipboardError::NoTextFormat {
+            formats: Vec::new(),
+        });
+    }
+    let global = HGLOBAL(handle.0);
+    // SAFETY: `global` came from the clipboard and stays valid until we close.
+    let pointer = unsafe { GlobalLock(global) } as *const u16;
+    if pointer.is_null() {
+        return Err(ClipboardError::Os {
+            operation: "GlobalLock",
+            code: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        });
+    }
+    // SAFETY: the block is at least `GlobalSize` bytes long.
+    let capacity_units = unsafe { GlobalSize(global) } / size_of::<u16>();
+    let mut length = 0;
+    // SAFETY: bounded by the reported size, so the scan cannot run off the end
+    // even if the producer omitted the terminator.
+    while length < capacity_units && unsafe { *pointer.add(length) } != 0 {
+        length += 1;
+    }
+    // SAFETY: `length` units were just proven readable.
+    let units = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let text = String::from_utf16_lossy(units);
+    // GlobalUnlock reports Err when the lock count reaches zero, which is the
+    // normal outcome here, so the result is deliberately discarded.
+    // SAFETY: matches the GlobalLock above.
+    let _ = unsafe { GlobalUnlock(global) };
+    if text.is_empty() {
+        Err(ClipboardError::EmptyText)
+    } else {
+        Ok(text)
+    }
+}
+
+/// Names of the formats on the clipboard, for diagnosing a client that answered
+/// with something other than text.
+fn available_formats() -> Vec<String> {
+    let mut names = Vec::new();
+    // SAFETY: enumeration requires the clipboard open; a failure leaves the
+    // list empty rather than reporting anything false.
+    if unsafe { OpenClipboard(Some(HWND::default())) }.is_err() {
+        return names;
+    }
+    let mut format = 0_u32;
+    loop {
+        // SAFETY: the clipboard is open on this thread.
+        format = unsafe { EnumClipboardFormats(format) };
+        if format == 0 || names.len() >= 12 {
+            break;
+        }
+        let mut buffer = [0_u16; 128];
+        // SAFETY: the buffer length travels with the slice.
+        let written = unsafe { GetClipboardFormatNameW(format, &mut buffer) };
+        names.push(if written > 0 {
+            String::from_utf16_lossy(&buffer[..written as usize])
+        } else {
+            match format {
+                1 => "CF_TEXT".to_string(),
+                7 => "CF_OEMTEXT".to_string(),
+                13 => "CF_UNICODETEXT".to_string(),
+                16 => "CF_LOCALE".to_string(),
+                other => format!("#{other}"),
+            }
+        });
+    }
+    // SAFETY: the clipboard is open on this thread.
+    let _ = unsafe { CloseClipboard() };
+    names
+}
+
+pub(crate) fn held_modifiers() -> HeldModifiers {
+    // SAFETY: takes a virtual key code and returns a bitfield.
+    let down = |vk: VIRTUAL_KEY| (unsafe { GetAsyncKeyState(i32::from(vk.0)) } as u16 & 0x8000) != 0;
+    HeldModifiers {
+        control: down(VK_CONTROL),
+        shift: down(VK_SHIFT),
+        alt: down(VK_MENU),
+    }
+}
+
+pub(crate) fn foreground_window_description() -> (String, String) {
+    // SAFETY: returns a borrowed handle valid for the calls below.
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_invalid() {
+        return (String::new(), String::new());
+    }
+    let mut title = [0_u16; 256];
+    let mut class = [0_u16; 256];
+    // SAFETY: both buffers are live and their lengths travel with the slices.
+    let title_length = unsafe { GetWindowTextW(window, &mut title) }.max(0) as usize;
+    // SAFETY: as above.
+    let class_length = unsafe { GetClassNameW(window, &mut class) }.max(0) as usize;
+    (
+        String::from_utf16_lossy(&title[..title_length]),
+        String::from_utf16_lossy(&class[..class_length]),
+    )
+}
+
+pub(crate) fn process_is_elevated() -> Option<bool> {
+    let mut token = HANDLE::default();
+    // SAFETY: GetCurrentProcess yields a pseudo-handle needing no close;
+    // `token` receives an owned handle closed below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.ok()?;
+
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0_u32;
+    // SAFETY: the buffer matches the size declared for TokenElevation.
+    let queried = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some((&raw mut elevation).cast()),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &raw mut returned,
+        )
+    };
+    // SAFETY: `token` came from OpenProcessToken and is closed exactly once.
+    let _ = unsafe { CloseHandle(token) };
+    queried.ok()?;
+    Some(elevation.TokenIsElevated != 0)
+}
+
+pub(crate) fn foreground_process_outranks_us() -> bool {
+    if process_is_elevated() != Some(false) {
+        return false;
+    }
+    // SAFETY: returns a borrowed handle valid for the call below.
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_invalid() {
+        return false;
+    }
+    let mut pid = 0_u32;
+    // SAFETY: `pid` is a live out-parameter.
+    unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: a refused open simply yields Err.
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+        return true;
+    };
+    let mut token = HANDLE::default();
+    // SAFETY: `process` is live; `token` receives an owned handle.
+    let readable = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.is_ok();
+    if readable && !token.is_invalid() {
+        // SAFETY: token came from OpenProcessToken.
+        let _ = unsafe { CloseHandle(token) };
+    }
+    // SAFETY: process came from OpenProcess.
+    let _ = unsafe { CloseHandle(process) };
+    !readable
+}
+
+pub(crate) fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateError> {
+    const SE_ERR_ACCESSDENIED: isize = 5;
+
+    let executable = std::env::current_exe().map_err(|_| ElevateError::NoExecutablePath)?;
+    let arguments = std::env::args()
+        .skip(1)
+        .filter(|argument| !skip_arguments.contains(&argument.as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let directory = std::env::current_dir().unwrap_or_default();
+
+    let operation = HSTRING::from("runas");
+    let file = HSTRING::from(executable.as_os_str());
+    let parameters = HSTRING::from(arguments);
+    let working_directory = HSTRING::from(directory.as_os_str());
+
+    // SAFETY: every pointer is a live HSTRING for the duration of the call.
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            &operation,
+            &file,
+            &parameters,
+            &working_directory,
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW returns above 32 on success and an error code below.
+    match result.0 as isize {
+        code if code > 32 => Ok(()),
+        SE_ERR_ACCESSDENIED => Err(ElevateError::Declined),
+        code => Err(ElevateError::Failed(code as i32)),
+    }
+}
