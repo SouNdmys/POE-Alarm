@@ -657,6 +657,12 @@ mod app {
         let mut poll_gap = LatencySamples::with_capacity(2048);
         let mut last_poll_at: Option<Instant> = None;
         let mut timeouts = 0_u64;
+        // Polling with the cursor off the item produces an unbroken run of
+        // timeouts and no other sign that anything is wrong. Without a hook
+        // there is no click to guarantee the cursor is anywhere in particular,
+        // so the run has to say so itself.
+        let mut consecutive_timeouts = 0_u64;
+        let mut warned_unanswered = false;
         let mut empties = 0_u64;
         let mut busy = 0_u64;
 
@@ -711,9 +717,21 @@ mod app {
                 Err(error) if error.is_transient() => {
                     failures += 1;
                     match error {
-                        ClipboardError::Timeout { .. } => timeouts += 1,
+                        ClipboardError::Timeout { .. } => {
+                            timeouts += 1;
+                            consecutive_timeouts += 1;
+                        }
                         ClipboardError::Busy { .. } => busy += 1,
                         _ => empties += 1,
+                    }
+                    if consecutive_timeouts == 25 && !warned_unanswered {
+                        warned_unanswered = true;
+                        println!();
+                        println!("  [nothing to copy] 25 copies in a row went unanswered.");
+                        println!("  Ctrl+C copies whatever the cursor is resting on, so this");
+                        println!("  means the cursor is not on an item right now. Put it on the");
+                        println!("  item you are rolling and leave it there.");
+                        println!();
                     }
                     // A refusal is not a reason to stop watching. Retry
                     // promptly rather than idling the full interval, so a
@@ -728,6 +746,8 @@ mod app {
                     continue;
                 }
             };
+            consecutive_timeouts = 0;
+            warned_unanswered = false;
             let gap = last_poll_at.map(|at| at.elapsed());
             last_poll_at = Some(Instant::now());
             if let Some(gap) = gap {
@@ -819,6 +839,13 @@ mod app {
         println!("  rolls seen                {rolls_seen}");
         println!("  hits                      {hits}");
         println!("  copy failures             {failures}");
+        if rolls_seen == 0 && timeouts > 50 {
+            println!();
+            println!("  Every copy went unanswered and no roll was ever seen. The cursor was");
+            println!("  not resting on an item, so there was nothing for Ctrl+C to copy.");
+            println!("  Hover the item first, then press Ctrl+Shift+F10.");
+            println!();
+        }
         println!("  cursor on a different item {different_item}  (skipped, baseline reset)");
         println!("  unparsable payloads       {unreadable}");
         println!(
