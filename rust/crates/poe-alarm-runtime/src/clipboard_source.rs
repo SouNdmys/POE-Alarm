@@ -14,7 +14,10 @@ use poe_alarm_clipboard::{ParsedItem, parse};
 use poe_alarm_monitoring::{
     AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
 };
-use poe_alarm_platform_win::{ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground};
+use poe_alarm_platform_win::{
+    ClipboardError, KeyMethod, copy_hovered_item, foreground_process_outranks_us,
+    game_is_foreground,
+};
 
 /// How long to wait for the client to answer one Ctrl+C.
 ///
@@ -26,11 +29,22 @@ use poe_alarm_platform_win::{ClipboardError, KeyMethod, copy_hovered_item, game_
 /// one-for-one (600ms deadline gave a 632ms median, 25ms gives 27ms).
 const COPY_DEADLINE: Duration = Duration::from_millis(25);
 
+/// How many unanswered copies in a row mean something is structurally wrong.
+///
+/// A craft blocks the client for a fraction of a second — a handful of polls at
+/// most. Windows refusing to deliver the keystroke at all looks identical from
+/// here, except that it never stops. This is the line between the two, set far
+/// enough out that no craft can reach it.
+const SILENT_FAILURE_STREAK: u32 = 60;
+
 /// Why a reading could not be taken.
 #[derive(Debug)]
 pub enum SourceError {
     /// The client refused or ignored the request.
     Clipboard(ClipboardError),
+    /// Windows is dropping the keystroke because the game outranks this
+    /// process. Monitoring cannot work until that is fixed.
+    OutrankedByGame,
     /// A source that is not the clipboard failed.
     Other(String),
 }
@@ -39,6 +53,9 @@ impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
+            Self::OutrankedByGame => formatter.write_str(
+                "the game is running with higher privileges than POE Alarm, so Windows is                  discarding the copy request. Restart POE Alarm as administrator.",
+            ),
             Self::Other(detail) => formatter.write_str(detail),
         }
     }
@@ -51,6 +68,8 @@ pub struct ClipboardSource {
     last_payload: Option<String>,
     /// The last item judged, used to notice the cursor moving to another item.
     last_item: Option<ParsedItem>,
+    /// Consecutive unanswered copies while the game held focus.
+    unanswered: u32,
 }
 
 impl Default for ClipboardSource {
@@ -66,6 +85,7 @@ impl ClipboardSource {
             key_method: KeyMethod::default(),
             last_payload: None,
             last_item: None,
+            unanswered: 0,
         }
     }
 
@@ -106,9 +126,21 @@ impl AffixSource for ClipboardSource {
             // The client goes quiet for the duration of a craft, so a missing
             // payload means it had nothing to give yet. Treating that as a
             // fault would end the session every time the user crafted.
-            Err(error) if error.is_transient() => return Ok(Self::unchanged(started.elapsed())),
+            Err(error) if error.is_transient() => {
+                self.unanswered = self.unanswered.saturating_add(1);
+                // Silence that never ends is not a craft. The usual cause is
+                // the game running elevated — an accelerator or a launcher
+                // started it as administrator — after which Windows drops every
+                // keystroke this process sends and monitoring runs forever
+                // without ever alarming. Saying so beats looking healthy.
+                if self.unanswered >= SILENT_FAILURE_STREAK && foreground_process_outranks_us() {
+                    return Err(SourceError::OutrankedByGame);
+                }
+                return Ok(Self::unchanged(started.elapsed()));
+            }
             Err(error) => return Err(SourceError::Clipboard(error)),
         };
+        self.unanswered = 0;
 
         if self
             .last_payload

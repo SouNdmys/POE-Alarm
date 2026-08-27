@@ -1002,6 +1002,39 @@ impl AppShell {
         cx.notify();
     }
 
+    /// Restarts the app elevated, so injected keystrokes reach an elevated game.
+    ///
+    /// Windows refuses input sent from a lower-integrity process to a
+    /// higher-integrity window, and a launcher that starts the game as
+    /// administrator puts it out of reach. There is no way to ask for that
+    /// privilege without restarting, and no reason to ask for it up front:
+    /// most people never need it, and a UAC prompt on every launch is a worse
+    /// tax than a button nobody presses.
+    pub fn relaunch_elevated(&mut self, cx: &mut Context<Self>) {
+        #[cfg(windows)]
+        {
+            use poe_alarm_platform_win::ElevateError;
+
+            let text = self.t();
+            match poe_alarm_platform_win::relaunch_elevated(&[]) {
+                // The elevated copy is starting; this one steps aside so two
+                // instances never contend for the same global hotkeys.
+                Ok(()) => cx.quit(),
+                Err(ElevateError::Declined) => {
+                    self.notice = Some((StatusKind::Warning, text.notice_elevate_declined.into()));
+                }
+                Err(_) => {
+                    self.notice = Some((StatusKind::Error, text.notice_elevate_failed.into()));
+                }
+            }
+            cx.notify();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = cx;
+        }
+    }
+
     /// 测试规则:拿粘贴框里的物品文本跑一次判定。
     ///
     /// 不再弹文件选择框。要检查的东西本来就在剪贴板里,让用户去存一个

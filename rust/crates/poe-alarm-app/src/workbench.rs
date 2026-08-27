@@ -646,6 +646,14 @@ impl AppShell {
                     ),
             )
             .child(row(label(t.hotkey_row), hotkey_picker, t.hotkey_row_hint))
+            .child(row(
+                label(t.elevate_row),
+                div().child(
+                    button("al-elevate", LedgerButton::Secondary, t.elevate_button, cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.relaunch_elevated(cx))),
+                ),
+                t.elevate_hint,
+            ))
             .child(warning_band(t.alerts_note_tag, t.alerts_note))
     }
 
