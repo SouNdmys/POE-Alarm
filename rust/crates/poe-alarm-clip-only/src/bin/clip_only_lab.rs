@@ -696,7 +696,7 @@ mod app {
                         "game lost focus"
                     }
                 );
-                if armed && clipboard::foreground_process_outranks_us() {
+                if armed && clipboard::game_process_outranks_us() {
                     println!("  [!] the game outranks this process — injected input cannot reach");
                     println!("      it, so nothing will ever be read. Quit and rerun with");
                     println!("      --elevate to get there in one step.");
@@ -1322,7 +1322,7 @@ mod app {
             println!("  Nothing was sent. Switch to the game and run this again.");
             return;
         }
-        if clipboard::foreground_process_outranks_us() {
+        if clipboard::game_process_outranks_us() {
             println!();
             println!("  >> The game outranks this process: its token cannot be read from here,");
             println!("  >> which only happens when it runs at a higher integrity level. Input");

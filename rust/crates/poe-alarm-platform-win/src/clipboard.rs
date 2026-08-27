@@ -361,18 +361,22 @@ pub fn process_is_elevated() -> Option<bool> {
     }
 }
 
-/// Whether the foreground process outranks this one.
+/// Whether the game process outranks this one.
 ///
 /// A medium-integrity process is refused the token of an elevated one, so
-/// failing to read the foreground process's token while reading our own
-/// identifies the case exactly. That case matters because UIPI then discards
-/// any input this process injects, and the client never sees the Ctrl+C —
-/// which otherwise presents as an unexplained wall of timeouts.
+/// failing to read the game's token while reading our own identifies the case
+/// exactly. That case matters because UIPI then discards any input this process
+/// injects, and the client never sees the Ctrl+C — which otherwise presents as
+/// an unexplained wall of timeouts.
+///
+/// Asks about the game, not about whatever happens to be in front. Those are
+/// the same window only while the user is playing, and a monitoring fault is
+/// read after they have alt-tabbed back to this one.
 #[must_use]
-pub fn foreground_process_outranks_us() -> bool {
+pub fn game_process_outranks_us() -> bool {
     #[cfg(windows)]
     {
-        crate::win32::foreground_process_outranks_us()
+        crate::win32::game_process_outranks_us()
     }
     #[cfg(not(windows))]
     {
@@ -385,7 +389,7 @@ pub fn foreground_process_outranks_us() -> bool {
 /// Deliberately not a manifest `requireAdministrator`: that puts a UAC prompt
 /// in front of every user, including the majority whose client is not elevated
 /// and who therefore need no privileges at all. Elevation is asked for only
-/// once [`foreground_process_outranks_us`] says it is necessary.
+/// once [`game_process_outranks_us`] says it is necessary.
 ///
 /// The elevated process gets a fresh console; the caller is expected to exit.
 pub fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateError> {

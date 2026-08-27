@@ -568,7 +568,7 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
 #[cfg(windows)]
 fn copy_item_under_cursor() -> PlatformEvent {
     use poe_alarm_platform_win::{
-        KeyMethod, copy_hovered_item, foreground_process_outranks_us, game_is_foreground,
+        KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
     };
 
     if !game_is_foreground() {
@@ -584,7 +584,7 @@ fn copy_item_under_cursor() -> PlatformEvent {
         }
         Ok(_) => PlatformEvent::NoItemUnderCursor,
         Err(_) => PlatformEvent::CopyRefused {
-            outranked: foreground_process_outranks_us(),
+            outranked: game_process_outranks_us(),
         },
     }
 }

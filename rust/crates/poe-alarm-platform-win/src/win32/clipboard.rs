@@ -297,19 +297,21 @@ fn window_description(window: HWND) -> (String, String) {
 /// failure: every caller already treats it as "use the primary monitor", which
 /// is exactly what a user with one screen sees either way.
 pub(crate) fn game_window_rect() -> Option<RectI> {
-    // The overwhelmingly common case is that the player is looking at the game,
-    // and this runs on the path that is about to paint a fullscreen alert.
+    game_window().and_then(window_rect)
+}
+
+/// The game's top-level window, wherever it is.
+fn game_window() -> Option<HWND> {
+    // The overwhelmingly common case is that the player is looking at the game.
     // SAFETY: returns a borrowed handle checked below.
     let foreground = unsafe { GetForegroundWindow() };
     if !foreground.is_invalid() {
         let (title, class) = window_description(foreground);
-        if describes_game(&title, &class)
-            && let Some(rect) = window_rect(foreground)
-        {
-            return Some(rect);
+        if describes_game(&title, &class) {
+            return Some(foreground);
         }
     }
-    enumerate_game_window().and_then(window_rect)
+    enumerate_game_window()
 }
 
 /// The window rectangle, refusing the two shapes that would silently mislead.
@@ -388,15 +390,21 @@ pub(crate) fn process_is_elevated() -> Option<bool> {
     Some(elevation.TokenIsElevated != 0)
 }
 
-pub(crate) fn foreground_process_outranks_us() -> bool {
+/// Whether the game is running at a higher integrity level than this process.
+///
+/// Asks about the game window, not the foreground window. Those are the same
+/// thing only while the user is actually playing: by the time a monitoring
+/// fault reaches the UI they have alt-tabbed back, the foreground window is
+/// ours, reading our own token succeeds, and the answer comes back "no
+/// mismatch" for a process that has been failing for a minute. That is why the
+/// privilege prompt fired on the hotkey path and never on the monitoring one.
+pub(crate) fn game_process_outranks_us() -> bool {
     if process_is_elevated() != Some(false) {
         return false;
     }
-    // SAFETY: returns a borrowed handle valid for the call below.
-    let window = unsafe { GetForegroundWindow() };
-    if window.is_invalid() {
+    let Some(window) = game_window() else {
         return false;
-    }
+    };
     let mut pid = 0_u32;
     // SAFETY: `pid` is a live out-parameter.
     unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };

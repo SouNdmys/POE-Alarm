@@ -15,8 +15,7 @@ use poe_alarm_monitoring::{
     AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, copy_hovered_item, foreground_process_outranks_us,
-    game_is_foreground,
+    ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -149,7 +148,7 @@ impl AffixSource for ClipboardSource {
                 if self.unanswered >= SILENT_FAILURE_STREAK {
                     return Err(SourceError::Unanswered {
                         attempts: self.unanswered,
-                        outranked: foreground_process_outranks_us(),
+                        outranked: game_process_outranks_us(),
                     });
                 }
                 return Ok(Self::unchanged(started.elapsed()));

@@ -24,8 +24,8 @@ mod win32;
 pub use alert_cue::built_in_alert_wave;
 pub use clipboard::{
     ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
-    confirm_relaunch_elevated, copy_hovered_item, describes_game, foreground_process_outranks_us,
-    foreground_window_description, game_is_foreground, game_window_rect, held_modifiers,
+    confirm_relaunch_elevated, copy_hovered_item, describes_game, foreground_window_description,
+    game_is_foreground, game_process_outranks_us, game_window_rect, held_modifiers,
     process_is_elevated, read_text, relaunch_elevated, sequence_number,
 };
 pub use error::PlatformError;

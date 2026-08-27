@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 /// the keystrokes sent to it.
 #[cfg(windows)]
 fn privileges_are_mismatched() -> bool {
-    poe_alarm_platform_win::foreground_process_outranks_us()
+    poe_alarm_platform_win::game_process_outranks_us()
 }
 
 #[cfg(not(windows))]
@@ -594,6 +594,12 @@ impl AppShell {
             return;
         };
         let starting = self.s.run == RunPhase::Idle;
+        // Each attempt to monitor earns its own answer. Asking once per process
+        // means someone who dismisses the box while reaching for the game never
+        // sees it again, and every later F10 fails as quietly as before.
+        if starting {
+            self.elevation_offered = false;
+        }
         let result = match self.s.run {
             RunPhase::Idle => {
                 backend.settings.selected_rules_mut().rule_editor_mode =
@@ -1063,11 +1069,13 @@ impl AppShell {
     /// exists. Exiting on "the request was submitted" tore down the UAC prompt
     /// along with the process that owned it, so the app closed and nothing
     /// else happened.
-    /// Puts the elevation question in front of the user, once per session.
+    /// Puts the elevation question in front of the user, once per attempt.
     ///
-    /// Once, because the condition repeats on every failed copy and a box that
-    /// reappears after every dismissal is worse than no box. Declining is an
-    /// answer; Settings -> Privileges is still there for changing it.
+    /// Once per attempt rather than once per failure, because the condition
+    /// repeats on every unanswered copy and a box that returns after every
+    /// dismissal is worse than no box. Pressing the start hotkey again asks
+    /// again; Settings -> Privileges is there for changing the answer without
+    /// waiting to be asked.
     fn offer_elevation(&mut self, _cx: &mut Context<Self>) {
         if self.elevation_offered {
             return;
