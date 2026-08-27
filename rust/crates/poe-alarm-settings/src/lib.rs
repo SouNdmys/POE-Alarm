@@ -101,41 +101,6 @@ impl RuleEditorMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct ScreenRegion {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-}
-
-impl ScreenRegion {
-    pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    pub const fn is_valid(self) -> bool {
-        self.width > 0 && self.height > 0
-    }
-
-    fn parse(value: Option<&Value>) -> Option<Self> {
-        let object = value?.as_object()?;
-        let region = Self {
-            x: json_i32(member_ci(object, "X"))?,
-            y: json_i32(member_ci(object, "Y"))?,
-            width: json_i32(member_ci(object, "Width"))?,
-            height: json_i32(member_ci(object, "Height"))?,
-        };
-        region.is_valid().then_some(region)
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct HudPlacement {
@@ -296,7 +261,6 @@ impl RuleProfileSettingsSet {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct GameProfileSettings {
-    pub capture_region: Option<ScreenRegion>,
     pub ocr_language: String,
     pub rule_profiles: RuleProfileSettingsSet,
 }
@@ -304,7 +268,6 @@ pub struct GameProfileSettings {
 impl Default for GameProfileSettings {
     fn default() -> Self {
         Self {
-            capture_region: None,
             ocr_language: DEFAULT_OCR_LANGUAGE.to_owned(),
             rule_profiles: RuleProfileSettingsSet::default(),
         }
@@ -331,7 +294,6 @@ impl GameProfileSettings {
     }
 
     pub fn normalize(mut self) -> Self {
-        self.capture_region = self.capture_region.filter(|region| region.is_valid());
         self.ocr_language = normalize_ocr_language(&self.ocr_language).to_owned();
         self.rule_profiles = self.rule_profiles.normalize();
         self
@@ -362,7 +324,6 @@ impl GameProfileSettings {
         };
 
         Self {
-            capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
             ocr_language,
             rule_profiles,
         }
@@ -511,11 +472,7 @@ impl AppSettings {
         };
         GameProfileSettingsSet {
             poe1: GameProfileSettings {
-                capture_region: ScreenRegion::parse(member_ci(object, "CaptureRegion")),
-                rule_profiles: RuleProfileSettingsSet::from_legacy(
-                    &ocr_language,
-                    legacy_rules,
-                ),
+                rule_profiles: RuleProfileSettingsSet::from_legacy(&ocr_language, legacy_rules),
                 ocr_language,
             }
             .normalize(),
@@ -805,12 +762,6 @@ fn json_string(value: Option<&Value>) -> Option<String> {
 
 fn json_bool(value: Option<&Value>) -> Option<bool> {
     value.and_then(Value::as_bool)
-}
-
-fn json_i32(value: Option<&Value>) -> Option<i32> {
-    value
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
 }
 
 fn json_usize(value: Option<&Value>) -> Option<usize> {
@@ -1215,7 +1166,11 @@ mod tests {
         let release = release_settings_path_from(local_app_data);
         fs::create_dir_all(preview.parent().unwrap()).unwrap();
         fs::create_dir_all(release.parent().unwrap()).unwrap();
-        fs::write(&preview, br#"{ "SchemaVersion": 4, "UiLanguage": "zh-CN" }"#).unwrap();
+        fs::write(
+            &preview,
+            br#"{ "SchemaVersion": 4, "UiLanguage": "zh-CN" }"#,
+        )
+        .unwrap();
         fs::write(&release, br#"{ "SchemaVersion": 3 }"#).unwrap();
 
         let store = SettingsStore::release_default_from(local_app_data).unwrap();
@@ -1283,10 +1238,51 @@ mod tests {
         profile.selected_rules_mut().target_affix = "繁中更新".to_owned();
         assert_eq!(profile.rules_for("zh-TW").target_affix, "繁中更新");
         assert_eq!(profile.rules_for("en").target_affix, "english target");
+        assert_eq!(profile.rules_for("unsupported"), profile.rules_for("en"));
+    }
+
+    #[test]
+    fn a_one_point_zero_file_still_loads_after_the_capture_region_was_dropped() {
+        // Everyone upgrading from 1.0 has a CaptureRegion key on disk. It is
+        // read by nothing now, and an unknown key must stay unremarkable —
+        // neither an error nor a reason to discard the rest of the profile.
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        fs::write(
+            &path,
+            r#"{
+                "SchemaVersion": 4,
+                "SelectedGameProfile": "Poe1",
+                "UiLanguage": "zh-CN",
+                "Profiles": {
+                    "Poe1": {
+                        "CaptureRegion": { "X": 12, "Y": 34, "Width": 560, "Height": 420 },
+                        "OcrLanguage": "zh-TW",
+                        "RuleProfiles": {
+                            "TraditionalChinese": { "TargetAffix": "+#% 暴擊率" }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut store = SettingsStore::new(&path);
+        let settings = store.load();
+        assert_eq!(settings.ui_language, "zh-CN");
+        assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
         assert_eq!(
-            profile.rules_for("unsupported"),
-            profile.rules_for("en")
+            settings.profiles.poe1.selected_rules().target_affix,
+            "+#% 暴擊率"
         );
+
+        // Saving is what actually drops the key from disk, and it must not
+        // drop anything else with it.
+        store.save(&settings).unwrap();
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let poe1 = saved["Profiles"]["Poe1"].as_object().unwrap();
+        assert!(poe1.get("CaptureRegion").is_none());
+        assert_eq!(poe1["OcrLanguage"], "zh-TW");
     }
 
     #[test]
@@ -1322,10 +1318,6 @@ mod tests {
         assert_eq!(
             settings.profiles.poe1.selected_rules().target_affix,
             "poe1 target"
-        );
-        assert_eq!(
-            settings.profiles.poe1.capture_region,
-            Some(ScreenRegion::new(12, 34, 560, 420))
         );
         assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
         assert_eq!(
@@ -1506,10 +1498,6 @@ mod tests {
             settings.profiles.poe1.selected_rules().target_affix,
             "legacy poe1 target"
         );
-        assert_eq!(
-            settings.profiles.poe1.capture_region,
-            Some(ScreenRegion::new(12, 34, 560, 420))
-        );
         assert_eq!(settings.profiles.poe1.ocr_language, "zh-TW");
         assert_eq!(
             settings.profiles.poe1.selected_rules().rule_editor_mode,
@@ -1578,7 +1566,6 @@ mod tests {
         assert_eq!(settings.hud_placement, HudPlacement::default());
         assert_eq!(settings.profiles.poe1.selected_rules().target_affix, "one");
         assert_eq!(settings.profiles.poe2.selected_rules().target_affix, "two");
-        assert!(settings.profiles.poe1.capture_region.is_none());
         assert_eq!(settings.profiles.poe1.ocr_language, "en");
         assert_eq!(
             settings.profiles.poe1.selected_rules().rule_editor_mode,
@@ -1647,18 +1634,10 @@ mod tests {
             ..AppSettings::default()
         };
         settings.profiles.poe1.ocr_language = "zh-TW".to_owned();
-        settings
-            .profiles
-            .poe1
-            .rules_for_mut("en")
-            .target_affix = "poe1 english target".to_owned();
-        settings
-            .profiles
-            .poe1
-            .rules_for_mut("zh-TW")
-            .target_affix = "poe1 traditional target".to_owned();
+        settings.profiles.poe1.rules_for_mut("en").target_affix = "poe1 english target".to_owned();
+        settings.profiles.poe1.rules_for_mut("zh-TW").target_affix =
+            "poe1 traditional target".to_owned();
         settings.profiles.poe2 = GameProfileSettings {
-            capture_region: Some(ScreenRegion::new(700, 80, 640, 920)),
             ocr_language: "en".to_owned(),
             rule_profiles: RuleProfileSettingsSet {
                 english: RuleProfileSettings {
@@ -1732,16 +1711,8 @@ mod tests {
             "poe2 english target"
         );
         assert_eq!(
-            reloaded
-                .profiles
-                .poe2
-                .rules_for("zh-TW")
-                .target_affix,
+            reloaded.profiles.poe2.rules_for("zh-TW").target_affix,
             "poe2 traditional target"
-        );
-        assert_eq!(
-            reloaded.profiles.poe2.capture_region,
-            Some(ScreenRegion::new(700, 80, 640, 920))
         );
         let rules = reloaded
             .profiles

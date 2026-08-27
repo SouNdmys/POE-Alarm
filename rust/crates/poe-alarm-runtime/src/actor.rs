@@ -4,38 +4,33 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use poe_alarm_alert_win::AlertServiceConfig;
 use poe_alarm_core::LogicalAffixMatch;
 use poe_alarm_monitoring::{
-    EventSink, Monitor, MonitorDetection, MonitorEvent, MonitorPlan, PreparedFrame,
-    RecognitionResult, SystemClock,
+    EventSink, Monitor, MonitorDetection, MonitorEvent, MonitorPlan, RecognitionResult, SystemClock,
 };
-use poe_alarm_recognition::PaddleBackendConfig;
-use poe_alarm_vision::{BlueMaskSettings, CaptureRegion, CapturedFrame, build_blue_mask};
+use poe_alarm_platform_win::game_window_rect;
 
-use crate::backend::{CaptureAdapter, RecognizerAdapter, ScreenshotBackend};
+use crate::backend::{AffixSourceFactory, DynamicSource, ProductionSourceFactory};
 use crate::protection::AlertPresentation;
 use crate::{
-    AlertLatchStatus, BackendError, BackendFactory, CompiledRuntimeSettings, DetectionSummary,
-    NativeProtection, ProductionBackendFactory, ProtectionEvent, ProtectionService, RuntimeCommand,
-    RuntimeEvent, RuntimeGeneration, RuntimeOperation, RuntimeRequestId, RuntimeState,
-    ScreenshotEvaluation, ScreenshotReport, ScreenshotRequest, compile_settings,
+    AlertLatchStatus, BackendError, CompiledRuntimeSettings, DetectionSummary, ItemCheckEvaluation,
+    ItemCheckReport, ItemCheckRequest, NativeProtection, ProtectionEvent, ProtectionService,
+    RuntimeCommand, RuntimeEvent, RuntimeGeneration, RuntimeOperation, RuntimeRequestId,
+    RuntimeState, compile_settings,
 };
 
 const COMMAND_CAPACITY: usize = 32;
 const ACTOR_POLL_INTERVAL: Duration = Duration::from_millis(4);
 const SHUTDOWN_TARGET: Duration = Duration::from_secs(1);
-pub(crate) const MAXIMUM_SCREENSHOT_PASSES: usize = 128;
 
-type LiveMonitor = Monitor<CaptureAdapter, RecognizerAdapter, SystemClock, MonitorBridge>;
+type LiveMonitor = Monitor<DynamicSource, SystemClock, MonitorBridge>;
 
 #[derive(Clone, Debug)]
 pub struct ProductionRuntimeConfig {
     pub alert: AlertServiceConfig,
-    /// `None` resolves the packaged OCR assets beside the executable.
-    pub paddle: Option<PaddleBackendConfig>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,7 +52,7 @@ impl std::error::Error for RuntimeSendError {}
 
 /// UI-facing non-blocking runtime endpoint.
 ///
-/// No method joins a worker or performs capture/OCR. Dropping the handle sends
+/// No method joins a worker or reads the clipboard. Dropping the handle sends
 /// a best-effort shutdown request and detaches the actor thread.
 pub struct RuntimeHandle {
     commands: mpsc::SyncSender<RuntimeCommand>,
@@ -68,25 +63,24 @@ pub struct RuntimeHandle {
 impl RuntimeHandle {
     pub fn start_production(config: ProductionRuntimeConfig) -> io::Result<Self> {
         Self::spawn_initialized(move || {
-            let factory: Arc<dyn BackendFactory> =
-                Arc::new(ProductionBackendFactory::new(config.paddle));
+            let sources: Arc<dyn AffixSourceFactory> = Arc::new(ProductionSourceFactory);
             let protection: Arc<dyn ProtectionService> =
                 Arc::new(NativeProtection::start(config.alert)?);
-            Ok((factory, protection))
+            Ok((sources, protection))
         })
     }
 
     pub fn spawn_with_components(
-        factory: Arc<dyn BackendFactory>,
+        sources: Arc<dyn AffixSourceFactory>,
         protection: Arc<dyn ProtectionService>,
     ) -> io::Result<Self> {
-        Self::spawn_initialized(move || Ok((factory, protection)))
+        Self::spawn_initialized(move || Ok((sources, protection)))
     }
 
     fn spawn_initialized<F>(initialize: F) -> io::Result<Self>
     where
         F: FnOnce() -> Result<
-                (Arc<dyn BackendFactory>, Arc<dyn ProtectionService>),
+                (Arc<dyn AffixSourceFactory>, Arc<dyn ProtectionService>),
                 crate::ProtectionError,
             > + Send
             + 'static,
@@ -98,26 +92,16 @@ impl RuntimeHandle {
         thread::Builder::new()
             .name("poe-alarm-runtime".to_owned())
             .spawn(move || match initialize() {
-                Ok((factory, protection)) => {
-                    match RuntimeActor::new(
+                Ok((sources, protection)) => {
+                    let actor = RuntimeActor::new(
                         command_receiver,
                         event_sender.clone(),
                         actor_snapshot,
-                        factory,
+                        sources,
                         protection,
-                    ) {
-                        Ok(actor) => {
-                            let _ = event_sender.send(RuntimeEvent::Ready);
-                            actor.run();
-                        }
-                        Err(error) => {
-                            let _ = event_sender.send(RuntimeEvent::Fault {
-                                generation: None,
-                                operation: RuntimeOperation::Startup,
-                                detail: format!("could not start screenshot worker: {error}"),
-                            });
-                        }
-                    }
+                    );
+                    let _ = event_sender.send(RuntimeEvent::Ready);
+                    actor.run();
                 }
                 Err(error) => {
                     let _ = event_sender.send(RuntimeEvent::Fault {
@@ -151,12 +135,12 @@ impl RuntimeHandle {
         self.try_send(RuntimeCommand::Stop)
     }
 
-    pub fn test_screenshot(&self, request: ScreenshotRequest) -> Result<(), RuntimeSendError> {
-        self.try_send(RuntimeCommand::Screenshot(request))
+    pub fn check_item(&self, request: ItemCheckRequest) -> Result<(), RuntimeSendError> {
+        self.try_send(RuntimeCommand::CheckItem(request))
     }
 
-    pub fn cancel_screenshot(&self, request_id: RuntimeRequestId) -> Result<(), RuntimeSendError> {
-        self.try_send(RuntimeCommand::CancelScreenshot { request_id })
+    pub fn cancel_item_check(&self, request_id: RuntimeRequestId) -> Result<(), RuntimeSendError> {
+        self.try_send(RuntimeCommand::CancelItemCheck { request_id })
     }
 
     pub fn acknowledge_alert(&self) -> Result<(), RuntimeSendError> {
@@ -192,11 +176,9 @@ struct RuntimeActor {
     monitor_snapshot:
         Arc<std::sync::Mutex<Option<(RuntimeGeneration, poe_alarm_monitoring::MonitorSnapshot)>>>,
     public_snapshot: Arc<std::sync::Mutex<Option<RuntimeEvent>>>,
-    factory: Arc<dyn BackendFactory>,
-    screenshot_worker: ScreenshotWorker,
+    sources: Arc<dyn AffixSourceFactory>,
     protection: Arc<dyn ProtectionService>,
     live: Option<LiveSession>,
-    screenshot: Option<ScreenshotTask>,
     retired: Option<RetiredWork>,
     pending_intent: Option<RuntimeIntent>,
     active_generation: Option<RuntimeGeneration>,
@@ -210,139 +192,10 @@ struct LiveSession {
     monitor: LiveMonitor,
 }
 
-struct ScreenshotTask {
-    request_id: RuntimeRequestId,
-    generation: RuntimeGeneration,
-    cancelled: Arc<AtomicBool>,
-}
-
-enum ScreenshotWorkerCommand {
-    Run {
-        generation: RuntimeGeneration,
-        request_id: RuntimeRequestId,
-        path: std::path::PathBuf,
-        compiled: Box<CompiledRuntimeSettings>,
-        cancelled: Arc<AtomicBool>,
-    },
-    ReleaseRecognizer {
-        acknowledged: mpsc::SyncSender<()>,
-    },
-    Stop,
-}
-
-/// The only screenshot execution thread in a runtime process.
-///
-/// It owns WIC's COM apartment and the cached native recognizer, preventing
-/// every UI screenshot test from creating and destroying an ONNX session,
-/// thread stacks and COM/WIC state. The actor still owns cancellation,
-/// generation filtering and latest-intent coalescing.
-struct ScreenshotWorker {
-    commands: mpsc::SyncSender<ScreenshotWorkerCommand>,
-}
-
-impl ScreenshotWorker {
-    fn start(
-        factory: Arc<dyn BackendFactory>,
-        events: mpsc::Sender<InternalEvent>,
-    ) -> io::Result<Self> {
-        let (commands, receiver) = mpsc::sync_channel(1);
-        thread::Builder::new()
-            .name("poe-alarm-screenshot".to_owned())
-            .spawn(move || {
-                let mut backend: Option<Box<dyn ScreenshotBackend>> = None;
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        ScreenshotWorkerCommand::Run {
-                            generation,
-                            request_id,
-                            path,
-                            compiled,
-                            cancelled,
-                        } => {
-                            let result = catch_unwind(AssertUnwindSafe(|| {
-                                if backend.is_none() {
-                                    backend = Some(factory.create_screenshot_backend()?);
-                                }
-                                let backend = backend
-                                    .as_deref_mut()
-                                    .expect("the screenshot backend was initialized above");
-                                run_screenshot(
-                                    backend, generation, request_id, &path, &compiled, &cancelled,
-                                )
-                            }));
-                            let result = match result {
-                                Ok(result) => result,
-                                Err(_) => {
-                                    // Do not reuse native state across an unwind. A later request
-                                    // can rebuild it on this same bounded worker.
-                                    backend = None;
-                                    Err(BackendError(
-                                        "screenshot worker panicked during native recognition"
-                                            .to_owned(),
-                                    ))
-                                }
-                            };
-                            let _ = events.send(InternalEvent::ScreenshotFinished {
-                                generation,
-                                request_id,
-                                result,
-                            });
-                        }
-                        ScreenshotWorkerCommand::ReleaseRecognizer { acknowledged } => {
-                            if let Some(backend) = backend.as_mut() {
-                                backend.release_recognizer();
-                            }
-                            let _ = acknowledged.send(());
-                        }
-                        ScreenshotWorkerCommand::Stop => break,
-                    }
-                }
-            })?;
-        Ok(Self { commands })
-    }
-
-    fn submit(&self, command: ScreenshotWorkerCommand) -> Result<(), BackendError> {
-        self.commands
-            .try_send(command)
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => {
-                    BackendError("screenshot worker queue is unexpectedly full".to_owned())
-                }
-                mpsc::TrySendError::Disconnected(_) => {
-                    BackendError("screenshot worker is no longer running".to_owned())
-                }
-            })
-    }
-
-    fn stop(&self) {
-        let _ = self.commands.try_send(ScreenshotWorkerCommand::Stop);
-    }
-
-    fn release_recognizer(&self) -> Result<(), BackendError> {
-        let (acknowledged, acknowledgement) = mpsc::sync_channel(1);
-        self.commands
-            .send(ScreenshotWorkerCommand::ReleaseRecognizer { acknowledged })
-            .map_err(|_| BackendError("screenshot worker is no longer running".to_owned()))?;
-        acknowledgement
-            .recv_timeout(Duration::from_secs(1))
-            .map_err(|_| BackendError("screenshot recognizer release timed out".to_owned()))
-    }
-}
-
-impl Drop for ScreenshotWorker {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RetiredWork {
     Live {
         generation: RuntimeGeneration,
-    },
-    Screenshot {
-        generation: RuntimeGeneration,
-        request_id: RuntimeRequestId,
     },
     /// The OS refused the one cleanup thread. The monitor is deliberately
     /// leaked until process exit and replacement work remains disabled so the
@@ -352,7 +205,7 @@ enum RetiredWork {
 
 enum RuntimeIntent {
     Live(poe_alarm_settings::AppSettings),
-    Screenshot(ScreenshotRequest),
+    ItemCheck(ItemCheckRequest),
 }
 
 impl RuntimeActor {
@@ -360,30 +213,26 @@ impl RuntimeActor {
         commands: mpsc::Receiver<RuntimeCommand>,
         events: mpsc::Sender<RuntimeEvent>,
         public_snapshot: Arc<std::sync::Mutex<Option<RuntimeEvent>>>,
-        factory: Arc<dyn BackendFactory>,
+        sources: Arc<dyn AffixSourceFactory>,
         protection: Arc<dyn ProtectionService>,
-    ) -> io::Result<Self> {
+    ) -> Self {
         let (internal_sender, internal_events) = mpsc::channel();
-        let screenshot_worker =
-            ScreenshotWorker::start(Arc::clone(&factory), internal_sender.clone())?;
-        Ok(Self {
+        Self {
             commands,
             events,
             internal_sender,
             internal_events,
             monitor_snapshot: Arc::new(std::sync::Mutex::new(None)),
             public_snapshot,
-            factory,
-            screenshot_worker,
+            sources,
             protection,
             live: None,
-            screenshot: None,
             retired: None,
             pending_intent: None,
             active_generation: None,
             next_generation: 1,
             state: RuntimeState::Idle,
-        })
+        }
     }
 
     fn run(mut self) {
@@ -408,9 +257,9 @@ impl RuntimeActor {
         }
     }
 
-    /// Coalesces a burst before allocating a fresh native recognizer. Shutdown
-    /// therefore has priority over a queued replacement and cannot get stuck
-    /// behind avoidable Paddle/WinRT initialization.
+    /// Coalesces a burst before standing up a fresh monitor. Shutdown therefore
+    /// has priority over a queued replacement and cannot get stuck behind a
+    /// session that is about to be replaced anyway.
     fn handle_command_batch(&mut self, first: RuntimeCommand) -> bool {
         let mut next = Some(first);
         loop {
@@ -434,12 +283,12 @@ impl RuntimeActor {
                 self.retire_active_work(true);
             }
             RuntimeCommand::Stop => self.stop_all(true),
-            RuntimeCommand::Screenshot(request) => {
-                self.replace_intent(RuntimeIntent::Screenshot(request));
+            RuntimeCommand::CheckItem(request) => {
+                self.replace_intent(RuntimeIntent::ItemCheck(request));
                 self.retire_active_work(true);
             }
-            RuntimeCommand::CancelScreenshot { request_id } => {
-                self.cancel_screenshot_task(Some(request_id), true);
+            RuntimeCommand::CancelItemCheck { request_id } => {
+                self.cancel_pending_item_check(request_id, true);
             }
             RuntimeCommand::AlertAck => {
                 if let Err(error) = self.protection.acknowledge() {
@@ -463,7 +312,6 @@ impl RuntimeActor {
 
     fn launch_live(&mut self, settings: poe_alarm_settings::AppSettings) {
         debug_assert!(self.live.is_none());
-        debug_assert!(self.screenshot.is_none());
         debug_assert!(self.retired.is_none());
         let generation = self.allocate_generation();
         self.active_generation = Some(generation);
@@ -477,22 +325,8 @@ impl RuntimeActor {
         };
         self.publish_compiled(generation, &compiled);
 
-        // A live monitor owns its own recognizer. Drop the idle screenshot
-        // cache so native model memory remains bounded to one active session.
-        if let Err(error) = self.screenshot_worker.release_recognizer() {
-            self.fault(Some(generation), RuntimeOperation::Start, error.to_string());
-            return;
-        }
-
-        let capture = match self.factory.create_capture() {
-            Ok(capture) => capture,
-            Err(error) => {
-                self.fault(Some(generation), RuntimeOperation::Start, error.to_string());
-                return;
-            }
-        };
-        let recognizer = match self.factory.create_recognizer(compiled.profile) {
-            Ok(recognizer) => recognizer,
+        let source = match self.sources.create() {
+            Ok(source) => DynamicSource(source),
             Err(error) => {
                 self.fault(Some(generation), RuntimeOperation::Start, error.to_string());
                 return;
@@ -516,7 +350,6 @@ impl RuntimeActor {
         let valid = Arc::new(AtomicBool::new(true));
         let bridge = MonitorBridge {
             generation,
-            region: compiled.region,
             alert_copy: compiled.alert_copy.clone(),
             input_guard_enabled: compiled.input_guard_enabled,
             protection: Arc::clone(&self.protection),
@@ -525,13 +358,8 @@ impl RuntimeActor {
             session_valid: Arc::clone(&valid),
             safety_failed: AtomicBool::new(false),
         };
-        let mut monitor = Monitor::new(
-            CaptureAdapter(capture),
-            RecognizerAdapter(recognizer),
-            SystemClock::default(),
-            bridge,
-        );
-        match monitor.start(compiled.plan, compiled.region) {
+        let mut monitor = Monitor::new(source, SystemClock::default(), bridge);
+        match monitor.start(compiled.plan) {
             Ok(_) => {
                 self.live = Some(LiveSession {
                     generation,
@@ -547,52 +375,51 @@ impl RuntimeActor {
         }
     }
 
-    fn launch_screenshot(&mut self, request: ScreenshotRequest) {
+    /// Runs one offline rule check against item text the user supplied.
+    ///
+    /// The OCR build handed this to a bounded worker thread that owned WIC's
+    /// COM apartment and a cached ONNX session, because decoding a PNG and
+    /// recognising it took seconds and had to stay cancellable. A parse and an
+    /// evaluation take microseconds, so the whole apparatus — worker,
+    /// cancellation flag, in-flight task tracking, retirement — is gone and the
+    /// answer is produced before this function returns.
+    fn launch_item_check(&mut self, request: ItemCheckRequest) {
         debug_assert!(self.live.is_none());
-        debug_assert!(self.screenshot.is_none());
         debug_assert!(self.retired.is_none());
         let generation = self.allocate_generation();
         self.active_generation = Some(generation);
-        self.publish_state(Some(generation), RuntimeState::TestingScreenshot);
+        self.publish_state(Some(generation), RuntimeState::CheckingItem);
         let compiled = match compile_settings(&request.settings) {
             Ok(compiled) => compiled,
             Err(error) => {
                 self.fault(
                     Some(generation),
-                    RuntimeOperation::Screenshot,
+                    RuntimeOperation::ItemCheck,
                     error.to_string(),
                 );
                 return;
             }
         };
         self.publish_compiled(generation, &compiled);
-        let cancelled = Arc::new(AtomicBool::new(false));
-        self.screenshot = Some(ScreenshotTask {
-            request_id: request.request_id,
-            generation,
-            cancelled: Arc::clone(&cancelled),
-        });
-        let request_id = request.request_id;
-        let path = request.path;
-        if let Err(error) = self.screenshot_worker.submit(ScreenshotWorkerCommand::Run {
-            generation,
-            request_id,
-            path,
-            compiled: Box::new(compiled),
-            cancelled,
-        }) {
-            self.screenshot = None;
-            self.fault(
-                Some(generation),
-                RuntimeOperation::Screenshot,
-                format!("could not start screenshot worker: {error}"),
-            );
+        match check_item_text(generation, request.request_id, &request.text, &compiled) {
+            Ok(report) => {
+                let _ = self.events.send(RuntimeEvent::ItemCheckCompleted(report));
+                self.active_generation = None;
+                self.publish_state(None, RuntimeState::Idle);
+            }
+            Err(error) => {
+                self.active_generation = None;
+                self.fault(
+                    Some(generation),
+                    RuntimeOperation::ItemCheck,
+                    error.to_string(),
+                );
+            }
         }
     }
 
     fn stop_all(&mut self, acknowledge_alert: bool) {
         self.cancel_pending_intent(true);
-        self.cancel_screenshot_task(None, true);
         if self.live.is_none() && acknowledge_alert && !self.protection.ready_for_new_work() {
             let _ = self.protection.acknowledge();
         }
@@ -605,41 +432,36 @@ impl RuntimeActor {
     }
 
     fn replace_intent(&mut self, intent: RuntimeIntent) {
-        if let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.replace(intent) {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
+        if let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.replace(intent) {
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
                 request_id: request.request_id,
             });
         }
     }
 
     fn cancel_pending_intent(&mut self, publish: bool) {
-        if let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.take()
+        if let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.take()
             && publish
         {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
                 request_id: request.request_id,
             });
         }
     }
 
     fn retire_active_work(&mut self, acknowledge_alert: bool) {
-        self.cancel_screenshot_task(None, true);
         if self.live.is_some() {
             let _ = self.stop_live(acknowledge_alert);
         }
     }
 
     fn try_launch_pending(&mut self) {
-        if self.live.is_some()
-            || self.screenshot.is_some()
-            || self.retired.is_some()
-            || !self.protection.ready_for_new_work()
-        {
+        if self.live.is_some() || self.retired.is_some() || !self.protection.ready_for_new_work() {
             return;
         }
         match self.pending_intent.take() {
             Some(RuntimeIntent::Live(settings)) => self.launch_live(settings),
-            Some(RuntimeIntent::Screenshot(request)) => self.launch_screenshot(request),
+            Some(RuntimeIntent::ItemCheck(request)) => self.launch_item_check(request),
             None => {}
         }
     }
@@ -672,51 +494,22 @@ impl RuntimeActor {
         self.spawn_monitor_drain(live.generation, live.monitor, RuntimeOperation::Stop)
     }
 
-    fn cancel_screenshot_task(
-        &mut self,
-        expected_request: Option<RuntimeRequestId>,
-        publish: bool,
-    ) {
-        if let Some(RuntimeIntent::Screenshot(request)) = self.pending_intent.as_ref()
-            && expected_request.is_some_and(|expected| expected == request.request_id)
-        {
-            let request_id = request.request_id;
-            self.pending_intent = None;
-            if publish {
-                let _ = self
-                    .events
-                    .send(RuntimeEvent::ScreenshotCancelled { request_id });
-            }
-            return;
-        }
-        let Some(task) = self.screenshot.as_ref() else {
+    /// Cancels an item-text check that is still queued behind retiring work.
+    ///
+    /// Nothing is ever in flight to cancel: the check itself completes inside
+    /// `launch_item_check`. What can be cancelled is the intent waiting for a
+    /// live session to finish draining.
+    fn cancel_pending_item_check(&mut self, expected_request: RuntimeRequestId, publish: bool) {
+        let Some(RuntimeIntent::ItemCheck(request)) = self.pending_intent.as_ref() else {
             return;
         };
-        if expected_request.is_some_and(|expected| expected != task.request_id) {
+        if request.request_id != expected_request {
             return;
         }
-        let task = self.screenshot.take().expect("task was just observed");
-        task.cancelled.store(true, Ordering::Release);
-        if self.active_generation == Some(task.generation) {
-            self.active_generation = None;
-        }
-        if self.retired.is_some() {
-            self.retired = Some(RetiredWork::CleanupBlocked);
-            self.fault(
-                Some(task.generation),
-                RuntimeOperation::Screenshot,
-                "runtime cleanup capacity was already occupied; replacement work is disabled until process exit"
-                    .to_owned(),
-            );
-        } else {
-            self.retired = Some(RetiredWork::Screenshot {
-                generation: task.generation,
-                request_id: task.request_id,
-            });
-        }
+        self.pending_intent = None;
         if publish {
-            let _ = self.events.send(RuntimeEvent::ScreenshotCancelled {
-                request_id: task.request_id,
+            let _ = self.events.send(RuntimeEvent::ItemCheckCancelled {
+                request_id: expected_request,
             });
         }
     }
@@ -725,9 +518,7 @@ impl RuntimeActor {
         let started = Instant::now();
         self.publish_state(self.active_generation, RuntimeState::ShuttingDown);
         self.cancel_pending_intent(false);
-        self.cancel_screenshot_task(None, false);
         self.drain_live_for_shutdown();
-        self.screenshot_worker.stop();
         self.active_generation = None;
         self.clear_snapshots();
         if let Err(error) = self.protection.shutdown_fail_open() {
@@ -742,9 +533,9 @@ impl RuntimeActor {
     }
 
     /// Invalidates input and event ownership synchronously, then lets a
-    /// possibly in-flight native OCR call finish outside the actor. Paddle's
-    /// public production boundary observes cancellation before/after ONNX but
-    /// cannot interrupt an inference already inside the native runtime.
+    /// possibly in-flight clipboard round trip finish outside the actor. The
+    /// source observes cancellation between reads but cannot interrupt one the
+    /// client has not answered yet.
     fn drain_live_for_shutdown(&mut self) {
         let Some(live) = self.live.take() else {
             return;
@@ -796,7 +587,7 @@ impl RuntimeActor {
                     generation: Some(generation),
                     operation,
                     detail: format!(
-                        "could not start OCR cleanup worker; resources will be reclaimed at process exit: {error}"
+                        "could not start the monitor cleanup worker; resources will be reclaimed at process exit: {error}"
                     ),
                 });
                 false
@@ -810,18 +601,6 @@ impl RuntimeActor {
             match event {
                 InternalEvent::LiveDrainFinished { generation }
                     if self.retired == Some(RetiredWork::Live { generation }) =>
-                {
-                    self.retired = None;
-                }
-                InternalEvent::ScreenshotFinished {
-                    generation,
-                    request_id,
-                    ..
-                } if self.retired
-                    == Some(RetiredWork::Screenshot {
-                        generation,
-                        request_id,
-                    }) =>
                 {
                     self.retired = None;
                 }
@@ -839,32 +618,6 @@ impl RuntimeActor {
                         BridgeMonitorEvent::Fault(detail) => {
                             let _ = self.stop_live(false);
                             self.fault(Some(generation), RuntimeOperation::Alert, detail);
-                        }
-                    }
-                }
-                InternalEvent::ScreenshotFinished {
-                    generation,
-                    request_id,
-                    result,
-                } if self.active_generation == Some(generation)
-                    && self.screenshot.as_ref().is_some_and(|task| {
-                        task.generation == generation && task.request_id == request_id
-                    }) =>
-                {
-                    self.screenshot = None;
-                    match result {
-                        Ok(report) => {
-                            let _ = self.events.send(RuntimeEvent::ScreenshotCompleted(report));
-                            self.active_generation = None;
-                            self.publish_state(None, RuntimeState::Idle);
-                        }
-                        Err(error) => {
-                            self.active_generation = None;
-                            self.fault(
-                                Some(generation),
-                                RuntimeOperation::Screenshot,
-                                error.to_string(),
-                            );
                         }
                     }
                 }
@@ -956,8 +709,6 @@ impl RuntimeActor {
     fn publish_compiled(&self, generation: RuntimeGeneration, compiled: &CompiledRuntimeSettings) {
         let _ = self.events.send(RuntimeEvent::SettingsCompiled {
             generation,
-            profile: compiled.profile,
-            region: compiled.region,
             ui: compiled.ui.clone(),
         });
     }
@@ -1000,11 +751,6 @@ enum InternalEvent {
         generation: RuntimeGeneration,
         event: BridgeMonitorEvent,
     },
-    ScreenshotFinished {
-        generation: RuntimeGeneration,
-        request_id: RuntimeRequestId,
-        result: Result<ScreenshotReport, BackendError>,
-    },
     LiveDrainFinished {
         generation: RuntimeGeneration,
     },
@@ -1017,7 +763,6 @@ enum BridgeMonitorEvent {
 
 struct MonitorBridge {
     generation: RuntimeGeneration,
-    region: CaptureRegion,
     alert_copy: crate::AlertCopy,
     input_guard_enabled: bool,
     protection: Arc<dyn ProtectionService>,
@@ -1085,7 +830,12 @@ impl EventSink for MonitorBridge {
                 let presentation = AlertPresentation {
                     copy: self.alert_copy.clone(),
                     detail: alert_detail,
-                    anchor_region: self.region,
+                    // Asked here rather than at compile time: a rectangle
+                    // captured when the user pressed Start can be minutes stale
+                    // by the time an item rolls, and the client may not even
+                    // have been up. This runs immediately before a fullscreen
+                    // window is painted, so one lookup costs nothing.
+                    anchor_region: game_window_rect(),
                 };
                 match self
                     .protection
@@ -1128,128 +878,45 @@ fn detection_summary(detection: &MonitorDetection) -> DetectionSummary {
     }
 }
 
-fn run_screenshot(
-    backend: &mut dyn ScreenshotBackend,
+/// Parses item text and runs the compiled plan over it.
+///
+/// The grouping the parser recovered is carried through as physical line
+/// identities, so a check here reaches the same verdict as the live monitor
+/// would on the same item — including refusing to let one modifier satisfy two
+/// conditions.
+fn check_item_text(
     generation: RuntimeGeneration,
     request_id: RuntimeRequestId,
-    path: &std::path::Path,
+    text: &str,
     compiled: &CompiledRuntimeSettings,
-    cancelled: &AtomicBool,
-) -> Result<ScreenshotReport, BackendError> {
-    ensure_not_cancelled(cancelled)?;
-    let load_started = Instant::now();
-    let full_frame = backend.decode(path)?;
-    let (frame, used_full_image_fallback) = crop_or_full(full_frame, compiled.region)?;
-    let load_elapsed = load_started.elapsed();
-    ensure_not_cancelled(cancelled)?;
+) -> Result<ItemCheckReport, BackendError> {
+    let parse_started = Instant::now();
+    let item = poe_alarm_clipboard::parse(text).map_err(|error| BackendError(error.to_string()))?;
+    let modifier_count = item.groups.len();
+    let (lines, physical_line_identities) = item.render();
+    let parse_elapsed = parse_started.elapsed();
 
-    let mask_started = Instant::now();
-    let blue_mask = build_blue_mask(&frame, BlueMaskSettings::default());
-    let mask_elapsed = mask_started.elapsed();
-    backend.begin_request();
-    let mut preprocessing_elapsed = mask_elapsed;
-    let mut recognition_elapsed = Duration::ZERO;
-    let mut final_result = None;
-    for _ in 0..MAXIMUM_SCREENSHOT_PASSES {
-        ensure_not_cancelled(cancelled)?;
-        let prepared = PreparedFrame {
-            frame: &frame,
-            blue_mask: &blue_mask,
-            semantic_fingerprint: blue_mask.fingerprint(),
-        };
-        let result = match &compiled.plan {
-            MonitorPlan::Quick(target) => {
-                backend.recognize_quick(compiled.profile, prepared, target, cancelled)?
-            }
-            MonitorPlan::Structured(rules) => backend.recognize_structured(
-                compiled.profile,
-                prepared,
-                rules.targets(),
-                cancelled,
-            )?,
-        };
-        preprocessing_elapsed = preprocessing_elapsed.saturating_add(result.preprocessing_elapsed);
-        recognition_elapsed = recognition_elapsed.saturating_add(result.recognition_elapsed);
-        let requires_rescan = result.requires_rescan;
-        final_result = Some(result);
-        if !requires_rescan {
-            break;
-        }
-    }
-    let result = final_result.expect("at least one screenshot recognition pass runs");
-    if result.requires_rescan {
-        return Err(BackendError(format!(
-            "screenshot recognition did not converge after {MAXIMUM_SCREENSHOT_PASSES} passes"
-        )));
-    }
-    ensure_not_cancelled(cancelled)?;
+    let result = RecognitionResult {
+        lines,
+        physical_line_identities,
+        ..RecognitionResult::default()
+    };
     let evaluation_started = Instant::now();
-    let evaluation = evaluate_screenshot(&compiled.plan, &result);
+    let evaluation = evaluate_item(&compiled.plan, &result);
     let evaluation_elapsed = evaluation_started.elapsed();
-    ensure_not_cancelled(cancelled)?;
 
-    Ok(ScreenshotReport {
+    Ok(ItemCheckReport {
         request_id,
         generation,
-        profile: compiled.profile,
-        requested_region: compiled.region,
-        used_full_image_fallback,
         lines: result.lines,
-        load_elapsed,
-        preprocessing_elapsed,
-        recognition_elapsed,
+        modifier_count,
+        parse_elapsed,
         evaluation_elapsed,
         evaluation,
     })
 }
 
-fn ensure_not_cancelled(cancelled: &AtomicBool) -> Result<(), BackendError> {
-    if cancelled.load(Ordering::Acquire) {
-        Err(BackendError(
-            "screenshot recognition was cancelled".to_owned(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn crop_or_full(
-    full: CapturedFrame,
-    requested: CaptureRegion,
-) -> Result<(CapturedFrame, bool), BackendError> {
-    let valid = requested.x >= 0
-        && requested.y >= 0
-        && (requested.x as u32) < full.width() as u32
-        && (requested.y as u32) < full.height() as u32
-        && requested.width <= full.width() as u32 - requested.x as u32
-        && requested.height <= full.height() as u32 - requested.y as u32;
-    if !valid {
-        return Ok((full, true));
-    }
-    if requested.x == 0
-        && requested.y == 0
-        && requested.width as usize == full.width()
-        && requested.height as usize == full.height()
-    {
-        return Ok((full, false));
-    }
-
-    let stride = requested.width as usize * poe_alarm_vision::BYTES_PER_PIXEL;
-    let mut pixels = vec![0_u8; stride * requested.height as usize];
-    let source_stride = full.stride();
-    let source_x = requested.x as usize * poe_alarm_vision::BYTES_PER_PIXEL;
-    for row in 0..requested.height as usize {
-        let source_start = (requested.y as usize + row) * source_stride + source_x;
-        let destination_start = row * stride;
-        pixels[destination_start..destination_start + stride]
-            .copy_from_slice(&full.bgra_pixels()[source_start..source_start + stride]);
-    }
-    CapturedFrame::from_bgra(requested, stride, pixels, SystemTime::now())
-        .map(|frame| (frame, false))
-        .map_err(|error| BackendError(error.to_string()))
-}
-
-fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> ScreenshotEvaluation {
+fn evaluate_item(plan: &MonitorPlan, result: &RecognitionResult) -> ItemCheckEvaluation {
     match plan {
         MonitorPlan::Quick(target) => {
             let matched = target.find_match(&result.lines).or_else(|| {
@@ -1268,7 +935,7 @@ fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> Screen
                 &result.physical_line_identities,
             );
             let group = evaluation.matched_group();
-            ScreenshotEvaluation {
+            ItemCheckEvaluation {
                 is_match: evaluation.is_match,
                 detail: group.map(|matched| {
                     let observed = matched
@@ -1291,8 +958,8 @@ fn evaluate_screenshot(plan: &MonitorPlan, result: &RecognitionResult) -> Screen
     }
 }
 
-fn quick_evaluation(matched: Option<LogicalAffixMatch>) -> ScreenshotEvaluation {
-    ScreenshotEvaluation {
+fn quick_evaluation(matched: Option<LogicalAffixMatch>) -> ItemCheckEvaluation {
+    ItemCheckEvaluation {
         is_match: matched.is_some(),
         detail: matched.map(|value| value.original_text),
         matched_group: None,

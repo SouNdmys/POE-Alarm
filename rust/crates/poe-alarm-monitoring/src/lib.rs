@@ -14,9 +14,9 @@ mod model;
 
 pub use cancellation::CancellationToken;
 pub use clock::{CACHED_SCAN_DELAY, MonitorClock, ScanPace, SystemClock, UNCACHED_SCAN_DELAY};
-pub use engine::{FrameCapture, Monitor};
+pub use engine::Monitor;
 pub use model::{
-    EventSink, MonitorDetection, MonitorEvent, MonitorPlan, MonitorSnapshot, MonitorState,
-    NoopEventSink, OcrRecognizer, PreparedFrame, RecognitionResult, SessionId, StartError,
-    StopError, StructuredOcrSupport,
+    AffixSource, EventSink, MonitorDetection, MonitorEvent, MonitorPlan, MonitorSnapshot,
+    MonitorState, NoopEventSink, RecognitionResult, SessionId, StartError, StopError,
+    StructuredOcrSupport,
 };

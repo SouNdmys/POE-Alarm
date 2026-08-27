@@ -8,13 +8,8 @@ description = "Background native runtime orchestration for POE Alarm"
 
 [dependencies]
 poe-alarm-alert-win = { path = "../poe-alarm-alert-win" }
+poe-alarm-clipboard = { path = "../poe-alarm-clipboard" }
 poe-alarm-core = { path = "../poe-alarm-core" }
 poe-alarm-monitoring = { path = "../poe-alarm-monitoring" }
 poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
-poe-alarm-recognition = { path = "../poe-alarm-recognition" }
 poe-alarm-settings = { path = "../poe-alarm-settings" }
-poe-alarm-vision = { path = "../poe-alarm-vision" }
-
-[[bin]]
-name = "poe-alarm-runtime-soak"
-path = "src/bin/runtime_soak.rs"

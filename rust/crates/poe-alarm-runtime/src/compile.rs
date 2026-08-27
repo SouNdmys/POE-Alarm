@@ -5,17 +5,13 @@ use poe_alarm_core::{
     matching::{DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN, MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN},
 };
 use poe_alarm_monitoring::MonitorPlan;
-use poe_alarm_recognition::{GameVersion, RecognitionLanguage, RecognitionProfile};
 use poe_alarm_settings::{AppSettings, CURRENT_SCHEMA_VERSION, GameProfile, RuleEditorMode};
-use poe_alarm_vision::CaptureRegion;
 
 use crate::{AlertCopy, CompiledUiBindings};
 
 #[derive(Clone, Debug)]
 pub struct CompiledRuntimeSettings {
     pub plan: MonitorPlan,
-    pub profile: RecognitionProfile,
-    pub region: CaptureRegion,
     pub ui: CompiledUiBindings,
     pub alert_copy: AlertCopy,
     /// Reserved for a future explicitly selected protection policy. The released fast mode must
@@ -74,42 +70,22 @@ pub fn compile_settings(
 
     let selected = settings.selected_profile();
     let selected_rules = selected.selected_rules();
-    let screen_region = selected.capture_region.ok_or_else(|| {
-        SettingsValidationError::one("capture_region", "select an item tooltip region first")
-    })?;
-    if !screen_region.is_valid() {
+
+    // Still validated even though the parser reads both locales: this value
+    // also selects which rule set the profile uses.
+    let language = selected.ocr_language.trim();
+    if !language.eq_ignore_ascii_case("en") && !language.eq_ignore_ascii_case("zh-TW") {
         return Err(SettingsValidationError::one(
-            "capture_region",
-            "the selected region must have positive width and height",
+            "ocr_language",
+            format!("unsupported affix language '{language}'"),
         ));
     }
-    let width = u32::try_from(screen_region.width).map_err(|_| {
-        SettingsValidationError::one("capture_region.width", "width is outside the valid range")
-    })?;
-    let height = u32::try_from(screen_region.height).map_err(|_| {
-        SettingsValidationError::one("capture_region.height", "height is outside the valid range")
-    })?;
-    let region = CaptureRegion::new(screen_region.x, screen_region.y, width, height)
-        .map_err(|error| SettingsValidationError::one("capture_region", error.to_string()))?;
 
-    let game = match settings.selected_game_profile {
-        GameProfile::Poe1 => GameVersion::Poe1,
-        GameProfile::Poe2 => GameVersion::Poe2,
-    };
-    let language = match selected.ocr_language.trim() {
-        value if value.eq_ignore_ascii_case("en") => RecognitionLanguage::English,
-        value if value.eq_ignore_ascii_case("zh-TW") => RecognitionLanguage::TraditionalChinese,
-        value => {
-            return Err(SettingsValidationError::one(
-                "ocr_language",
-                format!("unsupported recognition language '{value}'"),
-            ));
-        }
-    };
-
-    let maximum_line_span = match game {
-        GameVersion::Poe1 => DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN,
-        GameVersion::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
+    // How many physical lines one modifier may span. Not a recognition
+    // concern — POE2 simply renders wider modifiers than POE1 does.
+    let maximum_line_span = match settings.selected_game_profile {
+        GameProfile::Poe1 => DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN,
+        GameProfile::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
     };
 
     let plan = match selected_rules.rule_editor_mode {
@@ -138,8 +114,6 @@ pub fn compile_settings(
 
     Ok(CompiledRuntimeSettings {
         plan,
-        profile: RecognitionProfile { game, language },
-        region,
         ui: CompiledUiBindings::from_settings(settings),
         alert_copy: AlertCopy::for_ui_language(&settings.ui_language),
         input_guard_enabled: false,
@@ -148,31 +122,24 @@ pub fn compile_settings(
 
 #[cfg(test)]
 mod tests {
-    use poe_alarm_core::{AcceptableResultGroup, AffixCondition, RuleSetDefinition};
-    use poe_alarm_settings::{GameProfileSettings, ScreenRegion};
-
     use super::*;
+    use poe_alarm_core::{AcceptableResultGroup, AffixCondition, RuleSetDefinition};
 
     fn valid_settings() -> AppSettings {
         let mut settings = AppSettings::default();
-        settings.profiles.poe1 = GameProfileSettings {
-            capture_region: Some(ScreenRegion::new(12, 20, 600, 800)),
-            ..GameProfileSettings::default()
-        };
         settings.profiles.poe1.selected_rules_mut().target_affix =
             "+#% to Critical Hit Chance".to_owned();
         settings
     }
 
     #[test]
-    fn compiles_profile_region_and_quick_plan_without_normalizing_away_errors() {
+    fn a_profile_that_was_never_configured_beyond_its_rule_still_compiles() {
+        // The OCR build refused to compile a profile with no capture region,
+        // which after the clipboard migration meant a fresh install could
+        // neither monitor nor check an item — the field was still required and
+        // no longer read by anything.
         let settings = valid_settings();
         let compiled = compile_settings(&settings).unwrap();
-        assert_eq!(compiled.profile, RecognitionProfile::POE1_ENGLISH);
-        assert_eq!(
-            compiled.region,
-            CaptureRegion::new(12, 20, 600, 800).unwrap()
-        );
         assert!(matches!(compiled.plan, MonitorPlan::Quick(_)));
         assert!(!compiled.input_guard_enabled);
     }
@@ -206,11 +173,7 @@ mod tests {
             MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN
         );
 
-        settings
-            .profiles
-            .poe2
-            .selected_rules_mut()
-            .rule_editor_mode = RuleEditorMode::Structured;
+        settings.profiles.poe2.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
         settings
             .profiles
             .poe2
@@ -241,11 +204,7 @@ mod tests {
     #[test]
     fn structured_rules_are_compiled_once() {
         let mut settings = valid_settings();
-        settings
-            .profiles
-            .poe1
-            .selected_rules_mut()
-            .rule_editor_mode = RuleEditorMode::Structured;
+        settings.profiles.poe1.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
         settings
             .profiles
             .poe1
@@ -270,15 +229,8 @@ mod tests {
     }
 
     #[test]
-    fn missing_region_and_unknown_language_are_explicit_errors() {
+    fn an_unknown_affix_language_is_an_explicit_error() {
         let mut settings = valid_settings();
-        settings.profiles.poe1.capture_region = None;
-        assert_eq!(
-            compile_settings(&settings).unwrap_err().fields[0].field,
-            "capture_region"
-        );
-
-        settings.profiles.poe1.capture_region = Some(ScreenRegion::new(0, 0, 100, 100));
         settings.profiles.poe1.ocr_language = "zh-CN".to_owned();
         assert_eq!(
             compile_settings(&settings).unwrap_err().fields[0].field,

@@ -273,9 +273,7 @@ impl HudWindow {
 
     /// 取走最近一次用户拖动结束后的窗口左上角(屏幕坐标)。
     pub fn take_user_move(&mut self) -> Option<PointI> {
-        self.native
-            .take_user_move()
-            .map(|(x, y)| PointI::new(x, y))
+        self.native.take_user_move().map(|(x, y)| PointI::new(x, y))
     }
 }
 
@@ -329,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_position_prefers_right_of_capture_region() {
+    fn automatic_position_prefers_right_of_the_avoided_rectangle() {
         let work = RectI::new(0, 0, 1920, 1040).unwrap();
         let anchor = RectI::new(500, 200, 400, 500).unwrap();
         let size = SizeI::new(336, 150).unwrap();

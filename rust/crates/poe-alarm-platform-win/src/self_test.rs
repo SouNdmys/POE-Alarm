@@ -5,8 +5,17 @@ use crate::PlatformError;
 pub struct PlatformSelfTestReport {
     pub hud_window_create_cleanup: bool,
     pub hot_key_register_cleanup: bool,
-    pub region_window_create_cleanup: bool,
     pub mouse_hook_create_cleanup: bool,
+}
+
+impl PlatformSelfTestReport {
+    /// True when every native resource was created and released cleanly.
+    #[must_use]
+    pub fn is_healthy(&self) -> bool {
+        self.hud_window_create_cleanup
+            && self.hot_key_register_cleanup
+            && self.mouse_hook_create_cleanup
+    }
 }
 
 /// Creates and cleans each native resource used by the platform crate.

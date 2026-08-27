@@ -1,0 +1,572 @@
+Item Class: Abyss Jewels
+Rarity: Magic
+Energising Murderous Eye Jewel of Heating
+--------
+Abyss
+Intangibility: 18%
+--------
+Requirements:
+Level: 56
+--------
+Item Level: 83
+--------
+{ Prefix Modifier "Energising" (Tier: 3) — Mana }
+Regenerate 2(1.1-2) Mana per second
+{ Suffix Modifier "of Heating" (Tier: 1) — Elemental, Cold, Ailment }
+45(41-50)% chance to Avoid being Frozen
+--------
+Place into an Abyssal Socket on an Item or into an allocated Jewel Socket on the Passive Skill Tree. Right click to remove from the Socket.
+
+
+Item Class: Abyss Jewels
+Rarity: Magic
+Stalwart Hypnotic Eye Jewel of Hindering
+--------
+Abyss
+--------
+Requirements:
+Level: 65
+--------
+Item Level: 85
+--------
+{ Prefix Modifier "Stalwart" (Tier: 1) — Life }
++39(36-40) to maximum Life
+{ Suffix Modifier "of Hindering" (Tier: 1) — Caster }
+7(6-8)% chance to Hinder Enemies on Hit with Spells
+(Hinder reduces movement speed by 30% for 4 seconds)
+--------
+Place into an Abyssal Socket on an Item or into an allocated Jewel Socket on the Passive Skill Tree. Right click to remove from the Socket.
+
+
+Item Class: Body Armours
+Rarity: Magic
+Seraphim's Destroyer Regalia
+--------
+Quality: +7% (augmented)
+Energy Shield: 184 (augmented)
+--------
+Requirements:
+Level: 62
+Int: 145 (unmet)
+--------
+Sockets: W-W-W-W-W-W 
+--------
+Item Level: 85
+--------
+{ Prefix Modifier "Seraphim's" (Tier: 1) — Defences, Energy Shield }
+40(39-42)% increased Energy Shield
+16(16-17)% increased Stun and Block Recovery
+
+
+Item Class: Body Armours
+Rarity: Magic
+Wasp's Cutthroat's Garb of the Starfish
+--------
+Evasion Rating: 745 (augmented)
+--------
+Requirements:
+Level: 53
+Dex: 145 (unmet)
+--------
+Sockets: G-W-W-W-W-W 
+--------
+Item Level: 85
+--------
+{ Prefix Modifier "Wasp's" (Tier: 3) — Defences, Evasion }
+30(27-32)% increased Evasion Rating
+12(12-13)% increased Stun and Block Recovery
+{ Suffix Modifier "of the Starfish" (Tier: 8) — Life }
+Regenerate 17.2(16.1-24) Life per second
+
+
+Item Class: Gloves
+Rarity: Magic
+Virile Dragonscale Gauntlets of Ephij
+--------
+Armour: 129
+Evasion Rating: 129
+Memory Strands: 93
+--------
+Requirements:
+Level: 67
+Str: 51
+Dex: 51
+--------
+Sockets: W W 
+--------
+Item Level: 85
+--------
+{ Prefix Modifier "Virile" (Tier: 2) — Life }
++101(100-114) to maximum Life
+{ Suffix Modifier "of Ephij" (Tier: 1) — Elemental, Lightning, Resistance }
++48(46-48)% to Lightning Resistance
+
+
+Item Class: Bows
+Rarity: Magic
+Incinerating Spine Bow of Melting
+--------
+Bow
+Physical Damage: 38-115
+Elemental Damage: 106-175 (augmented)
+Critical Strike Chance: 6.50%
+Attacks per Second: 1.40
+--------
+Requirements:
+Level: 64
+Dex: 212 (unmet)
+--------
+Sockets: W-G W-G 
+--------
+Item Level: 85
+--------
+{ Prefix Modifier "Incinerating" (Tier: 4) — Damage, Elemental, Fire, Attack }
+Adds 106(85-115) to 175(172-200) Fire Damage
+{ Fractured Suffix Modifier "of Melting" (Tier: 2) — Damage }
++23(20-23)% to Damage over Time Multiplier
+--------
+Fractured Item
+
+
+Item Class: Gloves
+Rarity: Magic
+Frozen Legion Gloves of Ephij
+--------
+Armour: 119
+Energy Shield: 24
+Memory Strands: 78
+--------
+Requirements:
+Level: 67
+Str: 44
+Int: 44
+--------
+Sockets: W-W-B 
+--------
+Item Level: 84
+--------
+{ Prefix Modifier "Frozen" (Tier: 1) — Damage, Elemental, Cold, Attack }
+Adds 13(10-13) to 22(20-24) Cold Damage to Attacks
+{ Suffix Modifier "of Ephij" (Tier: 1) — Elemental, Lightning, Resistance }
++46(46-48)% to Lightning Resistance
+
+
+Item Class: Maps
+Rarity: Rare
+Damned Liturgy
+Map (Tier 16)
+--------
+Item Quantity: +90% (augmented)
+Item Rarity: +141% (augmented)
+Monster Pack Size: +39% (augmented)
+More Maps: +35% (augmented)
+--------
+Item Level: 83
+--------
+Monster Level: 83
+--------
+{ Implicit Modifier }
+Area is Influenced by the Originator's Memories — Unscalable Value
+{ Corruption Implicit Modifier }
++7(5-10)% Pack Size
+--------
+{ Prefix Modifier "Magnifying" (Tier: 1) }
+Monsters have 100% increased Area of Effect
+Monsters fire 2 additional Projectiles
+{ Prefix Modifier "Labyrinth's" (Tier: 1) }
+Area contains Labyrinth Hazards
+{ Prefix Modifier "Titan's" — Life }
+Unique Boss has 35% increased Life
+Unique Boss has 70% increased Area of Effect
+{ Suffix Modifier "of Power" (Tier: 1) }
+Monsters have +1 to Maximum Power Charges
+Monsters gain a Power Charge on Hit
+{ Suffix Modifier "of Carnage" }
+Monsters Maim on Hit with Attacks
+(Maimed enemies have 30% reduced Movement Speed)
+{ Suffix Modifier "of Smothering" — Life, Defences, Energy Shield }
+Players have 60% less Recovery Rate of Life and Energy Shield
+--------
+Travel to a Map of this tier or lower by using this in a personal Map Device. Maps can only be used once. 
+--------
+Corrupted
+--------
+Note: ~b/o 20 chaos
+
+
+Item Class: Maps
+Rarity: Rare
+Stained Journey
+Map (Tier 16)
+--------
+Item Quantity: +113% (augmented)
+Item Rarity: +117% (augmented)
+Monster Pack Size: +58% (augmented)
+More Scarabs: +35% (augmented)
+More Currency: +47% (augmented)
+--------
+Item Level: 84
+--------
+Monster Level: 83
+--------
+{ Implicit Modifier }
+Area is Influenced by the Originator's Memories — Unscalable Value
+--------
+{ Prefix Modifier "Fleet" (Tier: 1) }
+26(25-30)% increased Monster Movement Speed
+42(35-45)% increased Monster Attack Speed
+40(35-45)% increased Monster Cast Speed
+{ Prefix Modifier "Unwavering" — Life }
+25(25-30)% more Monster Life
+Monsters cannot be Stunned — Unscalable Value
+{ Prefix Modifier "Freezing" — Damage, Physical, Elemental, Cold }
+Monsters deal 108(90-110)% extra Physical Damage as Cold
+{ Prefix Modifier "Ultimate" (Tier: 1) }
+Players are assaulted by Bloodstained Sawblades
+{ Suffix Modifier "of Decaying" (Tier: 1) }
+Area contains Unstable Tentacle Fiends
+{ Suffix Modifier "of Curses" (Tier: 1) }
+Players are Cursed with Vulnerability
+(Vulnerability is a Hex which increases Physical Damage taken by 15% and causes Hits to have +25% chance to inflict Bleeding on the target. It lasts 8 seconds)
+Players are Cursed with Temporal Chains
+(Temporal Chains is a Hex which reduces Action Speed by 15%, or 9% on Rare or Unique targets, and makes other effects on the target expire 40% slower. It has 50% less effect on Players and lasts 5 seconds)
+Players are Cursed with Elemental Weakness
+(Elemental Weakness is a Hex which inficts -15% to all Elemental Resistances. It lasts 8 seconds)
+{ Suffix Modifier "of Rust" — Defences, Armour }
+Players have 30% less Armour
+Players have 40% reduced Chance to Block
+{ Suffix Modifier "of Toughness" — Damage, Critical }
+Monsters take 39(36-40)% reduced Extra Damage from Critical Strikes
+--------
+Travel to a Map of this tier or lower by using this in a personal Map Device. Maps can only be used once. 
+--------
+Corrupted
+--------
+Note: ~b/o 200 chaos
+
+
+Item Class: Maps
+Rarity: Rare
+Abandoned Journey
+Map (Tier 16)
+--------
+Item Quantity: +107% (augmented)
+Item Rarity: +63% (augmented)
+Monster Pack Size: +40% (augmented)
+More Maps: +70% (augmented)
+More Scarabs: +35% (augmented)
+More Currency: +47% (augmented)
+--------
+Item Level: 83
+--------
+Monster Level: 83
+--------
+{ Implicit Modifier }
+Area is Influenced by the Originator's Memories — Unscalable Value
+--------
+{ Prefix Modifier "Buffered" (Tier: 1) }
+Monsters gain 75(70-80)% of Maximum Life as Extra Maximum Energy Shield
+{ Prefix Modifier "Diluted" (Tier: 1) }
+Players have 40% less effect of Flasks applied to them
+{ Prefix Modifier "Oppressive" }
+Monsters have +60% chance to Suppress Spell Damage
+(40% of Damage from Suppressed Hits and Ailments they inflict is prevented)
+{ Prefix Modifier "Hexwarded" — Caster, Curse }
+60% less effect of Curses on Monsters
+{ Suffix Modifier "of Endurance" (Tier: 1) }
+Monsters have +1 to Maximum Endurance Charges
+Monsters gain an Endurance Charge when hit
+{ Suffix Modifier "of Deadliness" — Damage, Critical }
+Monsters have 377(360-400)% increased Critical Strike Chance
++44(41-45)% to Monster Critical Strike Multiplier
+{ Suffix Modifier "of Rust" — Defences, Armour }
+Players have 30% less Armour
+Players have 40% reduced Chance to Block
+{ Suffix Modifier "of Transience" (Tier: 1) }
+Buffs on Players expire 100% faster
+--------
+Travel to a Map of this tier or lower by using this in a personal Map Device. Maps can only be used once. 
+--------
+Corrupted
+--------
+Note: ~b/o 200 chaos
+
+
+Item Class: Maps
+Rarity: Rare
+Malevolent Abyss
+Map (Tier 16)
+--------
+Item Quantity: +98% (augmented)
+Item Rarity: +111% (augmented)
+Monster Pack Size: +39% (augmented)
+More Scarabs: +35% (augmented)
+More Currency: +64% (augmented)
+--------
+Item Level: 85
+--------
+Monster Level: 83
+--------
+{ Implicit Modifier }
+Area is Influenced by the Originator's Memories — Unscalable Value
+--------
+{ Prefix Modifier "Chaining" (Tier: 1) }
+Monsters' skills Chain 3 additional times
+Monsters' Projectiles can Chain when colliding with Terrain
+{ Prefix Modifier "Impervious" — Physical, Chaos, Attack, Ailment }
+Monsters have a 50% chance to avoid Poison, Impale, and Bleeding
+{ Prefix Modifier "Punishing" — Damage, Physical }
+Rare Monsters have Physical Thorns reflecting 800 Physical Damage
+{ Prefix Modifier "Unstoppable" — Speed }
+Monsters cannot be Taunted — Unscalable Value
+Monsters' Action Speed cannot be modified to below Base Value
+Monsters' Movement Speed cannot be modified to below Base Value — Unscalable Value
+{ Suffix Modifier "of Curses" (Tier: 1) }
+Players are Cursed with Vulnerability
+(Vulnerability is a Hex which increases Physical Damage taken by 15% and causes Hits to have +25% chance to inflict Bleeding on the target. It lasts 8 seconds)
+Players are Cursed with Temporal Chains
+(Temporal Chains is a Hex which reduces Action Speed by 15%, or 9% on Rare or Unique targets, and makes other effects on the target expire 40% slower. It has 50% less effect on Players and lasts 5 seconds)
+Players are Cursed with Elemental Weakness
+(Elemental Weakness is a Hex which inficts -15% to all Elemental Resistances. It lasts 8 seconds)
+{ Suffix Modifier "of Enfeeblement" — Caster, Curse }
+Players are Cursed with Enfeeble
+(Enfeeble is a Hex which reduces the targets' Accuracy Rating by 10% and Damage by 15%, or 9% on Rare or Unique targets. It lasts 8 seconds)
+{ Suffix Modifier "of Insulation" — Elemental, Fire, Cold, Lightning, Ailment }
+Monsters have 70% chance to Avoid Elemental Ailments
+(Elemental Ailments are Ignited, Scorched, Chilled, Frozen, Brittle, Shocked, and Sapped)
+{ Suffix Modifier "of Defiance" (Tier: 1) }
+Debuffs on Monsters expire 100% faster
+--------
+Travel to a Map of this tier or lower by using this in a personal Map Device. Maps can only be used once. 
+--------
+Corrupted
+--------
+Note: ~b/o 200 chaos
+
+
+Item Class: Gloves
+Rarity: Rare
+Corruption Fingers
+Vestigial Velvet Gloves
+--------
+Quality: +20% (augmented)
+Energy Shield: 21 (augmented)
+--------
+Requirements:
+Level: 57
+--------
+Sockets: R R 
+--------
+Item Level: 86
+--------
+{ Vestigial Implicit Modifier }
+Can be modified while Corrupted — Unscalable Value
+{ Implicit Modifier }
+Item sells for much more to vendors — Unscalable Value
+{ Corruption Implicit Modifier — Caster, Curse }
+Curse Enemies with Temporal Chains on Hit — Unscalable Value
+(Temporal Chains is a Hex which reduces Action Speed by 15%, or 9% on Rare or Unique targets, and makes other effects on the target expire 40% slower. It has 50% less effect on Players and lasts 5 seconds)
+{ Corruption Implicit Modifier — Gem }
++2 to Level of Socketed AoE Gems
+{ Corruption Implicit Modifier — Gem }
++2 to Level of Socketed Projectile Gems
+--------
+{ Prefix Modifier "Cobalt" (Tier: 11) — Mana }
++23(20-24) to maximum Mana
+{ Prefix Modifier "Dauntless" (Tier: 3) — Defences, Energy Shield }
+79(68-79)% increased Energy Shield
+{ Prefix Modifier "Icy" (Tier: 4) — Damage, Elemental, Cold, Attack }
+Adds 5(5-7) to 10(10-12) Cold Damage to Attacks
+{ Suffix Modifier "of the Apt" (Tier: 1) }
+32% reduced Attribute Requirements
+(Attributes are Strength, Dexterity, and Intelligence)
+{ Suffix Modifier "of the Mongoose" (Tier: 10) — Attribute }
++8(8-12) to Dexterity
+{ Suffix Modifier "of the Lightning" (Tier: 2) — Elemental, Lightning, Resistance }
++42(42-45)% to Lightning Resistance
+--------
+Corrupted
+--------
+Note: ~b/o 200 divine
+
+
+Item Class: Gloves
+Rarity: Rare
+Pandemonium Mitts
+Gripped Gloves
+--------
+Quality: +20% (augmented)
+Evasion Rating: 299 (augmented)
+Intangibility: 58%
+--------
+Requirements:
+Level: 75
+Dex: 95 (unmet)
+--------
+Sockets: W-B-R-G 
+--------
+Item Level: 84
+--------
+{ Implicit Modifier — Damage, Attack }
+18(14-18)% increased Projectile Attack Damage
+--------
+{ Prefix Modifier "The Elder's" (Tier: 1) — Speed, Gem }
+Socketed Gems are supported by Level 20 Faster Projectiles — Unscalable Value
+27(26-30)% increased Projectile Speed
+{ Prefix Modifier "The Shaper's" (Tier: 1) — Damage, Gem }
+Socketed Gems are Supported by Level 20 Slower Projectiles — Unscalable Value
+24(23-25)% increased Projectile Damage
+{ Master Crafted Prefix Modifier "Upgraded" — Damage, Speed }
+19(17-20)% increased Projectile Speed
+15(14-16)% increased Projectile Damage
+{ Suffix Modifier "of the Essence" — Attack, Caster, Speed, Gem }
+Socketed Gems have 16% more Attack and Cast Speed — Unscalable Value
+{ Suffix Modifier "of the Elevated Elder" — Damage, Attack, Critical, Gem }
+Socketed Attacks have +90% to Critical Strike Multiplier — Unscalable Value
+{ Suffix Modifier "of Mastery" (Tier: 2) — Attack, Speed }
+12(11-13)% increased Attack Speed
+--------
+Shaper Item
+Elder Item
+--------
+Note: ~b/o 200 divine
+
+
+Item Class: Wands
+Rarity: Rare
+Vengeance Spire
+Kinetic Wand
+--------
+Wand
+Quality: +20% (augmented)
+Physical Damage: 29-54
+Critical Strike Chance: 8.92% (augmented)
+Attacks per Second: 1.78 (augmented)
+Intangibility: 21%
+--------
+Requirements:
+Level: 66
+Int: 188 (unmet)
+--------
+Sockets: B-B-W 
+--------
+Item Level: 87
+--------
+Quality does not increase Physical Damage (enchant)
+1% increased Critical Strike Chance per 4% Quality (enchant)
+--------
+{ Implicit Modifier }
+Cannot roll Caster Modifiers — Unscalable Value
+--------
+{ Prefix Modifier "The Shaper's" (Tier: 1) — Damage, Attack, Gem }
+Socketed Skills deal 40% more Attack Damage — Unscalable Value
+{ Prefix Modifier "Chosen" (Tier: 1) — Damage, Chaos, Attack }
+Attacks with this Weapon Penetrate 14(14-16)% Chaos Resistance
+{ Master Crafted Prefix Modifier "Upgraded" — Gem }
++8(7-8)% to Quality of Socketed Gems
+{ Suffix Modifier "of the Elder" (Tier: 1) — Damage, Attack, Critical, Gem }
+Socketed Gems are supported by Level 20 Increased Critical Damage — Unscalable Value
++27(26-29)% to Global Critical Strike Multiplier
+{ Suffix Modifier "of Shaping" (Tier: 1) — Attack, Speed, Gem }
+Socketed Gems are Supported by Level 20 Faster Attacks — Unscalable Value
+11(11-12)% increased Attack Speed
+{ Suffix Modifier "of the Elder" (Tier: 1) — Damage, Gem }
+Socketed Gems are Supported by Level 20 Multiple Projectiles — Unscalable Value
+26(26-30)% increased Projectile Damage
+--------
+Shaper Item
+Elder Item
+--------
+Note: ~b/o 200 divine
+
+
+Item Class: Helmets
+Rarity: Rare
+Woe Brow
+Haunted Bascinet
+--------
+Quality: +26% (augmented)
+Armour: 646 (augmented)
+Evasion Rating: 687 (augmented)
+Intangibility: 58%
+--------
+Requirements:
+Level: 84
+Str: 132
+Dex: 132 (unmet)
+--------
+Sockets: W A 
+--------
+Item Level: 85
+--------
+{ Searing Exarch Implicit Modifier (Grand) }
+While a Pinnacle Atlas Boss is in your Presence, 24(23-24)% increased Area of Effect
+{ Eater of Worlds Implicit Modifier (Perfect) — Damage, Caster }
+While a Pinnacle Atlas Boss is in your Presence, 53(52-53)% increased Spell Damage
+--------
+{ Prefix Modifier "Athlete's" (Tier: 2) — Life }
++128(115-129) to maximum Life
+{ Prefix Modifier "Sturdy" (Tier: 1) — Defences, Armour, Evasion }
++107(86-145) to Armour
++139(86-145) to Evasion Rating
+{ Master Crafted Prefix Modifier "Upgraded" — Gem }
++1 to Level of Socketed Projectile Gems
+Projectiles Pierce an additional Target
+{ Fractured Suffix Modifier "of the Underground" (Tier: 1) }
+Has 1 Abyssal Socket — Unscalable Value
+(Only Abyss Jewels can be Socketed in Abyssal Sockets)
+{ Suffix Modifier "of Haast" (Tier: 1) — Elemental, Cold, Resistance }
++48(46-48)% to Cold Resistance
+{ Suffix Modifier "of Lioneye" (Tier: 1) — Attack }
++574(481-600) to Accuracy Rating
+Searing Exarch Item
+Eater of Worlds Item
+--------
+Fractured Item
+--------
+Note: ~b/o 200 divine
+
+
+Item Class: Helmets
+Rarity: Rare
+Kraken Star
+Archdemon Crown
+--------
+Quality: +20% (augmented)
+Armour: 246 (augmented)
+Energy Shield: 50 (augmented)
+Intangibility: 18%
+--------
+Requirements:
+Level: 75
+Str: 79
+Int: 79
+--------
+Sockets: W-B-B-B 
+--------
+Item Level: 86
+--------
+{ Implicit Modifier }
+-2 to Level of Socketed Support Gems
++2 to Level of Socketed Skill Gems
+--------
+{ Prefix Modifier "The Elder's" (Tier: 2) — Damage, Gem }
+Socketed Gems are Supported by Level 18 Concentrated Effect — Unscalable Value
+19(19-22)% increased Area Damage
+{ Prefix Modifier "Chosen" (Tier: 1) — Gem }
++2 to Level of Socketed AoE Gems
+8(8-10)% increased Area of Effect
+{ Master Crafted Prefix Modifier "Upgraded" — Gem }
++1 to Level of Socketed Projectile Gems
+Projectiles Pierce an additional Target
+{ Suffix Modifier "of Shaping" (Tier: 1) — Elemental, Cold, Ailment, Gem }
+Socketed Gems are Supported by Level 20 Hypothermia — Unscalable Value
+18(17-20)% increased Effect of Cold Ailments
+(Cold Ailments are Chilled, Frozen and Brittle)
+{ Suffix Modifier "of Shaping" (Tier: 1) — Caster, Critical, Gem }
+Socketed Spells have +3% to Critical Strike Chance — Unscalable Value
+--------
+Shaper Item
+Elder Item
+--------
+Note: ~b/o 200 divine

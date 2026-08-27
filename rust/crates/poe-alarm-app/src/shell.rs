@@ -92,6 +92,12 @@ impl AppShell {
         let name_input = cx.new(|cx| InputState::new(window, cx));
         let template_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(text.template_placeholder));
+        let item_text_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(6)
+                .placeholder(text.item_text_placeholder)
+        });
 
         let tree = Self::tree_from_settings(backend.as_ref());
         let selected = tree
@@ -128,6 +134,7 @@ impl AppShell {
                 selected,
                 name_input,
                 template_input,
+                item_text_input,
                 value_rows: Vec::new(),
                 elapsed: "--:--".into(),
                 hit_count: 0,
@@ -281,37 +288,15 @@ impl AppShell {
                         self.push_log(LogKind::Meta, self.t().log_hotkey_start.to_owned());
                     }
                 }
-                PlatformEvent::HotKeySelectRegion => self.begin_region_selection(cx),
-                PlatformEvent::RegionSelected(region) => {
-                    let text = self.t();
-                    if let Some(backend) = &mut self.backend {
-                        backend.set_region(region);
-                        let label = backend.region_label().unwrap_or_default();
-                        match backend.save() {
-                            Ok(()) => {
-                                self.notice = Some((
-                                    StatusKind::Monitoring,
-                                    format!("{} · {label}", text.notice_region_saved).into(),
-                                ));
-                                self.push_log(
-                                    LogKind::Meta,
-                                    format!("{} · {label}", text.log_region_updated),
-                                );
-                            }
-                            Err(e) => {
-                                self.notice = Some((
-                                    StatusKind::Error,
-                                    format!("{}:{e}", text.notice_region_save_failed).into(),
-                                ));
-                            }
-                        }
-                    }
+                PlatformEvent::ItemUnderCursor(item_text) => {
+                    let origin = self.t().log_check_under_cursor;
+                    self.run_item_check(item_text, origin, cx);
                 }
-                PlatformEvent::RegionSelectionCancelled => {
-                    self.push_log(LogKind::Meta, self.t().log_selection_cancelled.to_owned());
-                }
-                PlatformEvent::RegionSelectionFailed => {
-                    self.notice = Some((StatusKind::Error, self.t().notice_selection_failed.into()));
+                PlatformEvent::NoItemUnderCursor => {
+                    self.notice = Some((
+                        StatusKind::Warning,
+                        self.t().notice_no_item_under_cursor.into(),
+                    ));
                 }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
@@ -370,7 +355,7 @@ impl AppShell {
                         format!("{} · {group} · {detail}", self.t().log_rule_hit_prefix),
                     );
                 }
-                BridgeEvent::ScreenshotReport {
+                BridgeEvent::ItemCheckReport {
                     lines,
                     matched,
                     detail,
@@ -381,10 +366,10 @@ impl AppShell {
                     if matched {
                         self.push_log(
                             LogKind::Hit,
-                            format!("{} · {detail}", self.t().log_shot_hit_prefix),
+                            format!("{} · {detail}", self.t().log_check_hit_prefix),
                         );
                     } else {
-                        self.push_log(LogKind::Meta, self.t().log_shot_miss.to_owned());
+                        self.push_log(LogKind::Meta, self.t().log_check_miss.to_owned());
                     }
                 }
                 BridgeEvent::AlertPresented => {
@@ -494,7 +479,7 @@ impl AppShell {
 
     fn apply_runtime_state(&mut self, state: BridgeState) {
         let next = match state {
-            BridgeState::Starting | BridgeState::Monitoring | BridgeState::TestingScreenshot => {
+            BridgeState::Starting | BridgeState::Monitoring | BridgeState::CheckingItem => {
                 RunPhase::Monitoring
             }
             BridgeState::MatchFound => RunPhase::Hit,
@@ -663,7 +648,11 @@ impl AppShell {
         let slots = Self::slot_count(&template).max(cond.numeric_constraints.len());
         let rows: Vec<(NumericConstraintMode, String, String)> = (0..slots)
             .map(|ix| {
-                let nc = cond.numeric_constraints.get(ix).cloned().unwrap_or_default();
+                let nc = cond
+                    .numeric_constraints
+                    .get(ix)
+                    .cloned()
+                    .unwrap_or_default();
                 let min = match nc.mode {
                     NumericConstraintMode::Exactly => nc.expected,
                     _ => nc.minimum,
@@ -916,7 +905,12 @@ impl AppShell {
             .tree
             .iter()
             .position(|n| matches!(n.node, NodeRef::Condition(..)))
-            .or_else(|| self.s.tree.iter().position(|n| matches!(n.node, NodeRef::Group(_))));
+            .or_else(|| {
+                self.s
+                    .tree
+                    .iter()
+                    .position(|n| matches!(n.node, NodeRef::Group(_)))
+            });
         self.s.selected = target.unwrap_or(0);
         self.sync_editor_from_selection(window, cx);
         cx.notify();
@@ -950,7 +944,12 @@ impl AppShell {
     }
 
     /// "指定条数"步进(±1,夹在 1..=词缀数)。
-    pub fn adjust_required_count(&mut self, delta: i64, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn adjust_required_count(
+        &mut self,
+        delta: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
             NodeRef::Game => return,
@@ -972,7 +971,12 @@ impl AppShell {
     }
 
     /// 数值行的比较方式切换,随手写回并自动保存。
-    pub fn set_value_row_mode(&mut self, ix: usize, mode: NumericConstraintMode, cx: &mut Context<Self>) {
+    pub fn set_value_row_mode(
+        &mut self,
+        ix: usize,
+        mode: NumericConstraintMode,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(row) = self.s.value_rows.get_mut(ix) {
             row.mode = mode;
             if self.apply_editor_to_selection(cx) {
@@ -998,43 +1002,76 @@ impl AppShell {
         cx.notify();
     }
 
-    /// 识别截图:弹文件选择,选中后交 runtime 回放。
-    pub fn test_screenshot(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: None,
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(mut paths))) = receiver.await
-                && let Some(path) = paths.pop()
-            {
-                let _ = this.update(cx, |this: &mut AppShell, cx| {
-                    let text = this.t();
-                    if let Some(backend) = &mut this.backend {
-                        match backend.test_screenshot(path.clone()) {
-                            Ok(()) => this.push_log(
-                                LogKind::Meta,
-                                format!("{}:{}", text.log_shot_prefix, path.display()),
-                            ),
-                            Err(e) => {
-                                this.notice = Some((StatusKind::Error, e.clone().into()));
-                                this.push_log(
-                                    LogKind::Meta,
-                                    format!("{}:{e}", text.log_shot_failed_prefix),
-                                );
-                            }
-                        }
-                        cx.notify();
-                    }
-                });
+    /// Restarts the app elevated, so injected keystrokes reach an elevated game.
+    ///
+    /// Windows refuses input sent from a lower-integrity process to a
+    /// higher-integrity window, and a launcher that starts the game as
+    /// administrator puts it out of reach. There is no way to ask for that
+    /// privilege without restarting, and no reason to ask for it up front:
+    /// most people never need it, and a UAC prompt on every launch is a worse
+    /// tax than a button nobody presses.
+    pub fn relaunch_elevated(&mut self, cx: &mut Context<Self>) {
+        #[cfg(windows)]
+        {
+            use poe_alarm_platform_win::ElevateError;
+
+            let text = self.t();
+            match poe_alarm_platform_win::relaunch_elevated(&[]) {
+                // The elevated copy is starting; this one steps aside so two
+                // instances never contend for the same global hotkeys.
+                Ok(()) => cx.quit(),
+                Err(ElevateError::Declined) => {
+                    self.notice = Some((StatusKind::Warning, text.notice_elevate_declined.into()));
+                }
+                Err(_) => {
+                    self.notice = Some((StatusKind::Error, text.notice_elevate_failed.into()));
+                }
             }
-        })
-        .detach();
+            cx.notify();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = cx;
+        }
     }
 
-    /// 切换游戏或 OCR 语言:写设置、保存并整体刷新(模板/树/区域)。
+    /// 测试规则:拿粘贴框里的物品文本跑一次判定。
+    ///
+    /// 不再弹文件选择框。要检查的东西本来就在剪贴板里,让用户去存一个
+    /// 文件再选回来,中间那两步纯粹是 OCR 时代留下的。
+    pub fn check_item(&mut self, cx: &mut Context<Self>) {
+        let item_text = self.s.item_text_input.read(cx).value().trim().to_string();
+        let text = self.t();
+        if item_text.is_empty() {
+            self.notice = Some((StatusKind::Warning, text.notice_item_text_empty.into()));
+            cx.notify();
+            return;
+        }
+        self.run_item_check(item_text, text.log_check_prefix, cx);
+    }
+
+    /// Runs one rule check over item text, whatever produced it.
+    ///
+    /// `origin` names the source in the log so a hotkey check and a pasted one
+    /// stay tellable apart.
+    fn run_item_check(&mut self, item_text: String, origin: &'static str, cx: &mut Context<Self>) {
+        let text = self.t();
+        if let Some(backend) = &mut self.backend {
+            match backend.check_item(item_text) {
+                Ok(()) => self.push_log(LogKind::Meta, origin.to_owned()),
+                Err(e) => {
+                    self.notice = Some((StatusKind::Error, e.clone().into()));
+                    self.push_log(
+                        LogKind::Meta,
+                        format!("{}:{e}", text.log_check_failed_prefix),
+                    );
+                }
+            }
+            cx.notify();
+        }
+    }
+
+    /// 切换游戏或词缀语言:写设置、保存并整体刷新(模板/树)。
     pub fn switch_profile(
         &mut self,
         game: Option<poe_alarm_settings::GameProfile>,
@@ -1119,15 +1156,15 @@ impl AppShell {
             {
                 let _ = this.update(cx, |this: &mut AppShell, cx| {
                     if let Some(backend) = &mut this.backend {
-                        backend.settings.custom_alert_sound_path =
-                            Some(path.display().to_string());
+                        backend.settings.custom_alert_sound_path = Some(path.display().to_string());
                     }
                     this.invalidate_runtime();
                     this.persist();
-                    let message = this
-                        .t()
-                        .log_sound_changed_fmt
-                        .replacen("{}", &path.display().to_string(), 1);
+                    let message = this.t().log_sound_changed_fmt.replacen(
+                        "{}",
+                        &path.display().to_string(),
+                        1,
+                    );
                     this.push_log(LogKind::Meta, message);
                     cx.notify();
                 });
@@ -1144,19 +1181,6 @@ impl AppShell {
         self.persist();
         self.push_log(LogKind::Meta, self.t().log_sound_reset.to_owned());
         cx.notify();
-    }
-
-    /// 触发框选(热键 Ctrl⇧F11 或界面按钮)。
-    pub fn begin_region_selection(&mut self, cx: &mut Context<Self>) {
-        let text = self.t();
-        if let Some(backend) = &mut self.backend {
-            if let Err(e) = backend.begin_region_selection() {
-                self.notice = Some((StatusKind::Error, e.into()));
-            } else {
-                self.push_log(LogKind::Meta, text.log_selecting.to_owned());
-            }
-            cx.notify();
-        }
     }
 
     // -- shared chrome ------------------------------------------------------
@@ -1212,7 +1236,7 @@ impl AppShell {
                         color: None,
                     },
                 ],
-                Some("F10 · F11 · F12"),
+                Some("F10 · F12"),
             )
         } else {
             let notice_text = self
@@ -1303,13 +1327,35 @@ impl AppShell {
             .child(caption(text.game_label))
             .child(
                 seg(div())
-                    .child(chip("pf-poe1", "POE 1", game == GameProfile::Poe1, cx, |t, w, cx| {
-                        t.switch_profile(Some(poe_alarm_settings::GameProfile::Poe1), None, w, cx)
-                    }))
+                    .child(chip(
+                        "pf-poe1",
+                        "POE 1",
+                        game == GameProfile::Poe1,
+                        cx,
+                        |t, w, cx| {
+                            t.switch_profile(
+                                Some(poe_alarm_settings::GameProfile::Poe1),
+                                None,
+                                w,
+                                cx,
+                            )
+                        },
+                    ))
                     .child(
-                        chip("pf-poe2", "POE 2", game == GameProfile::Poe2, cx, |t, w, cx| {
-                            t.switch_profile(Some(poe_alarm_settings::GameProfile::Poe2), None, w, cx)
-                        })
+                        chip(
+                            "pf-poe2",
+                            "POE 2",
+                            game == GameProfile::Poe2,
+                            cx,
+                            |t, w, cx| {
+                                t.switch_profile(
+                                    Some(poe_alarm_settings::GameProfile::Poe2),
+                                    None,
+                                    w,
+                                    cx,
+                                )
+                            },
+                        )
                         .border_l_1()
                         .border_color(c(HAIRLINE)),
                     ),

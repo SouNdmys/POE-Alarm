@@ -8,4 +8,3 @@ description = "Platform-neutral POE Alarm monitoring worker and state machine"
 
 [dependencies]
 poe-alarm-core = { path = "../poe-alarm-core" }
-poe-alarm-vision = { path = "../poe-alarm-vision" }

@@ -3,16 +3,13 @@ resolver = "2"
 members = [
     "crates/poe-alarm-alert-win",
     "crates/poe-alarm-app",
-    "crates/poe-alarm-app-win",
+    "crates/poe-alarm-clip-only",
+    "crates/poe-alarm-clipboard",
     "crates/poe-alarm-core",
     "crates/poe-alarm-monitoring",
-    "crates/poe-alarm-ocr-paddle",
-    "crates/poe-alarm-ocr-win",
     "crates/poe-alarm-platform-win",
-    "crates/poe-alarm-recognition",
     "crates/poe-alarm-runtime",
     "crates/poe-alarm-settings",
-    "crates/poe-alarm-vision",
 ]
 
 [workspace.package]

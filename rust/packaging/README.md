@@ -1,13 +1,13 @@
 # Native Windows preview packaging
 
-`package-rust-preview.ps1` builds and assembles one clean Windows x64 ZIP. It intentionally
+`package-release.ps1` builds and assembles one clean Windows x64 ZIP. It intentionally
 requires an official Visual Studio VC Redistributable directory instead of copying DLLs from
 `System32` or silently depending on a machine-wide runtime installation.
 
 Example with Visual Studio 18 Preview/Insiders installed:
 
 ```powershell
-.\rust\packaging\package-rust-preview.ps1 `
+.\rust\packaging\package-release.ps1 `
   -VcRedistDirectory 'C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Redist\MSVC\14.50.35710\x64\Microsoft.VC145.CRT'
 ```
 

@@ -1,0 +1,10 @@
+[package]
+name = "poe-alarm-clipboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parses Path of Exile clipboard item dumps into rule-engine input"
+
+[dependencies]
+poe-alarm-core = { path = "../poe-alarm-core" }

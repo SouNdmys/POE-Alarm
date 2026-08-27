@@ -11,7 +11,6 @@ use crate::{PlatformError, PlatformSelfTestReport, RectI};
 use super::hotkeys::{register_hot_key, unregister_hot_key};
 use super::hud::{NativeHudWindow, is_window, required_passive_style_bits};
 use super::mouse_hook::{NativePendingMouseGuard, installed_for_self_test};
-use super::region_overlay::create_destroy_self_test;
 
 const SELF_TEST_HOT_KEY_ID: i32 = 0x50_7E_24;
 
@@ -49,8 +48,6 @@ pub(crate) fn run_self_test() -> Result<PlatformSelfTestReport, PlatformError> {
         });
     }
 
-    create_destroy_self_test()?;
-
     let mut guard = NativePendingMouseGuard::new();
     guard.prepare()?;
     if !guard.is_installed() || !installed_for_self_test() {
@@ -86,7 +83,6 @@ pub(crate) fn run_self_test() -> Result<PlatformSelfTestReport, PlatformError> {
     Ok(PlatformSelfTestReport {
         hud_window_create_cleanup: true,
         hot_key_register_cleanup: true,
-        region_window_create_cleanup: true,
         mouse_hook_create_cleanup: true,
     })
 }

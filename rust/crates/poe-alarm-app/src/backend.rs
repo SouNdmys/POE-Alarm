@@ -1,6 +1,6 @@
 //! Phase 4:GPUI 前端 ↔ 生产运行时桥接。
 //!
-//! Windows 上使用真实 `poe-alarm-runtime`(截屏、OCR、规则判定、红色拦截窗
+//! Windows 上使用真实 `poe-alarm-runtime`(读取物品文本、规则判定、红色拦截窗
 //! 与提示音都由 runtime 内部完成;UI 只发命令、收事件)。非 Windows 平台
 //! 提供模拟器,保证云端 Linux 开发环境可编译、可迭代布局。
 //!
@@ -13,16 +13,16 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use poe_alarm_settings::{AppSettings, ScreenRegion, SettingsStore};
+use poe_alarm_settings::{AppSettings, SettingsStore};
 
-/// 平台事件(全局热键 / 框选结果 / 浮窗拖动),由后台线程投递、UI 轮询消费。
-#[derive(Clone, Copy, Debug)]
+/// 平台事件(全局热键 / 浮窗拖动),由后台线程投递、UI 轮询消费。
+#[derive(Clone, Debug)]
 pub enum PlatformEvent {
     HotKeyStart,
-    HotKeySelectRegion,
-    RegionSelected(ScreenRegion),
-    RegionSelectionCancelled,
-    RegionSelectionFailed,
+    /// 光标下物品的 Ctrl+C 原文,已在热键线程上取好。
+    ItemUnderCursor(String),
+    /// 取不到物品文本(游戏没在前台,或光标不在物品上)。
+    NoItemUnderCursor,
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
     HudMoved(f64, f64),
 }
@@ -33,7 +33,7 @@ pub enum BridgeState {
     Idle,
     Starting,
     Monitoring,
-    TestingScreenshot,
+    CheckingItem,
     MatchFound,
     Faulted,
     ShuttingDown,
@@ -48,7 +48,7 @@ impl From<poe_alarm_runtime::RuntimeState> for BridgeState {
             R::Idle => Self::Idle,
             R::Starting => Self::Starting,
             R::Monitoring => Self::Monitoring,
-            R::TestingScreenshot => Self::TestingScreenshot,
+            R::CheckingItem => Self::CheckingItem,
             R::MatchFound => Self::MatchFound,
             R::Faulted => Self::Faulted,
             R::ShuttingDown => Self::ShuttingDown,
@@ -61,7 +61,7 @@ impl From<poe_alarm_runtime::RuntimeState> for BridgeState {
 #[derive(Clone, Debug)]
 pub enum BridgeEvent {
     State(BridgeState),
-    /// 监控快照:扫描轮数 / 截屏耗时 ms / OCR 耗时 ms / 是否缓存复用 / 最近行
+    /// 监控快照:轮询轮数 / 读取耗时 ms / 判定耗时 ms / 是否未变化 / 最近行
     Snapshot {
         scan_count: u64,
         capture_ms: f64,
@@ -75,7 +75,7 @@ pub enum BridgeEvent {
         lines: Vec<String>,
         matched_group: Option<String>,
     },
-    ScreenshotReport {
+    ItemCheckReport {
         lines: Vec<String>,
         matched: bool,
         detail: String,
@@ -92,7 +92,6 @@ pub struct Backend {
     pub read_only: bool,
     platform_rx: Receiver<PlatformEvent>,
     platform_tx: Sender<PlatformEvent>,
-    selecting_region: bool,
     #[cfg(windows)]
     hud: Option<crate::hud_service::HudService>,
     #[cfg(windows)]
@@ -136,7 +135,6 @@ impl Backend {
             read_only,
             platform_rx,
             platform_tx,
-            selecting_region: false,
             #[cfg(windows)]
             hud,
             #[cfg(windows)]
@@ -154,60 +152,13 @@ impl Backend {
         self.store.path().display().to_string()
     }
 
-    /// 排空平台事件(热键 / 框选结果)。
+    /// 排空平台事件(热键)。
     pub fn poll_platform(&mut self) -> Vec<PlatformEvent> {
         let mut out = Vec::new();
         while let Ok(event) = self.platform_rx.try_recv() {
-            if matches!(
-                event,
-                PlatformEvent::RegionSelected(_)
-                    | PlatformEvent::RegionSelectionCancelled
-                    | PlatformEvent::RegionSelectionFailed
-            ) {
-                self.selecting_region = false;
-            }
             out.push(event);
         }
         out
-    }
-
-    /// 触发 F11 框选(独立线程运行全屏 overlay,结果经 channel 回投)。
-    pub fn begin_region_selection(&mut self) -> Result<(), String> {
-        if self.selecting_region {
-            return Ok(());
-        }
-        self.selecting_region = true;
-        #[cfg(windows)]
-        {
-            let tx = self.platform_tx.clone();
-            std::thread::spawn(move || {
-                use poe_alarm_platform_win::{RegionSelectionOverlay, SelectionOverlayConfig};
-                let event = match RegionSelectionOverlay::select(SelectionOverlayConfig::default())
-                {
-                    Ok(Some(rect)) => PlatformEvent::RegionSelected(ScreenRegion::new(
-                        rect.x,
-                        rect.y,
-                        rect.width,
-                        rect.height,
-                    )),
-                    Ok(None) => PlatformEvent::RegionSelectionCancelled,
-                    Err(error) => {
-                        eprintln!("region selection failed: {error}");
-                        PlatformEvent::RegionSelectionFailed
-                    }
-                };
-                let _ = tx.send(event);
-            });
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = self
-                .platform_tx
-                .send(PlatformEvent::RegionSelected(ScreenRegion::new(
-                    0, 58, 1134, 956,
-                )));
-        }
-        Ok(())
     }
 
     pub fn set_game(&mut self, profile: poe_alarm_settings::GameProfile) {
@@ -219,30 +170,21 @@ impl Backend {
             poe_alarm_settings::normalize_ocr_language(language).to_owned();
     }
 
-    pub fn set_region(&mut self, region: ScreenRegion) {
-        self.settings.selected_profile_mut().capture_region = Some(region);
-    }
-
-    /// 已框选区域的展示文本;未框选时为 None(占位文案由界面按语言提供)。
-    pub fn region_label(&self) -> Option<String> {
-        self.settings
-            .selected_profile()
-            .capture_region
-            .map(|r| format!("{}×{} @ {},{}", r.width, r.height, r.x, r.y))
-    }
-
     pub fn ocr_language_label(&self) -> String {
         self.settings.selected_profile().ocr_language.clone()
     }
 
     /// 自定义提示音文件名;使用内置音效时为 None(占位文案由界面按语言提供)。
     pub fn sound_label(&self) -> Option<String> {
-        self.settings.custom_alert_sound_path.as_deref().map(|path| {
-            std::path::Path::new(path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_owned())
-        })
+        self.settings
+            .custom_alert_sound_path
+            .as_deref()
+            .map(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_owned())
+            })
     }
 
     /// 更新状态浮窗内容(非 Windows 为空操作)。
@@ -370,10 +312,7 @@ impl Backend {
             let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
             alert.allow_overlay_capture = self.settings.allow_overlay_capture;
             match poe_alarm_runtime::RuntimeHandle::start_production(
-                poe_alarm_runtime::ProductionRuntimeConfig {
-                    alert,
-                    paddle: None,
-                },
+                poe_alarm_runtime::ProductionRuntimeConfig { alert },
             ) {
                 Ok(handle) => break (handle, fell_back),
                 Err(e) => {
@@ -419,25 +358,27 @@ impl Backend {
         }
     }
 
-    /// 识别截图:用当前设置在 runtime 里回放存档截图。
+    /// 检查物品文本:用当前规则跑一次判定。
+    ///
+    /// 入参是玩家在游戏里 Ctrl+C 复制出来的原文。
     #[cfg(windows)]
-    pub fn test_screenshot(&mut self, path: std::path::PathBuf) -> Result<(), String> {
+    pub fn check_item(&mut self, text: String) -> Result<(), String> {
         self.ensure_runtime()?;
         let settings = self.settings.clone().normalize();
-        let request = poe_alarm_runtime::ScreenshotRequest::new(
+        let request = poe_alarm_runtime::ItemCheckRequest::new(
             poe_alarm_runtime::RuntimeRequestId(1),
             settings,
-            path,
+            text,
         );
         self.runtime
             .as_ref()
             .expect("runtime just ensured")
-            .test_screenshot(request)
+            .check_item(request)
             .map_err(|e| e.to_string())
     }
 
     #[cfg(not(windows))]
-    pub fn test_screenshot(&mut self, _path: std::path::PathBuf) -> Result<(), String> {
+    pub fn check_item(&mut self, _text: String) -> Result<(), String> {
         Ok(())
     }
 
@@ -476,10 +417,10 @@ impl Backend {
                 E::Fault {
                     operation, detail, ..
                 } => out.push(BridgeEvent::Fault(format!("{operation:?}: {detail}"))),
-                E::ScreenshotCompleted(report) => {
+                E::ItemCheckCompleted(report) => {
                     let matched = report.evaluation.is_match;
                     let detail = report.evaluation.detail.clone().unwrap_or_default();
-                    out.push(BridgeEvent::ScreenshotReport {
+                    out.push(BridgeEvent::ItemCheckReport {
                         lines: report.lines.clone(),
                         matched,
                         detail,
@@ -487,7 +428,7 @@ impl Backend {
                 }
                 E::Ready
                 | E::SettingsCompiled { .. }
-                | E::ScreenshotCancelled { .. }
+                | E::ItemCheckCancelled { .. }
                 | E::ShutdownComplete { .. } => {}
             }
         }
@@ -526,7 +467,7 @@ impl Backend {
 #[cfg(windows)]
 const WM_APP_SET_START_HOTKEY: u32 = 0x8000 + 0x41; // WM_APP + 0x41
 
-/// 全局热键线程:注册 Ctrl⇧F10(可配)与 Ctrl⇧F11 框选,独立消息循环把
+/// 全局热键线程:注册 Ctrl⇧F10(可配)与 Ctrl⇧F12,独立消息循环把
 /// WM_HOTKEY 翻译成 PlatformEvent。F12 全局停止热键已按用户裁定移除;
 /// 命中解除由红窗按钮与其内部按键检测负责。返回线程 id 供运行时重配热键。
 #[cfg(windows)]
@@ -556,8 +497,9 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
         // SAFETY: standard thread message loop; the manager lives for the loop's duration.
         while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
             if message.message == WM_APP_SET_START_HOTKEY {
-                if let Some(option) =
-                    StartMonitoringHotKey::OPTIONS.get(message.wParam.0).copied()
+                if let Some(option) = StartMonitoringHotKey::OPTIONS
+                    .get(message.wParam.0)
+                    .copied()
                     && let Err(error) = manager.reconfigure_start(option)
                 {
                     eprintln!("start hotkey reconfiguration failed: {error}");
@@ -569,7 +511,14 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
             {
                 let event = match action {
                     HotKeyAction::StartMonitoring => PlatformEvent::HotKeyStart,
-                    HotKeyAction::SelectRegion => PlatformEvent::HotKeySelectRegion,
+                    // Copied here rather than on the UI thread: the hotkey
+                    // fires while the game holds focus and the cursor is still
+                    // over the item, and both stop being true the moment the
+                    // user looks away.
+                    HotKeyAction::CheckItemUnderCursor => match copy_item_under_cursor() {
+                        Some(text) => PlatformEvent::ItemUnderCursor(text),
+                        None => PlatformEvent::NoItemUnderCursor,
+                    },
                     HotKeyAction::StopOrAcknowledge => continue,
                 };
                 if tx.send(event).is_err() {
@@ -579,6 +528,24 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
         }
     });
     id_rx.recv().ok()
+}
+
+/// Reads the item the cursor is resting on, or `None` if there is not one.
+///
+/// A far longer deadline than the monitor uses. That one is short because a
+/// slow answer means a craft is in flight and waiting would blind it; here the
+/// user has asked a direct question and is waiting for the reply.
+#[cfg(windows)]
+fn copy_item_under_cursor() -> Option<String> {
+    use poe_alarm_platform_win::{KeyMethod, copy_hovered_item, game_is_foreground};
+
+    if !game_is_foreground() {
+        return None;
+    }
+    copy_hovered_item(std::time::Duration::from_millis(250), KeyMethod::default())
+        .ok()
+        .map(|outcome| outcome.text)
+        .filter(|text| poe_alarm_clipboard::looks_like_item(text))
 }
 
 #[cfg(windows)]
@@ -591,7 +558,7 @@ fn resolve_alert_wave(
             Err(error) => eprintln!("custom alert sound was rejected: {error}"),
         }
     }
-    poe_alarm_app_win::built_in_alert_wave()
+    poe_alarm_platform_win::built_in_alert_wave()
         .map(|wave| (wave, settings.custom_alert_sound_path.is_some()))
         .map_err(|error| format!("could not build the bundled alert sound: {error}"))
 }

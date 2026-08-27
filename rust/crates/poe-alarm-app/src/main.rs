@@ -23,7 +23,35 @@ use gpui_component::Root;
 use shell::AppShell;
 use state::WORKBENCH_SIZE;
 
+/// Headless check that the packaged binary can actually reach the platform.
+///
+/// Runs before GPUI starts and exits without opening a window, so the release
+/// pipeline can prove the executable it just assembled works rather than
+/// assuming a successful link means a working program. Exercises the real
+/// services: HUD window creation and teardown, global hotkey registration, the
+/// mouse guard, and the built-in alert cue.
+#[cfg(windows)]
+fn run_self_test() -> i32 {
+    match poe_alarm_platform_win::run_windows_self_test() {
+        Ok(report) => {
+            if poe_alarm_platform_win::built_in_alert_wave().is_err() {
+                return 2;
+            }
+            i32::from(!report.is_healthy())
+        }
+        Err(_) => 1,
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if std::env::args()
+        .skip(1)
+        .any(|argument| argument == "--self-test")
+    {
+        std::process::exit(run_self_test());
+    }
+
     Application::new().run(move |cx: &mut App| {
         gpui_component::init(cx);
         theme::apply_ledger_theme(cx);

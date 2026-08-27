@@ -143,7 +143,7 @@ version = "0.38.0+1.3.281"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
 dependencies = [
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -579,7 +579,7 @@ dependencies = [
  "hidden-trait",
  "js-sys",
  "khronos-egl",
- "libloading 0.8.9",
+ "libloading",
  "log",
  "mint",
  "naga",
@@ -873,7 +873,7 @@ checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -1404,7 +1404,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -3050,7 +3050,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
 dependencies = [
  "libc",
- "libloading 0.8.9",
+ "libloading",
 ]
 
 [[package]]
@@ -3144,16 +3144,6 @@ name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link 0.2.1",
-]
-
-[[package]]
-name = "libloading"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
  "cfg-if",
  "windows-link 0.2.1",
@@ -3342,16 +3332,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matrixmultiply"
-version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f607c237553f086e7043417a51df26b2eb899d3caff94e6a67592ff992fedc7"
-dependencies = [
- "autocfg",
- "rawpointer",
-]
-
-[[package]]
 name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3502,21 +3482,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "ndarray"
-version = "0.17.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520080814a7a6b4a6e9070823bb24b4531daac8c4627e08ba5de8c5ef2f2752d"
-dependencies = [
- "matrixmultiply",
- "num-complex",
- "num-integer",
- "num-traits",
- "portable-atomic",
- "portable-atomic-util",
- "rawpointer",
 ]
 
 [[package]]
@@ -3951,25 +3916,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ort"
-version = "2.0.0-rc.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4336a1e2b38848325241c72889086886004e589b7c74f335e60a8e8db5138a0b"
-dependencies = [
- "libloading 0.9.0",
- "ndarray",
- "ort-sys",
- "smallvec",
- "tracing",
-]
-
-[[package]]
-name = "ort-sys"
-version = "2.0.0-rc.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf211e3776eea6aec988552fa118dd746d70e1b1e5e244058d1c98015f3e5872"
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4180,7 +4126,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "poe-alarm-alert-win",
- "poe-alarm-app-win",
+ "poe-alarm-clipboard",
  "poe-alarm-core",
  "poe-alarm-platform-win",
  "poe-alarm-runtime",
@@ -4190,18 +4136,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "poe-alarm-app-win"
+name = "poe-alarm-clip-only"
 version = "1.0.0"
 dependencies = [
- "embed-resource",
- "poe-alarm-alert-win",
+ "poe-alarm-clipboard",
  "poe-alarm-core",
  "poe-alarm-platform-win",
- "poe-alarm-runtime",
  "poe-alarm-settings",
- "serde_json",
- "sha2 0.10.9",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "poe-alarm-clipboard"
+version = "1.0.0"
+dependencies = [
+ "poe-alarm-core",
 ]
 
 [[package]]
@@ -4217,47 +4166,14 @@ name = "poe-alarm-monitoring"
 version = "1.0.0"
 dependencies = [
  "poe-alarm-core",
- "poe-alarm-vision",
-]
-
-[[package]]
-name = "poe-alarm-ocr-paddle"
-version = "0.1.0"
-dependencies = [
- "ort",
- "poe-alarm-core",
- "poe-alarm-vision",
- "sha2 0.10.9",
- "unicode-normalization",
-]
-
-[[package]]
-name = "poe-alarm-ocr-win"
-version = "1.0.0"
-dependencies = [
- "poe-alarm-core",
- "poe-alarm-vision",
- "windows 0.61.3",
 ]
 
 [[package]]
 name = "poe-alarm-platform-win"
 version = "0.1.0"
 dependencies = [
+ "sha2 0.10.9",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "poe-alarm-recognition"
-version = "0.1.0"
-dependencies = [
- "poe-alarm-core",
- "poe-alarm-monitoring",
- "poe-alarm-ocr-paddle",
- "poe-alarm-ocr-win",
- "poe-alarm-vision",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4265,12 +4181,11 @@ name = "poe-alarm-runtime"
 version = "1.0.0"
 dependencies = [
  "poe-alarm-alert-win",
+ "poe-alarm-clipboard",
  "poe-alarm-core",
  "poe-alarm-monitoring",
  "poe-alarm-platform-win",
- "poe-alarm-recognition",
  "poe-alarm-settings",
- "poe-alarm-vision",
 ]
 
 [[package]]
@@ -4280,13 +4195,6 @@ dependencies = [
  "poe-alarm-core",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "poe-alarm-vision"
-version = "1.0.0"
-dependencies = [
- "windows 0.61.3",
 ]
 
 [[package]]
@@ -4308,21 +4216,6 @@ name = "pollster"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
-
-[[package]]
-name = "portable-atomic"
-version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
-
-[[package]]
-name = "portable-atomic-util"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
-dependencies = [
- "portable-atomic",
-]
 
 [[package]]
 name = "postage"
@@ -4741,12 +4634,6 @@ dependencies = [
  "objc",
  "raw-window-handle",
 ]
-
-[[package]]
-name = "rawpointer"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
 
 [[package]]
 name = "rayon"
@@ -6433,15 +6320,6 @@ name = "unicode-linebreak"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
-
-[[package]]
-name = "unicode-normalization"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
-dependencies = [
- "tinyvec",
-]
 
 [[package]]
 name = "unicode-properties"

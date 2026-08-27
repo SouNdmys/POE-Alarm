@@ -1,0 +1,289 @@
+Item Class: Quarterstaves
+Rarity: Rare
+Maelström Spire
+Razor Quarterstaff
+--------
+Quality: +20% (augmented)
+Physical Damage: 191-317 (augmented)
+Fire Damage: 42-66 (fire)
+Critical Hit Chance: 13.51% (augmented)
+Attacks per Second: 1.40
+--------
+Requires: Level 77, 127 (unmet) Dex, 50 Int
+--------
+Sockets: S S 
+--------
+Item Level: 81
+--------
+36% increased Physical Damage (rune)
+--------
+{ Prefix Modifier "Honed" (Tier: 6) — Damage, Physical, Attack }
+Adds 16(11-17) to 26(20-30) Physical Damage
+{ Prefix Modifier "Serrated" (Tier: 7) — Damage, Physical, Attack }
+61(50-64)% increased Physical Damage
+{ Prefix Modifier "Scorching" (Tier: 5) — Damage, Elemental, Fire, Attack }
+Adds 42(39-53) to 66(59-80) Fire Damage
+{ Suffix Modifier "of Dueling" (Tier: 4) — Attack }
++2 to Level of all Melee Skills
+{ Suffix Modifier "of Calamity" (Tier: 3) — Attack, Critical }
++3.51(3.11-3.8)% to Critical Hit Chance
+{ Suffix Modifier "of Siphoning" (Tier: 3) — Mana }
+Gain 23(21-27) Mana per enemy killed
+
+
+Item Class: Jewels
+Rarity: Rare
+Blight Splinter
+Sapphire
+--------
+Item Level: 81
+--------
+{ Prefix Modifier "Triggered" (Tier: 1) — Damage, Caster }
+Triggered Spells deal 14(10-18)% increased Spell Damage
+{ Prefix Modifier "Acrimonious" (Tier: 1) — Damage, Ailment }
+8(5-15)% increased Magnitude of Ailments you inflict
+{ Suffix Modifier "of Energy" (Tier: 1) — Mana }
+5(5-15)% increased Mana Regeneration Rate
+--------
+Place into an allocated Jewel Socket on the Passive Skill Tree. Right click to remove from the Socket.
+
+
+Item Class: Jewels
+Rarity: Rare
+Eagle Prism
+Emerald
+--------
+Item Level: 81
+--------
+{ Prefix Modifier "Combat" (Tier: 1) — Damage, Attack }
+13(5-15)% increased Attack Damage
+{ Prefix Modifier "Archer's" (Tier: 1) — Damage }
+8(5-15)% increased Projectile Damage
+{ Suffix Modifier "of the Leviathan" (Tier: 1) — Elemental, Lightning, Resistance }
++1% to Maximum Lightning Resistance
+{ Suffix Modifier "of Rapidity" (Tier: 1) — Attack, Speed }
+4(2-4)% increased Attack Speed with Crossbows
+--------
+Place into an allocated Jewel Socket on the Passive Skill Tree. Right click to remove from the Socket.
+
+
+Item Class: Bows
+Rarity: Rare
+Vortex Fletch
+Cavalry Bow
+--------
+Physical Damage: 76-127 (augmented)
+Critical Hit Chance: 5.00%
+Attacks per Second: 1.20
+--------
+Requires: Level 72, 149 (unmet) Dex
+--------
+Item Level: 81
+--------
+{ Prefix Modifier "Conqueror's" (Tier: 3) — Damage, Physical, Attack }
+55(55-64)% increased Physical Damage
++140(124-149) to Accuracy Rating
+{ Prefix Modifier "Hunter's" (Tier: 4) — Attack }
++241(237-346) to Accuracy Rating
+{ Prefix Modifier "Unleashed" (Tier: 3) — Damage, Elemental, Fire, Cold, Lightning }
+72(63-72)% increased Elemental Damage with Attacks
+{ Suffix Modifier "of the Marksman" (Tier: 2) }
++3 to Level of all Projectile Skills
+{ Suffix Modifier "of Siphoning" (Tier: 3) — Mana }
+Gain 22(21-27) Mana per enemy killed
+{ Suffix Modifier "of Legend" (Tier: 1) — Life }
+Gain 77(69-84) Life per enemy killed
+--------
+Note: ~b/o 15 exalted
+
+
+Item Class: Amulets
+Rarity: Rare
+Sol Idol
+Jade Amulet
+--------
+Requires: Level 56
+--------
+Item Level: 81
+--------
+{ Implicit Modifier — Attribute }
++10(10-15) to Dexterity
+--------
+{ Prefix Modifier "Scintillating" (Tier: 2) — Energy Shield }
++75(71-79) to maximum Energy Shield
+{ Prefix Modifier "Marchioness'" (Tier: 2) }
++43(43-46) to Spirit
+{ Prefix Modifier "Hoarder's" (Tier: 1) }
+17(16-19)% increased Rarity of Items found
+{ Suffix Modifier "of the Gorilla" (Tier: 4) — Attribute }
++24(21-24) to Strength
+{ Suffix Modifier "of Stitching" (Tier: 3) — Life }
+18(16-18)% of Damage taken Recouped as Life
+{ Suffix Modifier "of the Despot" (Tier: 2) — Minion, Gem }
++2 to Level of all Minion Skills
+
+
+Item Class: Rings
+Rarity: Rare
+Rune Turn
+Amethyst Ring
+--------
+Requires: Level 65
+--------
+Item Level: 82
+--------
+{ Implicit Modifier — Chaos, Resistance }
++9(7-13)% to Chaos Resistance
+--------
+{ Prefix Modifier "Flaming" (Tier: 5) — Damage, Elemental, Fire, Attack }
+Adds 13(12-13) to 20(18-20) Fire damage to Attacks
+{ Prefix Modifier "Adroit" (Tier: 1) — Evasion }
++214(203-233) to Evasion Rating
+{ Prefix Modifier "Razor-sharp" (Tier: 3) — Damage, Physical, Attack }
+Adds 8(7-11) to 18(14-20) Physical Damage to Attacks
+{ Suffix Modifier "of Ephij" (Tier: 1) — Elemental, Lightning, Resistance }
++44(41-45)% to Lightning Resistance
+{ Suffix Modifier "of the Walrus" (Tier: 4) — Elemental, Cold, Resistance }
++30(26-30)% to Cold Resistance
+{ Desecrated Suffix Modifier "of Amanamu" (Tier: 1) — Attribute }
++14(9-15) to Strength and Intelligence
+--------
+Note: ~b/o 2 divine
+
+
+Item Class: Spears
+Rarity: Rare
+Rune Edge
+Guardian Spear
+--------
+Physical Damage: 38-79
+Lightning Damage: 4-70 (lightning)
+Critical Hit Chance: 9.47% (augmented)
+Attacks per Second: 1.55
+--------
+Requires: Level 75, 50 Str, 127 (unmet) Dex
+--------
+Item Level: 80
+--------
+{ Implicit Modifier }
+Prevent +6(3-7)% of Damage from Deflected Hits
+--------
+Grants Skill: Spear Throw
+--------
+{ Prefix Modifier "Overpowering" (Tier: 2) — Damage, Elemental, Fire, Cold, Lightning }
+83(73-86)% increased Elemental Damage with Attacks
+{ Prefix Modifier "Amazon's" (Tier: 1) — Attack }
++517(451-550) to Accuracy Rating
+{ Prefix Modifier "Arcing" (Tier: 5) — Damage, Elemental, Lightning, Attack }
+Adds 4(1-4) to 70(63-82) Lightning Damage
+{ Suffix Modifier "of Unmaking" (Tier: 1) — Attack, Critical }
++4.47(4.41-5)% to Critical Hit Chance
+{ Suffix Modifier "of the Combatant" (Tier: 3) }
+Causes 60(51-60)% increased Stun Buildup
+{ Crafted Suffix Modifier "of the Essence" — Attack }
++2 to Level of all Attack Skills
+--------
+Note: ~b/o 1 divine
+
+
+Item Class: Rings
+Rarity: Rare
+Foe Band
+Sapphire Ring
+--------
+Requires: Level 60
+--------
+Item Level: 81
+--------
+{ Implicit Modifier — Elemental, Cold, Resistance }
++22(20-30)% to Cold Resistance
+--------
+{ Prefix Modifier "Flaring" (Tier: 1) — Damage, Physical, Attack }
+Adds 16(12-19) to 27(22-32) Physical Damage to Attacks
+{ Prefix Modifier "Magmatic" (Tier: 1) — Damage, Elemental, Fire }
+28(27-30)% increased Fire Damage
+{ Prefix Modifier "Vile" (Tier: 1) — Damage, Chaos }
+29(27-30)% increased Chaos Damage
+{ Suffix Modifier "of the Ice" (Tier: 2) — Elemental, Cold, Resistance }
++40(36-40)% to Cold Resistance
+{ Suffix Modifier "of the Leopard" (Tier: 3) — Attribute }
++27(25-27) to Dexterity
+{ Crafted Suffix Modifier "of Expulsion" (Tier: 3) — Chaos, Resistance }
++16(16-19)% to Chaos Resistance
+--------
+Note: ~b/o 1 divine
+
+
+Item Class: Tablet
+Rarity: Rare
+Mythical League
+Ritual Tablet
+--------
+Item Level: 81
+--------
+{ Implicit Modifier }
+Adds Ritual Altars to a Map
+10 uses remaining
+--------
+{ Prefix Modifier "Brimming" (Tier: 1) }
+Map has 26(25-35)% increased number of Rare Monsters
+{ Prefix Modifier "Collector's" (Tier: 1) }
+10(8-12)% increased Rarity of Items found in Map
+{ Suffix Modifier "of Undertaking" (Tier: 1) }
+Map has 2(1-2) additional random Modifiers
+{ Suffix Modifier "of the Dogma" (Tier: 1) }
+Rerolling Favours at Ritual Altars in Map costs 28(30-20)% reduced Tribute
+--------
+Can be used in a personal Map Device to add modifiers to a Map.
+--------
+Note: ~b/o 12 divine
+
+
+Item Class: Tablet
+Rarity: Rare
+Godless Writ
+Delirium Tablet
+--------
+Item Level: 79
+--------
+{ Implicit Modifier }
+Adds a Mirror of Delirium to a Map
+10 uses remaining
+--------
+{ Prefix Modifier "Collector's" (Tier: 1) }
+12(8-12)% increased Rarity of Items found in Map
+{ Prefix Modifier "Bountiful" (Tier: 1) }
+31(25-35)% increased Gold found in Map
+{ Suffix Modifier "of Persecution" (Tier: 1) }
+Delirium Monsters in Map have 28(15-30)% increased Pack Size
+{ Suffix Modifier "of Eternity" (Tier: 1) }
+Delirium Fog in Map lasts 12(6-12) additional seconds before dissipating
+--------
+Can be used in a personal Map Device to add modifiers to a Map.
+--------
+Note: ~b/o 6 chaos
+
+
+Item Class: Tablet
+Rarity: Rare
+Void Precept
+Delirium Tablet
+--------
+Item Level: 81
+--------
+{ Implicit Modifier }
+Adds a Mirror of Delirium to a Map
+10 uses remaining
+--------
+{ Prefix Modifier "Abounding" (Tier: 1) }
+Map has 15(15-20)% increased Monster Rarity
+{ Prefix Modifier "Summoner's" (Tier: 1) }
+Map contains an additional Summoning Circle
+{ Suffix Modifier "of the Antiquarian" (Tier: 1) }
+Map contains an additional Strongbox
+{ Suffix Modifier "of the Simulacrum" (Tier: 1) }
+28(15-30)% increased Stack size of Simulacrum Splinters found in Map
+--------
+Can be used in a personal Map Device to add modifiers to a Map.
+--------
+Note: ~b/o 1 divine

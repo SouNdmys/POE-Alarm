@@ -30,5 +30,5 @@ winresource = "0.1"
 poe-alarm-runtime = { path = "../poe-alarm-runtime" }
 windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 poe-alarm-alert-win = { path = "../poe-alarm-alert-win" }
+poe-alarm-clipboard = { path = "../poe-alarm-clipboard" }
 poe-alarm-platform-win = { path = "../poe-alarm-platform-win" }
-poe-alarm-app-win = { path = "../poe-alarm-app-win" }

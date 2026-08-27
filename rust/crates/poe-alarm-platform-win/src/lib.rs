@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+mod alert_cue;
+mod clipboard;
 mod error;
 mod geometry;
 mod handle;
@@ -14,12 +16,18 @@ mod hud;
 mod mouse_guard;
 #[cfg(not(windows))]
 mod non_windows;
-mod region_selection;
 mod self_test;
 mod wave;
 #[cfg(windows)]
 mod win32;
 
+pub use alert_cue::built_in_alert_wave;
+pub use clipboard::{
+    ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
+    copy_hovered_item, describes_game, foreground_process_outranks_us,
+    foreground_window_description, game_is_foreground, game_window_rect, held_modifiers,
+    process_is_elevated, read_text, relaunch_elevated, sequence_number,
+};
 pub use error::PlatformError;
 pub use geometry::{PointI, RectI, SizeI};
 pub use handle::NativeWindowHandle;
@@ -34,10 +42,6 @@ pub use hud::{
 pub use mouse_guard::{
     GuardDecision, GuardMode, GuardRelease, GuardSnapshot, MouseButton, MouseButtons,
     MouseGuardStateMachine, MouseInput, PendingMouseInputGuard,
-};
-pub use region_selection::{
-    RegionSelectionOverlay, RegionSelectionState, SelectionOverlayConfig, SelectionPhase,
-    SelectionUpdate,
 };
 pub use self_test::{PlatformSelfTestReport, run_windows_self_test};
 pub use wave::{

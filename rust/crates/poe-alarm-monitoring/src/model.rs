@@ -1,13 +1,11 @@
 use std::fmt;
 use std::time::Duration;
 
+use crate::CancellationToken;
 use poe_alarm_core::{
     AssistedModifierObservation, CompiledRuleSet, FullLineAffixMatcher, LogicalAffixMatch,
     PhysicalLineIdentity, RuleEvaluationResult,
 };
-use poe_alarm_vision::{BlueTextMask, CapturedFrame};
-
-use crate::CancellationToken;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MonitorState {
@@ -27,6 +25,7 @@ pub enum MonitorPlan {
     Structured(CompiledRuleSet),
 }
 
+/// Whether a source can judge a whole rule set from one reading.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StructuredOcrSupport {
     #[default]
@@ -35,15 +34,7 @@ pub enum StructuredOcrSupport {
     ConfirmedStrictBatch,
 }
 
-/// The frame and semantic blue-text mask prepared once by the monitoring worker.
-#[derive(Clone, Copy, Debug)]
-pub struct PreparedFrame<'a> {
-    pub frame: &'a CapturedFrame,
-    pub blue_mask: &'a BlueTextMask,
-    pub semantic_fingerprint: u64,
-}
-
-/// OCR evidence returned from one Quick request or one Structured batch request.
+/// Evidence returned from one reading of the item under the cursor.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RecognitionResult {
     pub lines: Vec<String>,
@@ -65,28 +56,32 @@ impl RecognitionResult {
     }
 }
 
-/// Target-aware OCR boundary. Quick and Structured are intentionally distinct methods.
+/// Where the affix lines come from.
 ///
-/// A Structured implementation must evaluate all supplied targets in one shared request. It must
-/// never implement `recognize_structured` by invoking `recognize_quick` once per target.
-pub trait OcrRecognizer: Send + 'static {
+/// Deliberately says nothing about how a reading is obtained. The pixel
+/// pipeline that preceded this needed the monitor to capture a frame and build
+/// a mask before the recognizer could be called, which welded the loop to the
+/// screen; asking the client for the item text needs none of that. Keeping the
+/// boundary at "give me the lines" is what let the loop stop knowing.
+///
+/// Deduplication belongs to the implementation, not the caller: only the source
+/// knows what "unchanged" means for its medium. Reporting
+/// [`RecognitionResult::was_cached`] lets the loop skip an evaluation that
+/// would reach the same verdict, and pace down while nothing is happening.
+pub trait AffixSource: Send + 'static {
     type Error: fmt::Display + Send + 'static;
 
     fn structured_support(&self) -> StructuredOcrSupport {
         StructuredOcrSupport::Unsupported
     }
 
-    fn recognize_quick(
+    /// Reads the item under the cursor once.
+    ///
+    /// `plan` is supplied because a source may narrow its work to the targets
+    /// actually being watched.
+    fn read(
         &mut self,
-        prepared: PreparedFrame<'_>,
-        target: &FullLineAffixMatcher,
-        cancellation: &CancellationToken,
-    ) -> Result<RecognitionResult, Self::Error>;
-
-    fn recognize_structured(
-        &mut self,
-        prepared: PreparedFrame<'_>,
-        targets: &[FullLineAffixMatcher],
+        plan: &MonitorPlan,
         cancellation: &CancellationToken,
     ) -> Result<RecognitionResult, Self::Error>;
 }

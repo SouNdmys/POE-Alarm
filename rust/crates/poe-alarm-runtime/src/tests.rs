@@ -1,230 +1,97 @@
+//! Actor contracts: generation filtering, alert ownership, bounded shutdown.
+//!
+//! What is exercised here is the actor, not recognition — the monitor's own
+//! loop has its contract test in `poe-alarm-monitoring`. The fake source exists
+//! so those actor contracts can be driven without a running client: it can be
+//! told to match, to block until cancelled, to ignore cancellation, or to fail
+//! to construct at all.
+
 use std::collections::VecDeque;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use poe_alarm_core::{
-    AcceptableResultGroup, AffixCondition, AssistedModifierObservation, FullLineAffixMatcher,
-    ResultGroupMode, RuleSetDefinition, canonicalize,
-};
+use poe_alarm_core::{AcceptableResultGroup, AffixCondition, ResultGroupMode, RuleSetDefinition};
 use poe_alarm_monitoring::{
-    CancellationToken, PreparedFrame, RecognitionResult, StructuredOcrSupport,
+    AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
 };
-use poe_alarm_recognition::RecognitionProfile;
-use poe_alarm_settings::{AppSettings, GameProfileSettings, RuleEditorMode, ScreenRegion};
-use poe_alarm_vision::{CaptureRegion, CapturedFrame};
+use poe_alarm_settings::{AppSettings, RuleEditorMode};
 
 use crate::{
-    AlertLatchStatus, AlertPresentation, BackendError, BackendFactory, CaptureBackend,
-    ProtectionError, ProtectionEvent, ProtectionService, RecognizerBackend, RuntimeEvent,
+    AffixSourceFactory, AlertLatchStatus, AlertPresentation, BackendError, BoxedAffixSource,
+    ItemCheckRequest, ProtectionError, ProtectionEvent, ProtectionService, RuntimeEvent,
     RuntimeGeneration, RuntimeHandle, RuntimeOperation, RuntimeRequestId, RuntimeSendError,
-    RuntimeState, ScreenshotBackend, ScreenshotRequest,
+    RuntimeState, SourceError,
 };
 
 #[derive(Clone)]
-struct FakeFactory {
-    state: Arc<FakeBackendState>,
+struct FakeSources {
+    state: Arc<FakeSourceState>,
 }
 
-struct FakeBackendState {
-    frames: Mutex<VecDeque<CapturedFrame>>,
-    last_frame: Mutex<CapturedFrame>,
-    live_results: Mutex<VecDeque<RecognitionResult>>,
-    screenshot_results: Mutex<VecDeque<RecognitionResult>>,
-    live_calls: AtomicUsize,
-    screenshot_calls: AtomicUsize,
-    structured_calls: AtomicUsize,
+struct FakeSourceState {
+    readings: Mutex<VecDeque<RecognitionResult>>,
+    reads: AtomicUsize,
+    sources_alive: AtomicUsize,
+    sources_peak: AtomicUsize,
+    sources_created: AtomicUsize,
+    /// 0 unsupported, 2 confirmed strict batch, anything else strict batch.
     structured_support: AtomicUsize,
-    block_live_until_cancelled: AtomicBool,
-    block_live_ignoring_cancellation: AtomicBool,
-    block_screenshot_until_cancelled: AtomicBool,
-    block_screenshot_ignoring_cancellation: AtomicBool,
-    screenshot_pass_delay_millis: AtomicUsize,
-    recognizers_alive: AtomicUsize,
-    recognizers_peak: AtomicUsize,
-    screenshot_backends: AtomicUsize,
-    screenshot_request_starts: AtomicUsize,
-    decoded: Mutex<CapturedFrame>,
-    profiles: Mutex<Vec<RecognitionProfile>>,
+    block_until_cancelled: AtomicBool,
+    block_ignoring_cancellation: AtomicBool,
+    fail_create: AtomicBool,
 }
 
-impl FakeFactory {
-    fn new(frames: Vec<CapturedFrame>, results: Vec<RecognitionResult>) -> Self {
-        let first = frames.first().cloned().unwrap_or_else(|| frame(1, 64, 64));
+impl FakeSources {
+    fn new(readings: Vec<RecognitionResult>) -> Self {
         Self {
-            state: Arc::new(FakeBackendState {
-                frames: Mutex::new(frames.into()),
-                last_frame: Mutex::new(first.clone()),
-                live_results: Mutex::new(results.clone().into()),
-                screenshot_results: Mutex::new(results.into()),
-                live_calls: AtomicUsize::new(0),
-                screenshot_calls: AtomicUsize::new(0),
-                structured_calls: AtomicUsize::new(0),
+            state: Arc::new(FakeSourceState {
+                readings: Mutex::new(readings.into()),
+                reads: AtomicUsize::new(0),
+                sources_alive: AtomicUsize::new(0),
+                sources_peak: AtomicUsize::new(0),
+                sources_created: AtomicUsize::new(0),
                 structured_support: AtomicUsize::new(1),
-                block_live_until_cancelled: AtomicBool::new(false),
-                block_live_ignoring_cancellation: AtomicBool::new(false),
-                block_screenshot_until_cancelled: AtomicBool::new(false),
-                block_screenshot_ignoring_cancellation: AtomicBool::new(false),
-                screenshot_pass_delay_millis: AtomicUsize::new(0),
-                recognizers_alive: AtomicUsize::new(0),
-                recognizers_peak: AtomicUsize::new(0),
-                screenshot_backends: AtomicUsize::new(0),
-                screenshot_request_starts: AtomicUsize::new(0),
-                decoded: Mutex::new(first),
-                profiles: Mutex::new(Vec::new()),
+                block_until_cancelled: AtomicBool::new(false),
+                block_ignoring_cancellation: AtomicBool::new(false),
+                fail_create: AtomicBool::new(false),
             }),
         }
     }
 }
 
-impl BackendFactory for FakeFactory {
-    fn create_capture(&self) -> Result<Box<dyn CaptureBackend>, BackendError> {
-        Ok(Box::new(FakeCapture {
-            state: Arc::clone(&self.state),
-        }))
-    }
-
-    fn create_recognizer(
-        &self,
-        profile: RecognitionProfile,
-    ) -> Result<Box<dyn RecognizerBackend>, BackendError> {
-        Ok(Box::new(FakeRecognizer::new(
-            Arc::clone(&self.state),
-            profile,
-        )))
-    }
-
-    fn create_screenshot_backend(&self) -> Result<Box<dyn ScreenshotBackend>, BackendError> {
-        self.state
-            .screenshot_backends
-            .fetch_add(1, Ordering::AcqRel);
-        Ok(Box::new(FakeScreenshotBackend {
-            state: Arc::clone(&self.state),
-            recognizer: None,
-        }))
-    }
-}
-
-struct FakeScreenshotBackend {
-    state: Arc<FakeBackendState>,
-    recognizer: Option<(RecognitionProfile, FakeRecognizer)>,
-}
-
-impl ScreenshotBackend for FakeScreenshotBackend {
-    fn decode(&mut self, _path: &Path) -> Result<CapturedFrame, BackendError> {
-        Ok(self.state.decoded.lock().unwrap().clone())
-    }
-
-    fn begin_request(&mut self) {
-        self.state
-            .screenshot_request_starts
-            .fetch_add(1, Ordering::AcqRel);
-        if let Some((_, recognizer)) = self.recognizer.as_mut() {
-            recognizer.begin_screenshot_request();
+impl AffixSourceFactory for FakeSources {
+    fn create(&self) -> Result<BoxedAffixSource, BackendError> {
+        if self.state.fail_create.load(Ordering::Acquire) {
+            return Err(BackendError("injected source failure".to_owned()));
         }
-    }
-
-    fn recognize_quick(
-        &mut self,
-        profile: RecognitionProfile,
-        prepared: PreparedFrame<'_>,
-        target: &FullLineAffixMatcher,
-        cancelled: &AtomicBool,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.ensure_recognizer(profile)
-            .recognize_quick_screenshot(prepared, target, cancelled)
-    }
-
-    fn recognize_structured(
-        &mut self,
-        profile: RecognitionProfile,
-        prepared: PreparedFrame<'_>,
-        targets: &[FullLineAffixMatcher],
-        cancelled: &AtomicBool,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.ensure_recognizer(profile)
-            .recognize_structured_screenshot(prepared, targets, cancelled)
-    }
-
-    fn release_recognizer(&mut self) {
-        self.recognizer = None;
+        self.state.sources_created.fetch_add(1, Ordering::AcqRel);
+        Ok(Box::new(FakeSource::new(Arc::clone(&self.state))))
     }
 }
 
-impl FakeScreenshotBackend {
-    fn ensure_recognizer(&mut self, profile: RecognitionProfile) -> &mut FakeRecognizer {
-        if self
-            .recognizer
-            .as_ref()
-            .is_none_or(|(cached, _)| *cached != profile)
-        {
-            self.recognizer = None;
-            self.recognizer = Some((
-                profile,
-                FakeRecognizer::new(Arc::clone(&self.state), profile),
-            ));
-        }
-        &mut self
-            .recognizer
-            .as_mut()
-            .expect("fake screenshot recognizer initialized above")
-            .1
-    }
+struct FakeSource {
+    state: Arc<FakeSourceState>,
 }
 
-struct FakeCapture {
-    state: Arc<FakeBackendState>,
-}
-
-impl CaptureBackend for FakeCapture {
-    fn capture_into(
-        &mut self,
-        _region: CaptureRegion,
-        destination: &mut CapturedFrame,
-    ) -> Result<(), BackendError> {
-        let next = self
-            .state
-            .frames
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| self.state.last_frame.lock().unwrap().clone());
-        *self.state.last_frame.lock().unwrap() = next.clone();
-        *destination = next;
-        Ok(())
-    }
-}
-
-struct FakeRecognizer {
-    state: Arc<FakeBackendState>,
-}
-
-impl Drop for FakeRecognizer {
-    fn drop(&mut self) {
-        self.state.recognizers_alive.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-impl FakeRecognizer {
-    fn new(state: Arc<FakeBackendState>, profile: RecognitionProfile) -> Self {
-        state.profiles.lock().unwrap().push(profile);
-        let alive = state.recognizers_alive.fetch_add(1, Ordering::AcqRel) + 1;
-        state.recognizers_peak.fetch_max(alive, Ordering::AcqRel);
+impl FakeSource {
+    fn new(state: Arc<FakeSourceState>) -> Self {
+        let alive = state.sources_alive.fetch_add(1, Ordering::AcqRel) + 1;
+        state.sources_peak.fetch_max(alive, Ordering::AcqRel);
         Self { state }
     }
+}
 
-    fn next_live(&self) -> RecognitionResult {
-        pop_or_default(&self.state.live_results)
-    }
-
-    fn next_screenshot(&self) -> RecognitionResult {
-        pop_or_default(&self.state.screenshot_results)
+impl Drop for FakeSource {
+    fn drop(&mut self) {
+        self.state.sources_alive.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
-impl RecognizerBackend for FakeRecognizer {
+impl AffixSource for FakeSource {
+    type Error = SourceError;
+
     fn structured_support(&self) -> StructuredOcrSupport {
         match self.state.structured_support.load(Ordering::Acquire) {
             0 => StructuredOcrSupport::Unsupported,
@@ -233,93 +100,36 @@ impl RecognizerBackend for FakeRecognizer {
         }
     }
 
-    fn begin_screenshot_request(&mut self) {}
-
-    fn recognize_quick_live(
+    fn read(
         &mut self,
-        _prepared: PreparedFrame<'_>,
-        _target: &FullLineAffixMatcher,
+        _plan: &MonitorPlan,
         cancellation: &CancellationToken,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.state.live_calls.fetch_add(1, Ordering::AcqRel);
-        if self
-            .state
-            .block_live_until_cancelled
-            .load(Ordering::Acquire)
-        {
+    ) -> Result<RecognitionResult, Self::Error> {
+        self.state.reads.fetch_add(1, Ordering::AcqRel);
+        if self.state.block_until_cancelled.load(Ordering::Acquire) {
             cancellation.wait_cancelled();
         }
         while self
             .state
-            .block_live_ignoring_cancellation
+            .block_ignoring_cancellation
             .load(Ordering::Acquire)
         {
             thread::sleep(Duration::from_millis(1));
         }
-        Ok(self.next_live())
-    }
-
-    fn recognize_structured_live(
-        &mut self,
-        _prepared: PreparedFrame<'_>,
-        _targets: &[FullLineAffixMatcher],
-        cancellation: &CancellationToken,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.state.structured_calls.fetch_add(1, Ordering::AcqRel);
-        self.recognize_quick_live(_prepared, _targets.first().unwrap(), cancellation)
-    }
-
-    fn recognize_quick_screenshot(
-        &mut self,
-        _prepared: PreparedFrame<'_>,
-        _target: &FullLineAffixMatcher,
-        cancelled: &AtomicBool,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.state.screenshot_calls.fetch_add(1, Ordering::AcqRel);
-        while self
+        // Running out of scripted readings means the item stopped changing,
+        // which is what a real source reports as an unchanged reading rather
+        // than as an empty item.
+        Ok(self
             .state
-            .block_screenshot_until_cancelled
-            .load(Ordering::Acquire)
-            && !cancelled.load(Ordering::Acquire)
-        {
-            thread::sleep(Duration::from_millis(1));
-        }
-        while self
-            .state
-            .block_screenshot_ignoring_cancellation
-            .load(Ordering::Acquire)
-        {
-            thread::sleep(Duration::from_millis(1));
-        }
-        if cancelled.load(Ordering::Acquire) {
-            return Err(BackendError("cancelled".to_owned()));
-        }
-        let delay = self
-            .state
-            .screenshot_pass_delay_millis
-            .load(Ordering::Acquire);
-        if delay > 0 {
-            thread::sleep(Duration::from_millis(delay as u64));
-        }
-        if cancelled.load(Ordering::Acquire) {
-            return Err(BackendError("cancelled".to_owned()));
-        }
-        Ok(self.next_screenshot())
+            .readings
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(RecognitionResult {
+                was_cached: true,
+                ..RecognitionResult::default()
+            }))
     }
-
-    fn recognize_structured_screenshot(
-        &mut self,
-        prepared: PreparedFrame<'_>,
-        targets: &[FullLineAffixMatcher],
-        cancelled: &AtomicBool,
-    ) -> Result<RecognitionResult, BackendError> {
-        self.state.structured_calls.fetch_add(1, Ordering::AcqRel);
-        self.recognize_quick_screenshot(prepared, targets.first().unwrap(), cancelled)
-    }
-}
-
-fn pop_or_default(queue: &Mutex<VecDeque<RecognitionResult>>) -> RecognitionResult {
-    queue.lock().unwrap().pop_front().unwrap_or_default()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -422,23 +232,8 @@ impl ProtectionService for FakeProtection {
     }
 }
 
-fn frame(seed: u8, width: u32, height: u32) -> CapturedFrame {
-    let region = CaptureRegion::new(0, 0, width, height).unwrap();
-    let stride = width as usize * 4;
-    let mut pixels = vec![0_u8; stride * height as usize];
-    let offset = usize::from(seed) % (width as usize * height as usize);
-    pixels[offset * 4] = 220;
-    pixels[offset * 4 + 1] = 80;
-    pixels[offset * 4 + 2] = 70;
-    CapturedFrame::from_bgra(region, stride, pixels, SystemTime::now()).unwrap()
-}
-
 fn quick_settings() -> AppSettings {
     let mut settings = AppSettings::default();
-    settings.profiles.poe1 = GameProfileSettings {
-        capture_region: Some(ScreenRegion::new(0, 0, 64, 64)),
-        ..GameProfileSettings::default()
-    };
     settings.profiles.poe1.selected_rules_mut().target_affix =
         "+#% to Critical Hit Chance".to_owned();
     settings
@@ -453,11 +248,7 @@ fn poe2_quick_settings() -> AppSettings {
 
 fn structured_settings() -> AppSettings {
     let mut settings = quick_settings();
-    settings
-        .profiles
-        .poe1
-        .selected_rules_mut()
-        .rule_editor_mode = RuleEditorMode::Structured;
+    settings.profiles.poe1.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
     settings
         .profiles
         .poe1
@@ -480,11 +271,7 @@ fn structured_settings() -> AppSettings {
 
 fn at_least_two_settings() -> AppSettings {
     let mut settings = quick_settings();
-    settings
-        .profiles
-        .poe1
-        .selected_rules_mut()
-        .rule_editor_mode = RuleEditorMode::Structured;
+    settings.profiles.poe1.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
     settings
         .profiles
         .poe1
@@ -523,9 +310,9 @@ fn result(lines: &[&str]) -> RecognitionResult {
     }
 }
 
-fn runtime(factory: &FakeFactory, protection: &Arc<FakeProtection>) -> RuntimeHandle {
+fn runtime(sources: &FakeSources, protection: &Arc<FakeProtection>) -> RuntimeHandle {
     RuntimeHandle::spawn_with_components(
-        Arc::new(factory.clone()),
+        Arc::new(sources.clone()),
         Arc::clone(protection) as Arc<dyn ProtectionService>,
     )
     .unwrap()
@@ -547,6 +334,14 @@ fn wait_for(
             Instant::now() < deadline,
             "timed out waiting for runtime event"
         );
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+fn wait_until(condition: impl Fn() -> bool, detail: &str) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !condition() {
+        assert!(Instant::now() < deadline, "timed out waiting for {detail}");
         thread::sleep(Duration::from_millis(2));
     }
 }
@@ -605,7 +400,7 @@ fn wait_for_without_late_result(
                 !matches!(
                     event,
                     RuntimeEvent::MatchFound { .. }
-                        | RuntimeEvent::ScreenshotCompleted(_)
+                        | RuntimeEvent::ItemCheckCompleted(_)
                         | RuntimeEvent::Fault { .. }
                 ),
                 "cancelled work published a late terminal event: {event:?}"
@@ -622,12 +417,44 @@ fn wait_for_without_late_result(
     }
 }
 
+/// One rare jewel whose two critical modifiers come from a single prefix.
+///
+/// The client says so itself: both lines sit under one `{ Prefix Modifier }`
+/// annotation, which is its authoritative statement that one physical modifier
+/// produced them.
+const ONE_HYBRID_PREFIX: &str = concat!(
+    "Item Class: Jewels\r\n",
+    "Rarity: Rare\r\n",
+    "Rage Bliss\r\n",
+    "Cobalt Jewel\r\n",
+    "--------\r\n",
+    "Item Level: 84\r\n",
+    "--------\r\n",
+    "{ Prefix Modifier \"Deadly\" (Tier: 1) — Critical }\r\n",
+    "+3.7(3.0-4.0)% to Critical Hit Chance\r\n",
+    "+25(20-30)% to Critical Strike Multiplier\r\n",
+);
+
+/// The same two lines, but rolled as two independent modifiers.
+const TWO_SEPARATE_AFFIXES: &str = concat!(
+    "Item Class: Jewels\r\n",
+    "Rarity: Rare\r\n",
+    "Rage Bliss\r\n",
+    "Cobalt Jewel\r\n",
+    "--------\r\n",
+    "Item Level: 84\r\n",
+    "--------\r\n",
+    "{ Prefix Modifier \"Deadly\" (Tier: 1) — Critical }\r\n",
+    "+3.7(3.0-4.0)% to Critical Hit Chance\r\n",
+    "{ Suffix Modifier \"of Menace\" (Tier: 1) — Critical }\r\n",
+    "+25(20-30)% to Critical Strike Multiplier\r\n",
+);
+
 #[test]
-fn unchanged_fingerprint_skips_ocr() {
-    let same = frame(1, 64, 64);
-    let factory = FakeFactory::new(vec![same.clone(), same], vec![result(&["not it"])]);
+fn cached_readings_keep_the_session_running_without_a_pending_guard() {
+    let sources = FakeSources::new(vec![result(&["not it"])]);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(quick_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
@@ -636,7 +463,6 @@ fn unchanged_fingerprint_skips_ocr() {
                 if snapshot.scan_count >= 2 && snapshot.ocr_was_cached
         )
     });
-    assert_eq!(factory.state.live_calls.load(Ordering::Acquire), 1);
     let calls = protection.calls.lock().unwrap().clone();
     assert!(
         !calls.iter().any(|call| matches!(
@@ -650,12 +476,9 @@ fn unchanged_fingerprint_skips_ocr() {
 
 #[test]
 fn fast_match_latches_alert_without_a_pending_mouse_guard() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_quick_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(event, RuntimeEvent::MatchFound { .. })
@@ -681,35 +504,31 @@ fn fast_match_latches_alert_without_a_pending_mouse_guard() {
 }
 
 #[test]
-fn stop_cancels_blocked_live_ocr_without_late_match() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
-    factory
+fn stop_cancels_a_blocked_reading_without_a_late_match() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    sources
         .state
-        .block_live_until_cancelled
+        .block_until_cancelled
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_quick_settings()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while factory.state.live_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
+    wait_until(
+        || sources.state.reads.load(Ordering::Acquire) > 0,
+        "the source to be entered",
+    );
     handle.stop().unwrap();
-    let stop_deadline = Instant::now() + Duration::from_secs(2);
-    while !protection
-        .calls
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|call| matches!(call, SafetyCall::StopPending(_)))
-    {
-        assert!(Instant::now() < stop_deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
+    wait_until(
+        || {
+            protection
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| matches!(call, SafetyCall::StopPending(_)))
+        },
+        "alert ownership to be closed",
+    );
     let calls = protection.calls.lock().unwrap().clone();
     let terminal_stop = calls
         .iter()
@@ -730,307 +549,13 @@ fn stop_cancels_blocked_live_ocr_without_late_match() {
 }
 
 #[test]
-fn screenshot_cancel_suppresses_completion_and_close_is_bounded() {
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not it"])]);
-    factory
-        .state
-        .block_screenshot_until_cancelled
-        .store(true, Ordering::Release);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    let request_id = RuntimeRequestId(44);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            request_id,
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while factory.state.screenshot_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    handle.cancel_screenshot(request_id).unwrap();
-    wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(
-            event,
-            RuntimeEvent::ScreenshotCancelled { request_id: id } if *id == request_id
-        )
-    });
-    shutdown(&handle);
-    thread::sleep(Duration::from_millis(20));
-    while let Some(event) = handle.try_next_event() {
-        assert!(!matches!(event, RuntimeEvent::ScreenshotCompleted(_)));
-    }
-}
-
-#[test]
-fn screenshot_progressive_recognition_can_converge_after_more_than_three_passes() {
-    let mut results = (0..5)
-        .map(|_| RecognitionResult {
-            requires_rescan: true,
-            ..result(&["partial"])
-        })
-        .collect::<Vec<_>>();
-    results.push(result(&["+3.73% to Critical Hit Chance"]));
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], results);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(45),
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
-    });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
-        unreachable!()
-    };
-    assert!(report.evaluation.is_match);
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 6);
-    shutdown(&handle);
-}
-
-#[test]
-fn sequential_screenshots_reuse_one_backend_and_one_profile_recognizer() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["not one"]), result(&["not two"])],
-    );
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-
-    for request in 1..=2 {
-        handle
-            .test_screenshot(ScreenshotRequest::new(
-                RuntimeRequestId(request),
-                quick_settings(),
-                "unused.png",
-            ))
-            .unwrap();
-        wait_for(&handle, Duration::from_secs(2), |event| {
-            matches!(
-                event,
-                RuntimeEvent::ScreenshotCompleted(report)
-                    if report.request_id == RuntimeRequestId(request)
-            )
-        });
-    }
-
-    assert_eq!(factory.state.screenshot_backends.load(Ordering::Acquire), 1);
-    assert_eq!(
-        factory
-            .state
-            .screenshot_request_starts
-            .load(Ordering::Acquire),
-        2
-    );
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    shutdown(&handle);
-}
-
-#[test]
-fn screenshot_rule_changes_reuse_profile_but_profile_switch_rebuilds_once() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["first"]), result(&["second"]), result(&["third"])],
-    );
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-
-    let mut same_profile_new_rule = quick_settings();
-    same_profile_new_rule
-        .profiles
-        .poe1
-        .selected_rules_mut()
-        .target_affix = "+# to Strength".to_owned();
-    let mut poe2 = quick_settings();
-    poe2.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
-    poe2.profiles.poe2 = poe2.profiles.poe1.clone();
-    for (request, settings) in [quick_settings(), same_profile_new_rule, poe2]
-        .into_iter()
-        .enumerate()
-    {
-        let request_id = RuntimeRequestId(request as u64 + 1);
-        handle
-            .test_screenshot(ScreenshotRequest::new(request_id, settings, "unused.png"))
-            .unwrap();
-        wait_for(&handle, Duration::from_secs(2), |event| {
-            matches!(
-                event,
-                RuntimeEvent::ScreenshotCompleted(report) if report.request_id == request_id
-            )
-        });
-    }
-
-    assert_eq!(factory.state.screenshot_backends.load(Ordering::Acquire), 1);
-    assert_eq!(
-        factory.state.profiles.lock().unwrap().as_slice(),
-        [
-            RecognitionProfile::POE1_ENGLISH,
-            RecognitionProfile::POE2_ENGLISH
-        ]
-    );
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-    shutdown(&handle);
-}
-
-#[test]
-fn permanently_progressive_screenshot_emits_typed_non_convergence_fault() {
-    let results = (0..crate::actor::MAXIMUM_SCREENSHOT_PASSES)
-        .map(|_| RecognitionResult {
-            requires_rescan: true,
-            ..result(&["partial"])
-        })
-        .collect();
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], results);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(46),
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(
-            event,
-            RuntimeEvent::Fault {
-                operation: RuntimeOperation::Screenshot,
-                detail,
-                ..
-            } if detail.contains("did not converge after 128 passes")
-        )
-    });
-    assert!(matches!(
-        event,
-        RuntimeEvent::Fault {
-            operation: RuntimeOperation::Screenshot,
-            ..
-        }
-    ));
-    assert_eq!(
-        factory.state.screenshot_calls.load(Ordering::Acquire),
-        crate::actor::MAXIMUM_SCREENSHOT_PASSES
-    );
-    shutdown(&handle);
-}
-
-#[test]
-fn progressive_screenshot_cancellation_wins_before_convergence_or_fault() {
-    let results = (0..crate::actor::MAXIMUM_SCREENSHOT_PASSES)
-        .map(|_| RecognitionResult {
-            requires_rescan: true,
-            ..result(&["partial"])
-        })
-        .collect();
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], results);
-    factory
-        .state
-        .screenshot_pass_delay_millis
-        .store(2, Ordering::Release);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    let request_id = RuntimeRequestId(47);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            request_id,
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while factory.state.screenshot_calls.load(Ordering::Acquire) <= 3 {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(1));
-    }
-    handle.cancel_screenshot(request_id).unwrap();
-    wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(
-            event,
-            RuntimeEvent::ScreenshotCancelled { request_id: id } if *id == request_id
-        )
-    });
-    thread::sleep(Duration::from_millis(20));
-    while let Some(event) = handle.try_next_event() {
-        assert!(!matches!(
-            event,
-            RuntimeEvent::ScreenshotCompleted(_) | RuntimeEvent::Fault { .. }
-        ));
-    }
-    shutdown(&handle);
-}
-
-#[test]
-fn structured_screenshot_uses_one_batch_and_preserves_strict_evaluation() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(7),
-            structured_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
-    });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
-        unreachable!()
-    };
-    assert!(report.evaluation.is_match);
-    assert_eq!(report.evaluation.matched_group.as_deref(), Some("critical"));
-    assert_eq!(factory.state.structured_calls.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 1);
-    shutdown(&handle);
-}
-
-#[test]
-fn out_of_bounds_screenshot_crop_falls_back_to_full_image() {
-    let factory = FakeFactory::new(vec![frame(1, 32, 32)], vec![result(&["not it"])]);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    let mut settings = quick_settings();
-    settings.profiles.poe1.capture_region = Some(ScreenRegion::new(100, 100, 64, 64));
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(8),
-            settings,
-            "unused.png",
-        ))
-        .unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
-    });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
-        unreachable!()
-    };
-    assert!(report.used_full_image_fallback);
-    shutdown(&handle);
-}
-
-#[test]
 fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
     let protection = Arc::new(FakeProtection::default());
     protection.fail_latch.store(true, Ordering::Release);
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_quick_settings()).unwrap();
-    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+    wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
             event,
             RuntimeEvent::Fault {
@@ -1039,7 +564,6 @@ fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
             }
         )
     });
-    assert!(matches!(event, RuntimeEvent::Fault { .. }));
     let calls = protection.calls.lock().unwrap().clone();
     assert!(!calls.iter().any(|call| matches!(
         call,
@@ -1049,13 +573,40 @@ fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
 }
 
 #[test]
-fn sound_failure_is_non_fatal_while_red_alert_remains_latched() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
+fn a_source_that_cannot_be_created_faults_without_opening_a_session() {
+    let sources = FakeSources::new(Vec::new());
+    sources.state.fail_create.store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
+    handle.start(quick_settings()).unwrap();
+    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(
+            event,
+            RuntimeEvent::Fault {
+                operation: RuntimeOperation::Start,
+                ..
+            }
+        )
+    });
+    let RuntimeEvent::Fault { detail, .. } = event else {
+        unreachable!()
+    };
+    assert!(detail.contains("injected source failure"), "{detail}");
+    let calls = protection.calls.lock().unwrap().clone();
+    assert!(
+        !calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Begin(_) | SafetyCall::Prepare(_))),
+        "a source that never started must not open an alert session: {calls:?}"
+    );
+    shutdown(&handle);
+}
+
+#[test]
+fn sound_failure_is_non_fatal_while_red_alert_remains_latched() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&sources, &protection);
     handle.start(quick_settings()).unwrap();
     let match_event = wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(event, RuntimeEvent::MatchFound { .. })
@@ -1095,9 +646,9 @@ fn sound_failure_is_non_fatal_while_red_alert_remains_latched() {
 
 #[test]
 fn poe2_fast_monitoring_never_prepares_the_dormant_guard() {
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not it"])]);
+    let sources = FakeSources::new(vec![result(&["not it"])]);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_quick_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
@@ -1120,10 +671,10 @@ fn poe2_fast_monitoring_never_prepares_the_dormant_guard() {
 
 #[test]
 fn monitor_start_failure_does_not_prepare_the_dormant_guard() {
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not it"])]);
-    factory.state.structured_support.store(0, Ordering::Release);
+    let sources = FakeSources::new(vec![result(&["not it"])]);
+    sources.state.structured_support.store(0, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_structured_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
         matches!(
@@ -1146,70 +697,166 @@ fn monitor_start_failure_does_not_prepare_the_dormant_guard() {
         )),
         "calls: {calls:?}"
     );
-    assert_eq!(factory.state.live_calls.load(Ordering::Acquire), 0);
+    assert_eq!(sources.state.reads.load(Ordering::Acquire), 0);
     shutdown(&handle);
 }
 
 #[test]
-fn structured_screenshot_does_not_reuse_one_physical_band_twice() {
-    let mut recognition = result(&[]);
-    recognition.assisted_observations = vec![
-        AssistedModifierObservation::new(
-            "same-band",
-            "+3.7% to Critical Hit Chance",
-            canonicalize("+#% to Critical Hit Chance").text,
-        ),
-        AssistedModifierObservation::new(
-            "same-band",
-            "+25% to Critical Strike Multiplier",
-            canonicalize("+#% to Critical Strike Multiplier").text,
-        ),
-    ];
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![recognition]);
+fn one_hybrid_modifier_cannot_satisfy_two_conditions() {
+    let sources = FakeSources::new(Vec::new());
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle
-        .test_screenshot(ScreenshotRequest::new(
+        .check_item(ItemCheckRequest::new(
             RuntimeRequestId(70),
             at_least_two_settings(),
-            "unused.png",
+            ONE_HYBRID_PREFIX,
         ))
         .unwrap();
     let event = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::ScreenshotCompleted(_))
+        matches!(event, RuntimeEvent::ItemCheckCompleted(_))
     });
-    let RuntimeEvent::ScreenshotCompleted(report) = event else {
+    let RuntimeEvent::ItemCheckCompleted(report) = event else {
         unreachable!()
     };
-    assert!(!report.evaluation.is_match);
+    assert_eq!(report.request_id, RuntimeRequestId(70));
+    assert_eq!(
+        report.modifier_count, 1,
+        "the client annotated both lines as one prefix: {:?}",
+        report.lines
+    );
+    assert!(
+        !report.evaluation.is_match,
+        "one physical modifier must not satisfy two conditions: {:?}",
+        report.lines
+    );
     assert_eq!(report.evaluation.matched_group, None);
     shutdown(&handle);
 }
 
 #[test]
-fn stale_session_cannot_publish_detection_after_replacement() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64), frame(2, 64, 64)],
-        vec![
-            result(&["+3.73% to Critical Hit Chance"]),
-            result(&["not it"]),
-        ],
+fn two_separate_modifiers_do_satisfy_two_conditions() {
+    let sources = FakeSources::new(Vec::new());
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&sources, &protection);
+    handle
+        .check_item(ItemCheckRequest::new(
+            RuntimeRequestId(71),
+            at_least_two_settings(),
+            TWO_SEPARATE_AFFIXES,
+        ))
+        .unwrap();
+    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(event, RuntimeEvent::ItemCheckCompleted(_))
+    });
+    let RuntimeEvent::ItemCheckCompleted(report) = event else {
+        unreachable!()
+    };
+    assert_eq!(report.modifier_count, 2);
+    assert!(
+        report.evaluation.is_match,
+        "two independent modifiers must match: {:?}",
+        report.lines
     );
-    factory
+    assert_eq!(
+        report.evaluation.matched_group.as_deref(),
+        Some("two critical modifiers")
+    );
+    // A blank entry between the groups is what stops the engine joining them.
+    assert!(
+        report.lines.iter().any(|line| line.is_empty()),
+        "grouping must survive into the report: {:?}",
+        report.lines
+    );
+    shutdown(&handle);
+}
+
+#[test]
+fn text_that_is_not_an_item_faults_rather_than_reporting_a_miss() {
+    let sources = FakeSources::new(Vec::new());
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&sources, &protection);
+    handle
+        .check_item(ItemCheckRequest::new(
+            RuntimeRequestId(72),
+            structured_settings(),
+            "whatever happened to be on the clipboard",
+        ))
+        .unwrap();
+    wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(
+            event,
+            RuntimeEvent::Fault {
+                operation: RuntimeOperation::ItemCheck,
+                ..
+            }
+        )
+    });
+    shutdown(&handle);
+}
+
+#[test]
+fn an_item_check_queued_behind_retiring_work_can_be_cancelled() {
+    let sources = FakeSources::new(vec![result(&["not it"])]);
+    sources
         .state
-        .block_live_until_cancelled
+        .block_ignoring_cancellation
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(quick_settings()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while factory.state.live_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    factory
+    wait_until(
+        || sources.state.reads.load(Ordering::Acquire) > 0,
+        "the source to be entered",
+    );
+
+    let request_id = RuntimeRequestId(73);
+    handle
+        .check_item(ItemCheckRequest::new(
+            request_id,
+            structured_settings(),
+            TWO_SEPARATE_AFFIXES,
+        ))
+        .unwrap();
+    handle.cancel_item_check(request_id).unwrap();
+    wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(
+            event,
+            RuntimeEvent::ItemCheckCancelled { request_id: id } if *id == request_id
+        )
+    });
+
+    sources
         .state
-        .block_live_until_cancelled
+        .block_ignoring_cancellation
+        .store(false, Ordering::Release);
+    thread::sleep(Duration::from_millis(30));
+    while let Some(event) = handle.try_next_event() {
+        assert!(!matches!(event, RuntimeEvent::ItemCheckCompleted(_)));
+    }
+    shutdown(&handle);
+}
+
+#[test]
+fn stale_session_cannot_publish_detection_after_replacement() {
+    let sources = FakeSources::new(vec![
+        result(&["+3.73% to Critical Hit Chance"]),
+        result(&["not it"]),
+    ]);
+    sources
+        .state
+        .block_until_cancelled
+        .store(true, Ordering::Release);
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&sources, &protection);
+    handle.start(quick_settings()).unwrap();
+    wait_until(
+        || sources.state.reads.load(Ordering::Acquire) > 0,
+        "the source to be entered",
+    );
+    sources
+        .state
+        .block_until_cancelled
         .store(false, Ordering::Release);
     handle.start(quick_settings()).unwrap();
     wait_for(&handle, Duration::from_secs(2), |event| {
@@ -1235,23 +882,19 @@ fn stale_session_cannot_publish_detection_after_replacement() {
 }
 
 #[test]
-fn shutdown_is_bounded_when_native_ocr_ignores_cancellation_in_flight() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"])],
-    );
-    factory
+fn shutdown_is_bounded_when_a_reading_ignores_cancellation_in_flight() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    sources
         .state
-        .block_live_ignoring_cancellation
+        .block_ignoring_cancellation
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
     handle.start(poe2_quick_settings()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while factory.state.live_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
+    wait_until(
+        || sources.state.reads.load(Ordering::Acquire) > 0,
+        "the source to be entered",
+    );
 
     let shutdown_started = Instant::now();
     handle.shutdown().unwrap();
@@ -1273,12 +916,12 @@ fn shutdown_is_bounded_when_native_ocr_ignores_cancellation_in_flight() {
             .unwrap()
             .iter()
             .any(|call| matches!(call, SafetyCall::StopPending(_))),
-        "input protection must be terminally removed before detached OCR drain"
+        "input protection must be terminally removed before the detached drain"
     );
 
-    factory
+    sources
         .state
-        .block_live_ignoring_cancellation
+        .block_ignoring_cancellation
         .store(false, Ordering::Release);
     thread::sleep(Duration::from_millis(30));
     while let Some(event) = handle.try_next_event() {
@@ -1287,178 +930,17 @@ fn shutdown_is_bounded_when_native_ocr_ignores_cancellation_in_flight() {
 }
 
 #[test]
-fn one_hundred_live_replacements_coalesce_behind_one_retired_native_call() {
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not a match"])]);
-    factory
-        .state
-        .block_live_ignoring_cancellation
-        .store(true, Ordering::Release);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle.start(quick_settings()).unwrap();
-    let entered = Instant::now() + Duration::from_secs(2);
-    while factory.state.live_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < entered);
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    for replacement in 0..100 {
-        retry_queue(|| handle.start(quick_settings()));
-        if replacement != 99 {
-            retry_queue(|| handle.stop());
-        }
-    }
-    retry_queue(|| handle.acknowledge_alert());
-    let processed = Instant::now() + Duration::from_secs(2);
-    loop {
-        let acknowledgements = protection
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|call| matches!(call, SafetyCall::Ack))
-            .count();
-        if acknowledgements >= 2 {
-            break;
-        }
-        assert!(
-            Instant::now() < processed,
-            "replacement marker was not processed"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    factory
-        .state
-        .block_live_ignoring_cancellation
-        .store(false, Ordering::Release);
-    let replacement = Instant::now() + Duration::from_secs(2);
-    let mut replacement_started = false;
-    while !replacement_started {
-        while let Some(event) = handle.try_next_event() {
-            assert!(!matches!(
-                event,
-                RuntimeEvent::MatchFound {
-                    generation: RuntimeGeneration(1),
-                    ..
-                }
-            ));
-            replacement_started = matches!(
-                event,
-                RuntimeEvent::StateChanged {
-                    generation: Some(RuntimeGeneration(2)),
-                    state: RuntimeState::Monitoring,
-                }
-            );
-        }
-        assert!(
-            Instant::now() < replacement,
-            "latest live intent did not start"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 2);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    let shutdown_started = Instant::now();
-    shutdown(&handle);
-    assert!(shutdown_started.elapsed() < Duration::from_secs(1));
-}
-
-#[test]
-fn one_hundred_screenshot_replacements_keep_only_the_latest_intent() {
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![result(&["not a match"])]);
-    factory
-        .state
-        .block_screenshot_ignoring_cancellation
-        .store(true, Ordering::Release);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(1),
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-    let entered = Instant::now() + Duration::from_secs(2);
-    while factory.state.screenshot_calls.load(Ordering::Acquire) == 0 {
-        assert!(Instant::now() < entered);
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    for request in 2..=101 {
-        retry_queue(|| {
-            handle.test_screenshot(ScreenshotRequest::new(
-                RuntimeRequestId(request),
-                quick_settings(),
-                "unused.png",
-            ))
-        });
-    }
-    retry_queue(|| handle.acknowledge_alert());
-    let processed = Instant::now() + Duration::from_secs(2);
-    while !protection
-        .calls
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|call| matches!(call, SafetyCall::Ack))
-    {
-        assert!(
-            Instant::now() < processed,
-            "replacement marker was not processed"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    factory
-        .state
-        .block_screenshot_ignoring_cancellation
-        .store(false, Ordering::Release);
-    let completed = Instant::now() + Duration::from_secs(2);
-    let mut latest_completed = false;
-    while !latest_completed {
-        while let Some(event) = handle.try_next_event() {
-            if let RuntimeEvent::ScreenshotCompleted(report) = event {
-                assert_eq!(report.request_id, RuntimeRequestId(101));
-                latest_completed = true;
-            }
-        }
-        assert!(
-            Instant::now() < completed,
-            "latest screenshot intent did not finish"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 2);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    let shutdown_started = Instant::now();
-    shutdown(&handle);
-    assert!(shutdown_started.elapsed() < Duration::from_secs(1));
-}
-
-#[test]
 #[ignore = "release-gate soak; set POE_ALARM_RUNTIME_START_STOP_SOAK_CYCLES to override 1000"]
 fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
     let cycles = soak_iterations("POE_ALARM_RUNTIME_START_STOP_SOAK_CYCLES", 1_000);
-    let matching_result = result(&["+3.73% to Critical Hit Chance"]);
-    let factory = FakeFactory::new(vec![frame(1, 64, 64)], vec![matching_result; cycles]);
-    factory
+    let matching = result(&["+3.73% to Critical Hit Chance"]);
+    let sources = FakeSources::new(vec![matching; cycles]);
+    sources
         .state
-        .block_live_until_cancelled
+        .block_until_cancelled
         .store(true, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
+    let handle = runtime(&sources, &protection);
 
     for cycle in 0..cycles {
         let generation = RuntimeGeneration(cycle as u64 + 1);
@@ -1472,15 +954,10 @@ fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
                 } if *current == generation
             )
         });
-
-        let entered = Instant::now() + Duration::from_secs(2);
-        while factory.state.live_calls.load(Ordering::Acquire) < cycle + 1 {
-            assert!(
-                Instant::now() < entered,
-                "cycle {cycle} never entered the recognizer"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
+        wait_until(
+            || sources.state.reads.load(Ordering::Acquire) > cycle,
+            "the cycle to enter the source",
+        );
 
         retry_queue(|| handle.stop());
         wait_for_without_late_result(&handle, Duration::from_secs(2), |event| {
@@ -1492,21 +969,18 @@ fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
                 }
             )
         });
-
-        let released = Instant::now() + Duration::from_secs(2);
-        while factory.state.recognizers_alive.load(Ordering::Acquire) != 0 {
-            assert!(
-                Instant::now() < released,
-                "cycle {cycle} did not release its recognizer"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
+        wait_until(
+            || sources.state.sources_alive.load(Ordering::Acquire) == 0,
+            "the cycle to release its source",
+        );
     }
 
-    assert_eq!(factory.state.live_calls.load(Ordering::Acquire), cycles);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), cycles);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 0);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
+    assert_eq!(
+        sources.state.sources_created.load(Ordering::Acquire),
+        cycles
+    );
+    assert_eq!(sources.state.sources_alive.load(Ordering::Acquire), 0);
+    assert_eq!(sources.state.sources_peak.load(Ordering::Acquire), 1);
     assert_eq!(*protection.active_generation.lock().unwrap(), None);
 
     thread::sleep(Duration::from_millis(30));
@@ -1515,7 +989,7 @@ fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
             !matches!(
                 event,
                 RuntimeEvent::MatchFound { .. }
-                    | RuntimeEvent::ScreenshotCompleted(_)
+                    | RuntimeEvent::ItemCheckCompleted(_)
                     | RuntimeEvent::Fault { .. }
             ),
             "cancelled live work published after the soak: {event:?}"
@@ -1530,169 +1004,10 @@ fn one_thousand_start_stop_cycles_keep_runtime_resources_bounded() {
     );
 }
 
-#[test]
-#[ignore = "release-gate soak; set POE_ALARM_RUNTIME_SCREENSHOT_SOAK_CYCLES to override 500"]
-fn five_hundred_screenshot_replacements_and_cancels_are_coalesced() {
-    let replacements = soak_iterations("POE_ALARM_RUNTIME_SCREENSHOT_SOAK_CYCLES", 500);
-    let final_request_id = replacements as u64 + 1;
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64)],
-        vec![result(&["+3.73% to Critical Hit Chance"]); 2],
-    );
-    factory
-        .state
-        .block_screenshot_ignoring_cancellation
-        .store(true, Ordering::Release);
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle
-        .test_screenshot(ScreenshotRequest::new(
-            RuntimeRequestId(1),
-            quick_settings(),
-            "unused.png",
-        ))
-        .unwrap();
-
-    let entered = Instant::now() + Duration::from_secs(2);
-    while factory.state.screenshot_calls.load(Ordering::Acquire) == 0 {
-        assert!(
-            Instant::now() < entered,
-            "initial screenshot never entered the recognizer"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    for request_id in 2..=final_request_id {
-        retry_queue(|| {
-            handle.test_screenshot(ScreenshotRequest::new(
-                RuntimeRequestId(request_id),
-                quick_settings(),
-                "unused.png",
-            ))
-        });
-        if request_id != final_request_id && request_id % 5 == 0 {
-            retry_queue(|| handle.cancel_screenshot(RuntimeRequestId(request_id)));
-        }
-    }
-    retry_queue(|| handle.acknowledge_alert());
-
-    let processed = Instant::now() + Duration::from_secs(2);
-    while !protection
-        .calls
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|call| matches!(call, SafetyCall::Ack))
-    {
-        assert!(
-            Instant::now() < processed,
-            "screenshot replacement batch was not processed"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    let mut cancellation_counts = vec![0_usize; final_request_id as usize + 1];
-    while let Some(event) = handle.try_next_event() {
-        match event {
-            RuntimeEvent::ScreenshotCancelled { request_id } => {
-                cancellation_counts[request_id.0 as usize] += 1;
-            }
-            RuntimeEvent::ScreenshotCompleted(_) | RuntimeEvent::MatchFound { .. } => {
-                panic!("blocked screenshot work published a terminal result: {event:?}")
-            }
-            RuntimeEvent::Fault { .. } => panic!("screenshot soak faulted: {event:?}"),
-            _ => {}
-        }
-    }
-    for request_id in 1..final_request_id {
-        assert_eq!(
-            cancellation_counts[request_id as usize], 1,
-            "request {request_id} did not publish exactly one cancellation"
-        );
-    }
-    assert_eq!(cancellation_counts[final_request_id as usize], 0);
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    factory
-        .state
-        .block_screenshot_ignoring_cancellation
-        .store(false, Ordering::Release);
-    let completed = wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(
-            event,
-            RuntimeEvent::ScreenshotCompleted(report)
-                if report.request_id == RuntimeRequestId(final_request_id)
-        )
-    });
-    let RuntimeEvent::ScreenshotCompleted(report) = completed else {
-        unreachable!()
-    };
-    assert_eq!(report.request_id, RuntimeRequestId(final_request_id));
-    assert_eq!(factory.state.screenshot_calls.load(Ordering::Acquire), 2);
-    assert_eq!(factory.state.profiles.lock().unwrap().len(), 1);
-    assert_eq!(factory.state.recognizers_alive.load(Ordering::Acquire), 1);
-    assert_eq!(factory.state.recognizers_peak.load(Ordering::Acquire), 1);
-
-    thread::sleep(Duration::from_millis(30));
-    while let Some(event) = handle.try_next_event() {
-        assert!(
-            !matches!(
-                event,
-                RuntimeEvent::ScreenshotCompleted(_)
-                    | RuntimeEvent::MatchFound { .. }
-                    | RuntimeEvent::Fault { .. }
-            ),
-            "screenshot work published a late event after completion: {event:?}"
-        );
-    }
-
-    let shutdown_started = Instant::now();
-    shutdown(&handle);
-    assert!(
-        shutdown_started.elapsed() < Duration::from_secs(1),
-        "runtime shutdown exceeded one second after {replacements} replacements"
-    );
-}
-
-#[test]
-fn profile_switch_builds_a_fresh_recognizer() {
-    let factory = FakeFactory::new(
-        vec![frame(1, 64, 64), frame(2, 64, 64)],
-        vec![result(&["not it"]), result(&["not it"])],
-    );
-    let protection = Arc::new(FakeProtection::default());
-    let handle = runtime(&factory, &protection);
-    handle.start(quick_settings()).unwrap();
-    wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(event, RuntimeEvent::MonitorSnapshot { .. })
-    });
-    let mut second = quick_settings();
-    second.selected_game_profile = poe_alarm_settings::GameProfile::Poe2;
-    second.profiles.poe2 = second.profiles.poe1.clone();
-    handle.start(second).unwrap();
-    wait_for(&handle, Duration::from_secs(2), |event| {
-        matches!(
-            event,
-            RuntimeEvent::StateChanged {
-                generation: Some(RuntimeGeneration(2)),
-                state: RuntimeState::Monitoring,
-            }
-        )
-    });
-    let profiles = factory.state.profiles.lock().unwrap().clone();
-    assert_eq!(profiles.len(), 2);
-    assert_eq!(profiles[0], RecognitionProfile::POE1_ENGLISH);
-    assert_eq!(profiles[1], RecognitionProfile::POE2_ENGLISH);
-    shutdown(&handle);
-}
-
 #[cfg(windows)]
 #[test]
-fn production_constructor_and_factory_are_compile_checked() {
+fn production_constructor_and_source_factory_are_compile_checked() {
     let _constructor: fn(crate::ProductionRuntimeConfig) -> std::io::Result<RuntimeHandle> =
         RuntimeHandle::start_production;
-    let _factory = crate::ProductionBackendFactory::packaged();
+    let _factory: Arc<dyn AffixSourceFactory> = Arc::new(crate::ProductionSourceFactory);
 }
