@@ -17,7 +17,7 @@ use poe_alarm_monitoring::{
 };
 use poe_alarm_platform_win::{
     ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us, primary_button_down,
+    game_process_outranks_us, held_modifiers, primary_button_down,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -49,6 +49,21 @@ const SILENT_FAILURE_STREAK: u32 = 60;
 /// A hand trembles by a pixel or two while spam-clicking one spot; travelling
 /// to an item covers tens of pixels per poll. Nothing meaningful lives between.
 const CURSOR_REST_TOLERANCE: i32 = 3;
+
+/// How long after a click the new roll is worth chasing.
+///
+/// The reroll is a server round trip, usually well under 200ms; the rest is
+/// headroom for a lag spike. Once it expires the click is presumed to have
+/// landed on nothing, and chasing stops rather than lifting Shift forever.
+const ROLL_WINDOW: Duration = Duration::from_millis(1200);
+
+/// Minimum gap between copies whose Shift lift the user can see.
+///
+/// While Shift is held every injection visibly flickers it — the comparison
+/// tooltip blinks, and a click landing inside the flicker goes out unshifted
+/// and eats the orb. Spacing the visible ones caps that exposure; invisible
+/// copies (Shift up) are not paced at all.
+const LIFT_SPACING: Duration = Duration::from_millis(35);
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
@@ -104,6 +119,14 @@ pub struct ClipboardSource {
     unanswered: u32,
     /// Where the cursor was at the previous poll, for the travel gate.
     last_cursor: Option<PointI>,
+    /// The button was down at some poll since the last completed click.
+    button_was_down: bool,
+    /// The cursor was travelling at some poll since it last came to rest.
+    was_travelling: bool,
+    /// A click or arrival owes us a fresh reading until this deadline.
+    roll_pending_until: Option<Instant>,
+    /// When the last visible (Shift-lifting) copy went out.
+    last_lift: Option<Instant>,
 }
 
 impl Default for ClipboardSource {
@@ -121,6 +144,10 @@ impl ClipboardSource {
             last_item: None,
             unanswered: 0,
             last_cursor: None,
+            button_was_down: false,
+            was_travelling: false,
+            roll_pending_until: None,
+            last_lift: None,
         }
     }
 
@@ -156,13 +183,13 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // A travelling cursor is never over the item the user means, and the
-        // client only answers while an item is hovered — so injecting during
-        // travel is a no-op for this monitor and a real keystroke to the game.
-        // One of those, with its momentary Shift lift, landing just as the
-        // user pressed Shift to start clicking is what kept knocking the
-        // currency-use state off their cursor. A held mouse button gets the
-        // same restraint: nothing is injected mid-click.
+        // Nothing is injected mid-click or while the cursor is travelling: the
+        // client only answers over a hovered item, so those injections would be
+        // no-ops for this monitor and real keystrokes to the game.
+        if primary_button_down() {
+            self.button_was_down = true;
+            return Ok(Self::unchanged(started.elapsed()));
+        }
         let resting = match cursor_position() {
             Some(position) => {
                 let moved = self.last_cursor.is_some_and(|last| {
@@ -174,8 +201,43 @@ impl AffixSource for ClipboardSource {
             }
             None => true,
         };
-        if !resting || primary_button_down() {
+        if !resting {
+            self.was_travelling = true;
             return Ok(Self::unchanged(started.elapsed()));
+        }
+
+        // Only two things can put new text under the cursor: a completed click
+        // rerolling the item, and the cursor arriving over a possibly different
+        // one. Each owes us a reading; nothing else does.
+        let clicked = std::mem::take(&mut self.button_was_down);
+        let arrived = std::mem::take(&mut self.was_travelling);
+        if clicked || arrived {
+            self.roll_pending_until = Some(started + ROLL_WINDOW);
+        }
+
+        // While Shift is held, every copy visibly flickers it. So none go out
+        // unless a reading is owed, and the ones that do are spaced apart.
+        // This is what confines the lifts to the moment right after a click —
+        // the one window where the user's finger is guaranteed to be up — and
+        // silences them entirely while they hover, aim, or read the tooltip.
+        // An earlier version injected on every poll and merely skipped during
+        // travel, which synchronised the injections with the click rhythm and
+        // knocked the orb off the cursor more, not less.
+        //
+        // With Shift up none of this applies: the copy is invisible, and free
+        // running keeps the baseline fresh before the first click.
+        if held_modifiers().shift {
+            let owed = self.roll_pending_until.is_some_and(|until| started < until);
+            if !owed {
+                return Ok(Self::unchanged(started.elapsed()));
+            }
+            if self
+                .last_lift
+                .is_some_and(|at| started.saturating_duration_since(at) < LIFT_SPACING)
+            {
+                return Ok(Self::unchanged(started.elapsed()));
+            }
+            self.last_lift = Some(started);
         }
 
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
@@ -213,6 +275,9 @@ impl AffixSource for ClipboardSource {
         {
             return Ok(Self::unchanged(started.elapsed()));
         }
+
+        // The reading a click or arrival owed us has arrived; stop chasing it.
+        self.roll_pending_until = None;
 
         let Ok(item) = parse(&outcome.text) else {
             // Readable clipboard, unreadable item — the cursor is over
