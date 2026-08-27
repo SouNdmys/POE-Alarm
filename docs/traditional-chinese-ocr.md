@@ -1,4 +1,9 @@
-# 繁體中文 OCR 生产说明
+# 繁體中文 OCR 生产说明(历史存档)
+
+> **此文档记录的是 1.0 之前的 OCR 识别路径,已不适用于当前版本。**
+> 当前版本改为读取客户端 Ctrl+C 写出的物品文本,不再做图像识别,
+> 因此**不需要安装任何 Windows OCR 语言包**。这里保留的是当时的
+> 实测数据与边界结论,供日后参考。
 
 POE Alarm 从 0.4.4 起将繁中识别与 POE1 English 路径完全分开：POE1 English 继续使用
 已经验证过的 `WindowsOcrRecognizer`；繁中由 `WindowsChineseOcrRecognizer` 处理整张
