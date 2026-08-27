@@ -59,11 +59,15 @@ const ROLL_WINDOW: Duration = Duration::from_millis(1200);
 
 /// Minimum gap between copies whose Shift lift the user can see.
 ///
-/// While Shift is held every injection visibly flickers it — the comparison
-/// tooltip blinks, and a click landing inside the flicker goes out unshifted
-/// and eats the orb. Spacing the visible ones caps that exposure; invisible
-/// copies (Shift up) are not paced at all.
-const LIFT_SPACING: Duration = Duration::from_millis(35);
+/// This is the field-validated chase rate: the experimental branch polled at
+/// 15ms and the user confirmed reliable detection at an 80ms click cadence
+/// with tolerable interference. A 35ms first cut re-opened the miss window —
+/// the roll lands 40-70ms after the click and the next click comes at 80ms,
+/// so with copies 35ms apart a roll arriving between two of them was routinely
+/// one click too late. What actually protects the orb is not this spacing but
+/// the gates around it: no copies mid-press, mid-travel, or while nothing is
+/// owed. Invisible copies (Shift up) are not paced at all.
+const LIFT_SPACING: Duration = Duration::from_millis(15);
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
