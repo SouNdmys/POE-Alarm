@@ -16,7 +16,8 @@ use poe_alarm_monitoring::{
     StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
+    ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
+    game_process_outranks_us,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -46,6 +47,12 @@ const COPY_DEADLINE: Duration = Duration::from_millis(12);
 /// item is hovered. The streak earns a report only when the integrity
 /// comparison confirms the game outranks this process.
 const SILENT_FAILURE_STREAK: u32 = 60;
+
+/// How far the cursor may drift between polls and still count as resting.
+///
+/// A hand trembles by a pixel or two while spam-clicking one spot; travelling
+/// to an item covers tens of pixels per poll. Nothing meaningful lives between.
+const CURSOR_REST_TOLERANCE: i32 = 3;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
@@ -99,6 +106,8 @@ pub struct ClipboardSource {
     last_item: Option<ParsedItem>,
     /// Consecutive unanswered copies while the game held focus.
     unanswered: u32,
+    /// Where the cursor was at the previous poll, for the travel gate.
+    last_cursor: Option<PointI>,
 }
 
 impl Default for ClipboardSource {
@@ -115,6 +124,7 @@ impl ClipboardSource {
             last_payload: None,
             last_item: None,
             unanswered: 0,
+            last_cursor: None,
         }
     }
 
@@ -150,24 +160,36 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // There is deliberately no gate here beyond the game having focus.
-        //
-        // Two used to stand in this spot — one skipping polls while the mouse
-        // button was down, one while the cursor was travelling — and both
-        // existed to keep the Shift lift away from the user's own keystrokes.
-        // The lift is gone: the chord touches nothing the user is holding, so
-        // an injection during travel costs a keystroke the client ignores and
-        // nothing else. Meanwhile each gate skipped polls at the exact moment
-        // a roll lands, and the travel one did it unpredictably, because the
-        // distance a cursor covers between two polls depends on how long the
-        // previous poll happened to take. Expressing it as a speed did not
-        // help: at an eleven-millisecond poll the two-pixel recoil of a click
-        // reads as two hundred pixels per second, so the same physical twitch
-        // gated or did not gate depending on timing noise. That is what made
-        // detection unstable at every cadence rather than slow at fast ones.
-        //
-        // Polling straight through is also what the experimental branch did,
-        // which is the configuration that was ever measured reliable at 80ms.
+        // Nothing is injected while the cursor is travelling: a travelling
+        // cursor is never over the item the user means, so the client would
+        // not answer. There is deliberately no mid-click gate any more. It
+        // existed to keep the Shift lift away from the user's presses; with
+        // the lift gone the chord touches nothing of theirs, and pausing for
+        // the whole of a macro's hold time was costing the probe exactly the
+        // window it needed — at an 80ms cadence with a 40ms hold, half of
+        // every cycle went dark.
+        let resting = match cursor_position() {
+            Some(position) => {
+                let moved = self.last_cursor.is_some_and(|last| {
+                    (position.x - last.x).abs() > CURSOR_REST_TOLERANCE
+                        || (position.y - last.y).abs() > CURSOR_REST_TOLERANCE
+                });
+                self.last_cursor = Some(position);
+                !moved
+            }
+            None => true,
+        };
+        if !resting {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
+
+        // No pacing beyond the monitor's own. The injected chord leaves the
+        // user's modifiers alone, so a copy has no visible effect and there is
+        // nothing to ration. Three generations of click-gating, chase windows
+        // and keepalives existed to ration a Shift flicker that a misdiagnosis
+        // had made necessary; with the lift gone, free running is both the
+        // simplest and the fastest this has ever been.
+
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
             // The client goes quiet for the duration of a craft, so a missing
