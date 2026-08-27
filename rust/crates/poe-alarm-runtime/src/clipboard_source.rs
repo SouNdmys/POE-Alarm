@@ -50,12 +50,25 @@ const SILENT_FAILURE_STREAK: u32 = 60;
 /// to an item covers tens of pixels per poll. Nothing meaningful lives between.
 const CURSOR_REST_TOLERANCE: i32 = 3;
 
-/// How long after a click the new roll is worth chasing.
+/// How long crafting is presumed to continue after its last sign of life.
 ///
-/// The reroll is a server round trip, usually well under 200ms; the rest is
-/// headroom for a lag spike. Once it expires the click is presumed to have
-/// landed on nothing, and chasing stops rather than lifting Shift forever.
-const ROLL_WINDOW: Duration = Duration::from_millis(1200);
+/// A sign of life is a click seen at the button, or the item text changing —
+/// the second one matters most, because a macro's press can last a couple of
+/// milliseconds and slip entirely between two polls. Requiring every click to
+/// be witnessed made machine-cadence crafting systematically one click late:
+/// each unseen click left its roll unread until the next seen one. Text
+/// changing cannot be missed the same way, so it keeps the mode alive on its
+/// own once crafting has begun.
+const CRAFTING_HYSTERESIS: Duration = Duration::from_secs(2);
+
+/// How often to copy while Shift is held but nothing suggests crafting.
+///
+/// This is the safety net under the hysteresis: if the very first click of a
+/// burst is one of the unseen ones, the keepalive still notices the changed
+/// text within this bound and opens crafting mode. Four lifts a second while
+/// someone holds Shift over an item is visible if you look for it; the hundred
+/// a second this replaced was a strobe.
+const IDLE_KEEPALIVE: Duration = Duration::from_millis(150);
 
 /// Minimum gap between copies whose Shift lift the user can see.
 ///
@@ -125,10 +138,8 @@ pub struct ClipboardSource {
     last_cursor: Option<PointI>,
     /// The button was down at some poll since the last completed click.
     button_was_down: bool,
-    /// The cursor was travelling at some poll since it last came to rest.
-    was_travelling: bool,
-    /// A click or arrival owes us a fresh reading until this deadline.
-    roll_pending_until: Option<Instant>,
+    /// Crafting is presumed in progress until this deadline.
+    crafting_until: Option<Instant>,
     /// When the last visible (Shift-lifting) copy went out.
     last_lift: Option<Instant>,
 }
@@ -149,8 +160,7 @@ impl ClipboardSource {
             unanswered: 0,
             last_cursor: None,
             button_was_down: false,
-            was_travelling: false,
-            roll_pending_until: None,
+            crafting_until: None,
             last_lift: None,
         }
     }
@@ -206,38 +216,35 @@ impl AffixSource for ClipboardSource {
             None => true,
         };
         if !resting {
-            self.was_travelling = true;
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // Only two things can put new text under the cursor: a completed click
-        // rerolling the item, and the cursor arriving over a possibly different
-        // one. Each owes us a reading; nothing else does.
-        let clicked = std::mem::take(&mut self.button_was_down);
-        let arrived = std::mem::take(&mut self.was_travelling);
-        if clicked || arrived {
-            self.roll_pending_until = Some(started + ROLL_WINDOW);
+        // A click seen at the button opens crafting mode. It is only an
+        // opener: detection inside the mode never depends on witnessing any
+        // particular click, because a macro's press can last two milliseconds
+        // and vanish between polls. Gating each reading on its own click did
+        // exactly that, and machine-cadence crafting came out one click late
+        // every time.
+        if std::mem::take(&mut self.button_was_down) {
+            self.crafting_until = Some(started + CRAFTING_HYSTERESIS);
         }
 
-        // While Shift is held, every copy visibly flickers it. So none go out
-        // unless a reading is owed, and the ones that do are spaced apart.
-        // This is what confines the lifts to the moment right after a click —
-        // the one window where the user's finger is guaranteed to be up — and
-        // silences them entirely while they hover, aim, or read the tooltip.
-        // An earlier version injected on every poll and merely skipped during
-        // travel, which synchronised the injections with the click rhythm and
-        // knocked the orb off the cursor more, not less.
-        //
-        // With Shift up none of this applies: the copy is invisible, and free
-        // running keeps the baseline fresh before the first click.
+        // While Shift is held every copy visibly flickers it, so their rate is
+        // matched to what the moment needs: the field-validated chase rate
+        // while crafting, a slow keepalive otherwise. The keepalive is what
+        // catches a first click that slipped between polls — its changed text
+        // reopens crafting mode. With Shift up none of this applies: the copy
+        // is invisible, and free running keeps the baseline fresh.
         if held_modifiers().shift {
-            let owed = self.roll_pending_until.is_some_and(|until| started < until);
-            if !owed {
-                return Ok(Self::unchanged(started.elapsed()));
-            }
+            let crafting = self.crafting_until.is_some_and(|until| started < until);
+            let spacing = if crafting {
+                LIFT_SPACING
+            } else {
+                IDLE_KEEPALIVE
+            };
             if self
                 .last_lift
-                .is_some_and(|at| started.saturating_duration_since(at) < LIFT_SPACING)
+                .is_some_and(|at| started.saturating_duration_since(at) < spacing)
             {
                 return Ok(Self::unchanged(started.elapsed()));
             }
@@ -280,8 +287,9 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // The reading a click or arrival owed us has arrived; stop chasing it.
-        self.roll_pending_until = None;
+        // Changed text is the one sign of crafting that cannot slip between
+        // polls; it keeps the mode alive even when every click does.
+        self.crafting_until = Some(Instant::now() + CRAFTING_HYSTERESIS);
 
         let Ok(item) = parse(&outcome.text) else {
             // Readable clipboard, unreadable item — the cursor is over
