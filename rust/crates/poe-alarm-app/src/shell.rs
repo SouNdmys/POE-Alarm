@@ -288,6 +288,16 @@ impl AppShell {
                         self.push_log(LogKind::Meta, self.t().log_hotkey_start.to_owned());
                     }
                 }
+                PlatformEvent::ItemUnderCursor(item_text) => {
+                    let origin = self.t().log_check_under_cursor;
+                    self.run_item_check(item_text, origin, cx);
+                }
+                PlatformEvent::NoItemUnderCursor => {
+                    self.notice = Some((
+                        StatusKind::Warning,
+                        self.t().notice_no_item_under_cursor.into(),
+                    ));
+                }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
                         backend.settings.hud_placement = poe_alarm_settings::HudPlacement {
@@ -1004,9 +1014,18 @@ impl AppShell {
             cx.notify();
             return;
         }
+        self.run_item_check(item_text, text.log_check_prefix, cx);
+    }
+
+    /// Runs one rule check over item text, whatever produced it.
+    ///
+    /// `origin` names the source in the log so a hotkey check and a pasted one
+    /// stay tellable apart.
+    fn run_item_check(&mut self, item_text: String, origin: &'static str, cx: &mut Context<Self>) {
+        let text = self.t();
         if let Some(backend) = &mut self.backend {
             match backend.check_item(item_text) {
-                Ok(()) => self.push_log(LogKind::Meta, text.log_check_prefix.to_owned()),
+                Ok(()) => self.push_log(LogKind::Meta, origin.to_owned()),
                 Err(e) => {
                     self.notice = Some((StatusKind::Error, e.clone().into()));
                     self.push_log(

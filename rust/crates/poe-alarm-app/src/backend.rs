@@ -16,9 +16,13 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use poe_alarm_settings::{AppSettings, SettingsStore};
 
 /// 平台事件(全局热键 / 浮窗拖动),由后台线程投递、UI 轮询消费。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum PlatformEvent {
     HotKeyStart,
+    /// 光标下物品的 Ctrl+C 原文,已在热键线程上取好。
+    ItemUnderCursor(String),
+    /// 取不到物品文本(游戏没在前台,或光标不在物品上)。
+    NoItemUnderCursor,
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
     HudMoved(f64, f64),
 }
@@ -507,6 +511,14 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
             {
                 let event = match action {
                     HotKeyAction::StartMonitoring => PlatformEvent::HotKeyStart,
+                    // Copied here rather than on the UI thread: the hotkey
+                    // fires while the game holds focus and the cursor is still
+                    // over the item, and both stop being true the moment the
+                    // user looks away.
+                    HotKeyAction::CheckItemUnderCursor => match copy_item_under_cursor() {
+                        Some(text) => PlatformEvent::ItemUnderCursor(text),
+                        None => PlatformEvent::NoItemUnderCursor,
+                    },
                     HotKeyAction::StopOrAcknowledge => continue,
                 };
                 if tx.send(event).is_err() {
@@ -516,6 +528,24 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
         }
     });
     id_rx.recv().ok()
+}
+
+/// Reads the item the cursor is resting on, or `None` if there is not one.
+///
+/// A far longer deadline than the monitor uses. That one is short because a
+/// slow answer means a craft is in flight and waiting would blind it; here the
+/// user has asked a direct question and is waiting for the reply.
+#[cfg(windows)]
+fn copy_item_under_cursor() -> Option<String> {
+    use poe_alarm_platform_win::{KeyMethod, copy_hovered_item, game_is_foreground};
+
+    if !game_is_foreground() {
+        return None;
+    }
+    copy_hovered_item(std::time::Duration::from_millis(250), KeyMethod::default())
+        .ok()
+        .map(|outcome| outcome.text)
+        .filter(|text| poe_alarm_clipboard::looks_like_item(text))
 }
 
 #[cfg(windows)]

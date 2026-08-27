@@ -376,6 +376,7 @@ impl AppShell {
                                 .v_flex()
                                 .gap(px(3.))
                                 .child(hotkey_row("Ctrl⇧F10", t.help_hotkey_start))
+                                .child(hotkey_row("Ctrl⇧F11", t.help_hotkey_check))
                                 .child(hotkey_row("Ctrl⇧F12", t.help_hotkey_stop)),
                         )
                         .child(section(t.help_rules_title))
@@ -1076,7 +1077,8 @@ impl AppShell {
                             .hover(|s| s.bg(c(HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| this.check_item(cx)))
                             .child(t.check_item_button),
-                    ),
+                    )
+                    .child(hotkey_chips(&["Ctrl", "\u{21e7}", "F11"])),
             )
             .child(
                 div()

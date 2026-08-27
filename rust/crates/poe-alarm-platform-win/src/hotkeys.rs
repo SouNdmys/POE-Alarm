@@ -6,27 +6,37 @@ use crate::{NativeWindowHandle, PlatformError};
 
 const WM_HOTKEY: u32 = 0x0312;
 const VK_F10: u32 = 0x79;
+const VK_F11: u32 = 0x7A;
 const VK_F12: u32 = 0x7B;
 const ERROR_HOTKEY_ALREADY_REGISTERED: u32 = 1409;
 
-// These preserve the stable .NET identifiers ('POE' and 'POG'). 'POF'
-// (0x50_4F_46) belonged to region selection and is now free.
+// These preserve the stable .NET identifiers ('POE', 'POF' and 'POG'). 'POF'
+// and its Ctrl+Shift+F11 binding used to select the capture region; the region
+// is gone, and checking the item under the cursor inherits both.
 const ACKNOWLEDGE_ID: i32 = 0x50_4F_45;
+const CHECK_ITEM_ID: i32 = 0x50_4F_46;
 const START_ID: i32 = 0x50_4F_47;
 
-/// Semantic action emitted by the stable global shortcuts.
+/// Semantic action emitted by the three stable global shortcuts.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum HotKeyAction {
     StartMonitoring,
+    /// Read the item under the cursor right now and run the rules over it.
+    CheckItemUnderCursor,
     StopOrAcknowledge,
 }
 
 impl HotKeyAction {
-    const ALL: [Self; 2] = [Self::StartMonitoring, Self::StopOrAcknowledge];
+    const ALL: [Self; 3] = [
+        Self::StartMonitoring,
+        Self::CheckItemUnderCursor,
+        Self::StopOrAcknowledge,
+    ];
 
     const fn identifier(self) -> i32 {
         match self {
             Self::StartMonitoring => START_ID,
+            Self::CheckItemUnderCursor => CHECK_ITEM_ID,
             Self::StopOrAcknowledge => ACKNOWLEDGE_ID,
         }
     }
@@ -34,7 +44,8 @@ impl HotKeyAction {
     const fn index(self) -> usize {
         match self {
             Self::StartMonitoring => 0,
-            Self::StopOrAcknowledge => 1,
+            Self::CheckItemUnderCursor => 1,
+            Self::StopOrAcknowledge => 2,
         }
     }
 }
@@ -168,6 +179,10 @@ impl HotKeyConfig {
     pub const fn binding(self, action: HotKeyAction) -> HotKeyBinding {
         match action {
             HotKeyAction::StartMonitoring => self.start.binding(),
+            HotKeyAction::CheckItemUnderCursor => HotKeyBinding::new(
+                HotKeyModifiers::CONTROL.union(HotKeyModifiers::SHIFT),
+                VK_F11,
+            ),
             HotKeyAction::StopOrAcknowledge => HotKeyBinding::new(
                 HotKeyModifiers::CONTROL.union(HotKeyModifiers::SHIFT),
                 VK_F12,
@@ -387,6 +402,10 @@ mod tests {
     #[test]
     fn fixed_bindings_match_one_point_zero() {
         let config = HotKeyConfig::default();
+        assert_eq!(
+            config.binding(HotKeyAction::CheckItemUnderCursor),
+            HotKeyBinding::new(HotKeyModifiers::CONTROL | HotKeyModifiers::SHIFT, VK_F11)
+        );
         assert_eq!(
             config.binding(HotKeyAction::StopOrAcknowledge),
             HotKeyBinding::new(HotKeyModifiers::CONTROL | HotKeyModifiers::SHIFT, VK_F12)
