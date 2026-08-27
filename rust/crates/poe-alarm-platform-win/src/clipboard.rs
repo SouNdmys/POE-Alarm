@@ -142,8 +142,6 @@ pub struct CopyOutcome {
     pub read_time: Duration,
     /// How many `OpenClipboard` attempts the read needed.
     pub open_attempts: u32,
-    /// Modifiers the user was physically holding, which had to be lifted.
-    pub suppressed_modifiers: HeldModifiers,
 }
 
 impl CopyOutcome {

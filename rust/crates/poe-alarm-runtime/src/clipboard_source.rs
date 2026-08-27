@@ -17,7 +17,7 @@ use poe_alarm_monitoring::{
 };
 use poe_alarm_platform_win::{
     ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us, held_modifiers, primary_button_down,
+    game_process_outranks_us, primary_button_down,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -49,38 +49,6 @@ const SILENT_FAILURE_STREAK: u32 = 60;
 /// A hand trembles by a pixel or two while spam-clicking one spot; travelling
 /// to an item covers tens of pixels per poll. Nothing meaningful lives between.
 const CURSOR_REST_TOLERANCE: i32 = 3;
-
-/// How long crafting is presumed to continue after its last sign of life.
-///
-/// A sign of life is a click seen at the button, or the item text changing —
-/// the second one matters most, because a macro's press can last a couple of
-/// milliseconds and slip entirely between two polls. Requiring every click to
-/// be witnessed made machine-cadence crafting systematically one click late:
-/// each unseen click left its roll unread until the next seen one. Text
-/// changing cannot be missed the same way, so it keeps the mode alive on its
-/// own once crafting has begun.
-const CRAFTING_HYSTERESIS: Duration = Duration::from_secs(2);
-
-/// How often to copy while Shift is held but nothing suggests crafting.
-///
-/// This is the safety net under the hysteresis: if the very first click of a
-/// burst is one of the unseen ones, the keepalive still notices the changed
-/// text within this bound and opens crafting mode. Four lifts a second while
-/// someone holds Shift over an item is visible if you look for it; the hundred
-/// a second this replaced was a strobe.
-const IDLE_KEEPALIVE: Duration = Duration::from_millis(150);
-
-/// Minimum gap between copies whose Shift lift the user can see.
-///
-/// This is the field-validated chase rate: the experimental branch polled at
-/// 15ms and the user confirmed reliable detection at an 80ms click cadence
-/// with tolerable interference. A 35ms first cut re-opened the miss window —
-/// the roll lands 40-70ms after the click and the next click comes at 80ms,
-/// so with copies 35ms apart a roll arriving between two of them was routinely
-/// one click too late. What actually protects the orb is not this spacing but
-/// the gates around it: no copies mid-press, mid-travel, or while nothing is
-/// owed. Invisible copies (Shift up) are not paced at all.
-const LIFT_SPACING: Duration = Duration::from_millis(15);
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
@@ -136,12 +104,6 @@ pub struct ClipboardSource {
     unanswered: u32,
     /// Where the cursor was at the previous poll, for the travel gate.
     last_cursor: Option<PointI>,
-    /// The button was down at some poll since the last completed click.
-    button_was_down: bool,
-    /// Crafting is presumed in progress until this deadline.
-    crafting_until: Option<Instant>,
-    /// When the last visible (Shift-lifting) copy went out.
-    last_lift: Option<Instant>,
 }
 
 impl Default for ClipboardSource {
@@ -159,9 +121,6 @@ impl ClipboardSource {
             last_item: None,
             unanswered: 0,
             last_cursor: None,
-            button_was_down: false,
-            crafting_until: None,
-            last_lift: None,
         }
     }
 
@@ -201,7 +160,6 @@ impl AffixSource for ClipboardSource {
         // client only answers over a hovered item, so those injections would be
         // no-ops for this monitor and real keystrokes to the game.
         if primary_button_down() {
-            self.button_was_down = true;
             return Ok(Self::unchanged(started.elapsed()));
         }
         let resting = match cursor_position() {
@@ -219,37 +177,12 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // A click seen at the button opens crafting mode. It is only an
-        // opener: detection inside the mode never depends on witnessing any
-        // particular click, because a macro's press can last two milliseconds
-        // and vanish between polls. Gating each reading on its own click did
-        // exactly that, and machine-cadence crafting came out one click late
-        // every time.
-        if std::mem::take(&mut self.button_was_down) {
-            self.crafting_until = Some(started + CRAFTING_HYSTERESIS);
-        }
-
-        // While Shift is held every copy visibly flickers it, so their rate is
-        // matched to what the moment needs: the field-validated chase rate
-        // while crafting, a slow keepalive otherwise. The keepalive is what
-        // catches a first click that slipped between polls — its changed text
-        // reopens crafting mode. With Shift up none of this applies: the copy
-        // is invisible, and free running keeps the baseline fresh.
-        if held_modifiers().shift {
-            let crafting = self.crafting_until.is_some_and(|until| started < until);
-            let spacing = if crafting {
-                LIFT_SPACING
-            } else {
-                IDLE_KEEPALIVE
-            };
-            if self
-                .last_lift
-                .is_some_and(|at| started.saturating_duration_since(at) < spacing)
-            {
-                return Ok(Self::unchanged(started.elapsed()));
-            }
-            self.last_lift = Some(started);
-        }
+        // No pacing beyond the monitor's own. The injected chord leaves the
+        // user's modifiers alone, so a copy has no visible effect and there is
+        // nothing to ration. Three generations of click-gating, chase windows
+        // and keepalives existed to ration a Shift flicker that a misdiagnosis
+        // had made necessary; with the lift gone, free running is both the
+        // simplest and the fastest this has ever been.
 
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
@@ -286,10 +219,6 @@ impl AffixSource for ClipboardSource {
         {
             return Ok(Self::unchanged(started.elapsed()));
         }
-
-        // Changed text is the one sign of crafting that cannot slip between
-        // polls; it keeps the mode alive even when every click does.
-        self.crafting_until = Some(Instant::now() + CRAFTING_HYSTERESIS);
 
         let Ok(item) = parse(&outcome.text) else {
             // Readable clipboard, unreadable item — the cursor is over

@@ -459,15 +459,16 @@ mod app {
                     }
                     *baseline = Some(outcome.text);
 
-                    let modifiers = outcome.suppressed_modifiers;
                     println!(
                         "  #{index:<4} copies {copies:<3} first {:<8} verdict {:<8} {:<5} ({} lines){}",
                         format_millis(first_copy.unwrap_or_default()),
                         format_millis(decided),
                         verdict.label(),
                         verdict.line_count(),
-                        if modifiers.any() {
-                            format!("  [held {modifiers}]")
+                        if false {
+                            // Held-modifier reporting went with the lift: the
+                            // chord no longer touches the user's modifiers.
+                            String::new()
                         } else {
                             String::new()
                         }
@@ -1336,7 +1337,6 @@ mod app {
         let mut failures: Vec<String> = Vec::new();
         let mut failure_count = 0_usize;
         let mut first_text: Option<String> = None;
-        let mut with_modifiers = 0_usize;
 
         for index in 0..samples {
             if !game_is_foreground() {
@@ -1347,9 +1347,6 @@ mod app {
                 Ok(outcome) => {
                     if first_text.is_none() {
                         first_text = Some(outcome.text.clone());
-                    }
-                    if outcome.suppressed_modifiers.any() {
-                        with_modifiers += 1;
                     }
                     latencies.push(outcome.total());
                 }
@@ -1367,7 +1364,6 @@ mod app {
         println!("=== clipboard check ===");
         println!("  succeeded  {}/{samples}", latencies.len());
         println!("  failed     {failure_count}");
-        println!("  copies that had to lift a held modifier  {with_modifiers}");
         println!("{}", latencies.summary("round trip"));
         for failure in &failures {
             println!("    {failure}");

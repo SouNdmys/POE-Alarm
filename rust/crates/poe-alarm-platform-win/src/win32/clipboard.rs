@@ -51,8 +51,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// Set 1 scan codes for the keys involved.
 const SCAN_LCONTROL: u16 = 0x1D;
 const SCAN_C: u16 = 0x2E;
-const SCAN_LSHIFT: u16 = 0x2A;
-const SCAN_LALT: u16 = 0x38;
 
 pub(crate) fn clipboard_sequence_number() -> u32 {
     // SAFETY: no arguments, no output buffer.
@@ -64,7 +62,18 @@ pub(crate) fn clipboard_sequence_number() -> u32 {
 /// Modifiers the user is physically holding are lifted for the duration and
 /// pressed back afterwards. Continuous crafting holds Shift, and without this
 /// the client receives Ctrl+Shift+C and copies nothing.
-fn send_ctrl_c(method: KeyMethod, held: HeldModifiers) -> Result<(), ClipboardError> {
+/// Injects the copy chord, leaving the user's held modifiers alone.
+///
+/// The client answers Ctrl+C with Shift held (field-verified by pressing it by
+/// hand mid-craft) and answers Ctrl+Alt+C with the advanced text, which parses
+/// the same. An earlier version lifted and restored held Shift/Alt around the
+/// chord, built on a misdiagnosis: copies really did fail while Shift was
+/// held, but because Shift is held exactly while crafting and the client goes
+/// quiet mid-craft — the modifier was never the cause. That lift flickered the
+/// comparison tooltip, and a click landing inside the flicker went out
+/// unshifted and consumed the orb. Not touching the modifiers removes the
+/// entire failure mode.
+fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
     let key = |vk: VIRTUAL_KEY, scan: u16, up: bool| {
         let mut flags = if up {
             KEYEVENTF_KEYUP
@@ -92,25 +101,12 @@ fn send_ctrl_c(method: KeyMethod, held: HeldModifiers) -> Result<(), ClipboardEr
         }
     };
 
-    let mut inputs = Vec::with_capacity(8);
-    if held.shift {
-        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, true));
-    }
-    if held.alt {
-        inputs.push(key(VK_MENU, SCAN_LALT, true));
-    }
-    inputs.extend([
+    let inputs = [
         key(VK_CONTROL, SCAN_LCONTROL, false),
         key(VK_C, SCAN_C, false),
         key(VK_C, SCAN_C, true),
         key(VK_CONTROL, SCAN_LCONTROL, true),
-    ]);
-    if held.alt {
-        inputs.push(key(VK_MENU, SCAN_LALT, false));
-    }
-    if held.shift {
-        inputs.push(key(VK_SHIFT, SCAN_LSHIFT, false));
-    }
+    ];
 
     let expected = inputs.len() as u32;
     // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
@@ -130,9 +126,8 @@ pub(crate) fn copy_hovered_item(
     method: KeyMethod,
 ) -> Result<CopyOutcome, ClipboardError> {
     let baseline = clipboard_sequence_number();
-    let held = held_modifiers();
     let started = Instant::now();
-    send_ctrl_c(method, held)?;
+    send_ctrl_c(method)?;
 
     loop {
         if clipboard_sequence_number() != baseline {
@@ -162,7 +157,6 @@ pub(crate) fn copy_hovered_item(
         client_round_trip,
         read_time: read_started.elapsed(),
         open_attempts,
-        suppressed_modifiers: held,
     })
 }
 
