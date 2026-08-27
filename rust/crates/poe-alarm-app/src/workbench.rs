@@ -277,9 +277,23 @@ impl AppShell {
                     .text_color(c(TEXT_META))
                     .child("settings.json")
                     .child(match &self.notice {
+                        // An error here means monitoring is not working. It sat
+                        // in the same grey metadata strip as the settings path,
+                        // clipped to one line, and went unread.
+                        Some((StatusKind::Error, notice)) => div()
+                            .flex_1()
+                            .min_w_0()
+                            .px_2()
+                            .py(px(2.))
+                            .bg(c(DANGER_WASH))
+                            .border_l_2()
+                            .border_color(c(DANGER))
+                            .text_color(c(DANGER))
+                            .child(notice.clone()),
                         Some((kind, notice)) => div()
+                            .flex_1()
+                            .min_w_0()
                             .text_color(c(kind.text()))
-                            .whitespace_nowrap()
                             .child(notice.clone()),
                         None => div().text_color(c(TEXT_META)).child(text.unchanged),
                     }),
@@ -516,7 +530,11 @@ impl AppShell {
                 .child(label_el)
                 .child(control)
                 .child(
+                    // flex_1 + min_w_0 is what lets a flex child wrap instead
+                    // of running past the window edge.
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_size(fs(FS_10_5))
                         .text_color(c(TEXT_META))
                         .child(hint),
@@ -1101,6 +1119,14 @@ impl AppShell {
                     .border_color(c(HAIRLINE_SOFT))
                     .child(Input::new(&self.s.item_text_input).h_full()),
             )
-            .child(div().flex_1().min_h_0().child(self.log_block(15)))
+            .child(
+                div().flex_1().min_h_0().child(
+                    div()
+                        .id("wb-log-scroll")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .child(self.log_block(200)),
+                ),
+            )
     }
 }

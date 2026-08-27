@@ -420,6 +420,28 @@ pub(crate) fn foreground_process_outranks_us() -> bool {
     !readable
 }
 
+pub(crate) fn confirm_relaunch_elevated(title: &str, body: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IDYES, MB_ICONWARNING, MB_SETFOREGROUND, MB_SYSTEMMODAL, MB_YESNO, MessageBoxW,
+    };
+
+    let title = HSTRING::from(title);
+    let body = HSTRING::from(body);
+    // SYSTEMMODAL and SETFOREGROUND because the user is looking at the game,
+    // not at this application, which is the entire reason a status line did
+    // not reach them.
+    // SAFETY: both strings outlive the call; a null owner window is valid.
+    let answer = unsafe {
+        MessageBoxW(
+            None,
+            &body,
+            &title,
+            MB_YESNO | MB_ICONWARNING | MB_SYSTEMMODAL | MB_SETFOREGROUND,
+        )
+    };
+    answer == IDYES
+}
+
 /// Starts an elevated copy of this executable and waits for it to exist.
 ///
 /// Uses ShellExecuteExW rather than ShellExecuteW because the caller has to know

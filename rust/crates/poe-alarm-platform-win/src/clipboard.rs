@@ -300,6 +300,28 @@ pub fn foreground_window_description() -> (String, String) {
     }
 }
 
+/// Asks the user, in a system-modal box, whether to restart elevated.
+///
+/// A line of text in a status bar is not an answer to "monitoring silently
+/// cannot work": the user has already gone back to the game by the time it
+/// appears. This takes the foreground and blocks, because the alternative is
+/// crafting for an hour against a monitor that was never going to fire.
+///
+/// Returns true when the user agrees. Button labels come from Windows, so they
+/// are already in the user's own language.
+#[must_use]
+pub fn confirm_relaunch_elevated(title: &str, body: &str) -> bool {
+    #[cfg(windows)]
+    {
+        crate::win32::confirm_relaunch_elevated(title, body)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (title, body);
+        false
+    }
+}
+
 /// Where the game window is, if it can be found.
 ///
 /// Answers one question: which monitor is the player looking at. `None` is an

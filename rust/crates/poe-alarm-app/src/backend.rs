@@ -21,6 +21,8 @@ pub enum PlatformEvent {
     HotKeyStart,
     /// 光标下物品的 Ctrl+C 原文,已在热键线程上取好。
     ItemUnderCursor(String),
+    /// 用户在提权弹窗里点了「是」。
+    ElevationConfirmed,
     /// 全局热键一个都没注册上(被别的软件占用)。
     ///
     /// 注册是全有全无的,所以这条一旦出现就意味着 F10/F11 都不会响应。
@@ -164,6 +166,25 @@ impl Backend {
     }
 
     /// 排空平台事件(热键)。
+    /// Puts the elevation question in front of the user and reports the answer.
+    ///
+    /// On its own thread: MessageBoxW runs a nested modal message loop, and
+    /// running one inside a GPUI frame would block the renderer for as long as
+    /// the box is up. The answer comes back through the same channel the
+    /// hotkey thread uses.
+    #[cfg(windows)]
+    pub fn ask_to_relaunch_elevated(&self, title: String, body: String) {
+        let tx = self.platform_tx.clone();
+        std::thread::spawn(move || {
+            if poe_alarm_platform_win::confirm_relaunch_elevated(&title, &body) {
+                let _ = tx.send(PlatformEvent::ElevationConfirmed);
+            }
+        });
+    }
+
+    #[cfg(not(windows))]
+    pub fn ask_to_relaunch_elevated(&self, _title: String, _body: String) {}
+
     pub fn poll_platform(&mut self) -> Vec<PlatformEvent> {
         let mut out = Vec::new();
         while let Ok(event) = self.platform_rx.try_recv() {

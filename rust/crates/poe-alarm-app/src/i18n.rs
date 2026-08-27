@@ -138,6 +138,8 @@ pub struct Text {
     pub notice_no_item_under_cursor: &'static str,
     pub notice_game_not_focused: &'static str,
     pub notice_hotkeys_unavailable: &'static str,
+    pub elevate_prompt_title: &'static str,
+    pub elevate_prompt_body: &'static str,
     pub notice_copy_refused: &'static str,
     pub notice_copy_refused_elevated: &'static str,
     pub log_check_failed_prefix: &'static str,
@@ -315,6 +317,13 @@ pub static ZH: Text = Text {
     notice_no_item_under_cursor: "光标下不是一件物品。把鼠标停在装备上再按一次",
     notice_game_not_focused: "游戏没在前台。先切回游戏,把鼠标停在装备上,再按 Ctrl⇧F11",
     notice_hotkeys_unavailable: "全局热键注册失败,可能被别的软件占用了。关掉可能抢占 Ctrl⇧F10 / F11 / F12 的程序后重启本程序",
+    elevate_prompt_title: "POE Alarm 需要管理员权限",
+    elevate_prompt_body:
+        "游戏是以管理员权限运行的(加速器常这样),Windows 因此丢弃了本程序发出的复制键。
+
+在这种状态下监控不会报警,规则写得再对也没用。
+
+现在以管理员身份重启 POE Alarm 吗?",
     notice_copy_refused: "游戏没有回应复制键。如果游戏是以管理员权限启动的(加速器常这样),请到 设置 → 权限 → 以管理员身份重启",
     notice_copy_refused_elevated: "游戏的权限比本程序高,Windows 正在丢弃复制请求。请到 设置 → 权限 → 以管理员身份重启",
     log_check_failed_prefix: "测试失败",
@@ -488,6 +497,12 @@ pub static EN: Text = Text {
     notice_no_item_under_cursor: "That is not an item. Rest the cursor on one and press it again",
     notice_game_not_focused: "The game is not in front. Switch to it, rest the cursor on an item, then press Ctrl+Shift+F11",
     notice_hotkeys_unavailable: "Global hotkeys could not be registered — another program is probably holding them. Close whatever claims Ctrl+Shift+F10 / F11 / F12 and restart POE Alarm",
+    elevate_prompt_title: "POE Alarm needs administrator rights",
+    elevate_prompt_body: "The game is running as administrator, which launchers often do, so Windows is discarding the copy key this app sends.
+
+Monitoring cannot alarm in this state, however correct your rules are.
+
+Restart POE Alarm as administrator now?",
     notice_copy_refused: "The game did not answer the copy key. If a launcher started it as administrator, use Settings -> Privileges -> Restart as administrator",
     notice_copy_refused_elevated: "The game has higher privileges than POE Alarm, so Windows is discarding the copy request. Use Settings -> Privileges -> Restart as administrator",
     log_check_failed_prefix: "Test failed",

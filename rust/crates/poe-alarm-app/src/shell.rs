@@ -6,6 +6,18 @@
 
 use std::time::{Duration, Instant};
 
+/// True when the game window outranks this process, so Windows is discarding
+/// the keystrokes sent to it.
+#[cfg(windows)]
+fn privileges_are_mismatched() -> bool {
+    poe_alarm_platform_win::foreground_process_outranks_us()
+}
+
+#[cfg(not(windows))]
+fn privileges_are_mismatched() -> bool {
+    false
+}
+
 use gpui::{Context, Div, FocusHandle, SharedString, Window, div, prelude::*, px};
 use gpui_component::{StyledExt, input::InputState};
 use poe_alarm_core::{NumericConstraint, NumericConstraintMode, ResultGroupMode};
@@ -38,6 +50,8 @@ pub struct AppShell {
     monitor_since: Option<Instant>,
     /// BitBlt 类一次性故障后的自动重启预算(成功进入监控后复位)。
     auto_restart_budget: u8,
+    /// The elevation box is offered once; declining it is an answer.
+    elevation_offered: bool,
     /// 延迟启动时刻:热键去抖(按键/IME 弹窗散场)与故障重建后的冷却。
     pending_start_at: Option<Instant>,
     /// 提示音/录屏可见性在监控中被改过:回到待机后重建运行时以生效。
@@ -145,6 +159,7 @@ impl AppShell {
             notice,
             monitor_since: None,
             auto_restart_budget: 2,
+            elevation_offered: false,
             pending_start_at: None,
             pending_runtime_reset: false,
             hud_interactive: None,
@@ -316,7 +331,9 @@ impl AppShell {
                     };
                     self.notice = Some((StatusKind::Error, detail.into()));
                     self.push_log(LogKind::Meta, detail.to_owned());
+                    self.offer_elevation(cx);
                 }
+                PlatformEvent::ElevationConfirmed => self.relaunch_elevated(cx),
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
                         backend.settings.hud_placement = poe_alarm_settings::HudPlacement {
@@ -400,11 +417,23 @@ impl AppShell {
                     self.push_log(LogKind::Meta, self.t().log_acknowledged.to_owned());
                 }
                 BridgeEvent::Fault(detail) => {
-                    self.notice = Some((StatusKind::Error, detail.clone().into()));
+                    // The runtime's own wording is English and technical. It
+                    // belongs in the log; what the user reads is this app's
+                    // copy, in this app's language.
+                    let outranked = privileges_are_mismatched();
+                    let shown = if outranked {
+                        self.t().notice_copy_refused_elevated
+                    } else {
+                        self.t().notice_backend_failed
+                    };
+                    self.notice = Some((StatusKind::Error, shown.into()));
                     self.push_log(
                         LogKind::Meta,
                         format!("{}:{detail}", self.t().log_error_prefix),
                     );
+                    if outranked {
+                        self.offer_elevation(cx);
+                    }
                     self.apply_runtime_state(BridgeState::Idle);
                     reset_runtime = true;
                     if detail.contains("BitBlt") && self.auto_restart_budget > 0 {
@@ -1034,6 +1063,25 @@ impl AppShell {
     /// exists. Exiting on "the request was submitted" tore down the UAC prompt
     /// along with the process that owned it, so the app closed and nothing
     /// else happened.
+    /// Puts the elevation question in front of the user, once per session.
+    ///
+    /// Once, because the condition repeats on every failed copy and a box that
+    /// reappears after every dismissal is worse than no box. Declining is an
+    /// answer; Settings -> Privileges is still there for changing it.
+    fn offer_elevation(&mut self, _cx: &mut Context<Self>) {
+        if self.elevation_offered {
+            return;
+        }
+        self.elevation_offered = true;
+        let text = self.t();
+        if let Some(backend) = &self.backend {
+            backend.ask_to_relaunch_elevated(
+                text.elevate_prompt_title.to_owned(),
+                text.elevate_prompt_body.to_owned(),
+            );
+        }
+    }
+
     pub fn relaunch_elevated(&mut self, cx: &mut Context<Self>) {
         #[cfg(windows)]
         {
