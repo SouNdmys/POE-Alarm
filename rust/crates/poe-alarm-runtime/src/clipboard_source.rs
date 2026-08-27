@@ -17,7 +17,7 @@ use poe_alarm_monitoring::{
 };
 use poe_alarm_platform_win::{
     ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us, primary_button_down,
+    game_process_outranks_us,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -27,8 +27,12 @@ use poe_alarm_platform_win::{
 /// it declines for the whole time a craft is in flight. Waiting it out blinds
 /// the source for exactly the window the new roll appears in, which is why
 /// this is short: measured detection lag tracked this deadline almost
-/// one-for-one (600ms deadline gave a 632ms median, 25ms gives 27ms).
-const COPY_DEADLINE: Duration = Duration::from_millis(25);
+/// one-for-one (600ms deadline gave a 632ms median, 25ms gave 27ms). The
+/// mechanism behind that ratio is the attempt that straddles the moment the
+/// client resumes: it burns its whole deadline before the next attempt can
+/// succeed instantly, so every spare millisecond here is a millisecond of
+/// detection lag. 12ms still clears the p99 of a healthy answer.
+const COPY_DEADLINE: Duration = Duration::from_millis(12);
 
 /// How many unanswered copies in a row mean something is structurally wrong.
 ///
@@ -156,12 +160,14 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // Nothing is injected mid-click or while the cursor is travelling: the
-        // client only answers over a hovered item, so those injections would be
-        // no-ops for this monitor and real keystrokes to the game.
-        if primary_button_down() {
-            return Ok(Self::unchanged(started.elapsed()));
-        }
+        // Nothing is injected while the cursor is travelling: a travelling
+        // cursor is never over the item the user means, so the client would
+        // not answer. There is deliberately no mid-click gate any more. It
+        // existed to keep the Shift lift away from the user's presses; with
+        // the lift gone the chord touches nothing of theirs, and pausing for
+        // the whole of a macro's hold time was costing the probe exactly the
+        // window it needed — at an 80ms cadence with a 40ms hold, half of
+        // every cycle went dark.
         let resting = match cursor_position() {
             Some(position) => {
                 let moved = self.last_cursor.is_some_and(|last| {
