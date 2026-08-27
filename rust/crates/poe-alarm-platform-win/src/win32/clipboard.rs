@@ -1,5 +1,6 @@
 //! Native half of the clipboard capture path.
 
+use std::thread;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::WAIT_OBJECT_0;
@@ -15,7 +16,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION, WaitForInputIdle, WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -43,6 +44,9 @@ const CF_UNICODETEXT: u32 = 13;
 /// How long the tight spin runs before the wait falls back to sleeping. Keeps
 /// the common case sub-millisecond without pinning a core through the tail.
 const SPIN_WINDOW: Duration = Duration::from_millis(4);
+
+/// How often to ask whether a relaunched copy has finished starting.
+const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// Set 1 scan codes for the keys involved.
 const SCAN_LCONTROL: u16 = 0x1D;
@@ -340,6 +344,45 @@ fn window_rect(window: HWND) -> Option<RectI> {
     )
 }
 
+/// Whether a process has put a visible top-level window on screen.
+fn shows_a_window(process: HANDLE) -> bool {
+    // SAFETY: a live handle; the id is stable for the process lifetime.
+    let pid = unsafe { windows::Win32::System::Threading::GetProcessId(process) };
+    if pid == 0 {
+        return false;
+    }
+    let mut state = (pid, false);
+    // SAFETY: the callback only writes through this pointer while EnumWindows
+    // runs, and EnumWindows is synchronous.
+    let _ = unsafe {
+        EnumWindows(
+            Some(visit_for_pid),
+            windows::Win32::Foundation::LPARAM((&raw mut state) as isize),
+        )
+    };
+    state.1
+}
+
+unsafe extern "system" fn visit_for_pid(
+    window: HWND,
+    state: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    // SAFETY: `state` is the &mut (u32, bool) handed to EnumWindows above.
+    let state = unsafe { &mut *(state.0 as *mut (u32, bool)) };
+    // SAFETY: EnumWindows hands out live top-level handles.
+    if !unsafe { IsWindowVisible(window) }.as_bool() {
+        return true.into();
+    }
+    let mut pid = 0_u32;
+    // SAFETY: `pid` is a live out-parameter.
+    unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
+    if pid == state.0 {
+        state.1 = true;
+        return false.into();
+    }
+    true.into()
+}
+
 fn enumerate_game_window() -> Option<HWND> {
     let mut found: Option<HWND> = None;
     // SAFETY: the callback below only writes through this pointer while
@@ -555,17 +598,43 @@ pub(crate) fn relaunch_elevated(
         return Err(ElevateError::Failed(0));
     }
 
-    // SAFETY: the handle came from ShellExecuteExW and is closed below.
-    let waited = unsafe { WaitForSingleObject(info.hProcess, settle.as_millis() as u32) };
-    let outcome = if waited == WAIT_OBJECT_0 {
-        let mut code = 0_u32;
-        // SAFETY: the process has exited, so its code is final.
-        let _ = unsafe { GetExitCodeProcess(info.hProcess, &raw mut code) };
-        Err(ElevateError::ExitedImmediately { code })
-    } else {
-        Ok(())
-    };
+    let outcome = wait_until_running(info.hProcess, settle);
     // SAFETY: closed exactly once, after the wait that needed it.
     let _ = unsafe { CloseHandle(info.hProcess) };
     outcome
+}
+
+/// Waits for the child to finish starting, or to die trying.
+///
+/// Returns the moment its message loop goes idle, which is Windows' own answer
+/// to "has this GUI process finished starting". Waiting out a fixed timeout
+/// instead left the old window sitting on screen for seconds after the new one
+/// had appeared.
+///
+/// Two signals, because the precise one is not always available.
+/// WaitForInputIdle wants PROCESS_QUERY_INFORMATION, and the handle
+/// ShellExecuteExW hands back for an elevated child may not carry it. Window
+/// enumeration needs no rights at all — UIPI blocks messages, not enumeration —
+/// and a visible top-level window is the same thing the user is looking for.
+///
+/// `settle` is only the ceiling, for when neither signal ever arrives.
+fn wait_until_running(process: HANDLE, settle: Duration) -> Result<(), ElevateError> {
+    let deadline = Instant::now() + settle;
+    loop {
+        // SAFETY: a live handle; a zero timeout only polls.
+        if unsafe { WaitForSingleObject(process, 0) } == WAIT_OBJECT_0 {
+            let mut code = 0_u32;
+            // SAFETY: the process has exited, so its code is final.
+            let _ = unsafe { GetExitCodeProcess(process, &raw mut code) };
+            return Err(ElevateError::ExitedImmediately { code });
+        }
+        // SAFETY: as above; 0 asks whether it is idle right now.
+        if unsafe { WaitForInputIdle(process, 0) } == 0 || shows_a_window(process) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Ok(());
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
 }
