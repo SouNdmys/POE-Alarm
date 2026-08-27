@@ -197,6 +197,8 @@ pub enum ElevateError {
     NoExecutablePath,
     /// ShellExecute refused for some other reason.
     Failed(i32),
+    /// The elevated copy started and then died before it could show a window.
+    ExitedImmediately { code: u32 },
     /// This build cannot elevate.
     Unsupported,
 }
@@ -207,6 +209,10 @@ impl std::fmt::Display for ElevateError {
             Self::Declined => formatter.write_str("the elevation prompt was declined"),
             Self::NoExecutablePath => formatter.write_str("could not locate this executable"),
             Self::Failed(code) => write!(formatter, "ShellExecute failed with code {code}"),
+            Self::ExitedImmediately { code } => write!(
+                formatter,
+                "the elevated copy started and exited with code {code} before showing a window"
+            ),
             Self::Unsupported => formatter.write_str("elevation is Windows-only"),
         }
     }
@@ -392,14 +398,14 @@ pub fn game_process_outranks_us() -> bool {
 /// once [`game_process_outranks_us`] says it is necessary.
 ///
 /// The elevated process gets a fresh console; the caller is expected to exit.
-pub fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateError> {
+pub fn relaunch_elevated(skip_arguments: &[&str], settle: Duration) -> Result<(), ElevateError> {
     #[cfg(windows)]
     {
-        crate::win32::relaunch_elevated(skip_arguments)
+        crate::win32::relaunch_elevated(skip_arguments, settle)
     }
     #[cfg(not(windows))]
     {
-        let _ = skip_arguments;
+        let _ = (skip_arguments, settle);
         Err(ElevateError::Unsupported)
     }
 }

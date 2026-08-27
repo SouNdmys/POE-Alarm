@@ -1439,7 +1439,7 @@ mod app {
         // Asked for explicitly, or already elevated and therefore a no-op.
         if options.elevate && clipboard::process_is_elevated() == Some(false) {
             println!("Requesting Administrator — accept the prompt to continue in a new window.");
-            match clipboard::relaunch_elevated(&["--elevate"]) {
+            match clipboard::relaunch_elevated(&["--elevate"], Duration::from_secs(4)) {
                 Ok(()) => return,
                 Err(error) => {
                     eprintln!("Could not relaunch elevated: {error}");

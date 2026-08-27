@@ -23,6 +23,13 @@ pub enum PlatformEvent {
     ItemUnderCursor(String),
     /// 用户在提权弹窗里点了「是」。
     ElevationConfirmed,
+    /// 提权副本已经起来了,这个实例可以退出。
+    ElevationSucceeded,
+    /// 提权失败。`detail` 是技术原因(含子进程退出码),给日志用。
+    ElevationFailed {
+        declined: bool,
+        detail: String,
+    },
     /// 全局热键一个都没注册上(被别的软件占用)。
     ///
     /// 注册是全有全无的,所以这条一旦出现就意味着 F10/F11 都不会响应。
@@ -188,6 +195,58 @@ impl Backend {
 
     #[cfg(not(windows))]
     pub fn ask_to_relaunch_elevated(&self, _title: String, _body: String) {}
+
+    /// Hands the global hotkeys back before an elevated copy tries to take them.
+    ///
+    /// Registration is all-or-nothing, so a new instance starting while this one
+    /// still holds Ctrl+Shift+F10/F11/F12 comes up with none of them. Ending the
+    /// hotkey thread's message loop drops its HotKeyManager, whose Drop
+    /// unregisters.
+    #[cfg(windows)]
+    pub fn release_hotkeys(&mut self) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+
+        if let Some(thread) = self.hotkey_thread.take() {
+            // SAFETY: posting to a thread this process owns.
+            let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        }
+    }
+
+    /// Relaunches elevated on a background thread and reports what happened.
+    ///
+    /// Off the UI thread because it waits on the new process, and reporting
+    /// rather than assuming because "the process was created" is not "the
+    /// process is running" — the caller must not exit until the replacement has
+    /// survived its own startup.
+    #[cfg(windows)]
+    pub fn begin_relaunch_elevated(&mut self) {
+        use poe_alarm_platform_win::ElevateError;
+
+        self.release_hotkeys();
+        let tx = self.platform_tx.clone();
+        std::thread::spawn(move || {
+            let settle = std::time::Duration::from_secs(4);
+            let event = match poe_alarm_platform_win::relaunch_elevated(&[], settle) {
+                Ok(()) => PlatformEvent::ElevationSucceeded,
+                Err(error @ ElevateError::Declined) => PlatformEvent::ElevationFailed {
+                    declined: true,
+                    detail: error.to_string(),
+                },
+                // The exit code is the only thing that identifies why a child
+                // died during startup, and stderr goes nowhere in a
+                // GUI-subsystem binary. It has to reach the log.
+                Err(error) => PlatformEvent::ElevationFailed {
+                    declined: false,
+                    detail: error.to_string(),
+                },
+            };
+            let _ = tx.send(event);
+        });
+    }
+
+    #[cfg(not(windows))]
+    pub fn begin_relaunch_elevated(&mut self) {}
 
     pub fn poll_platform(&mut self) -> Vec<PlatformEvent> {
         let mut out = Vec::new();

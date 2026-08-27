@@ -2,6 +2,7 @@
 
 use std::time::{Duration, Instant};
 
+use windows::Win32::Foundation::WAIT_OBJECT_0;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
@@ -13,7 +14,8 @@ use windows::Win32::System::DataExchange::{
 };
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
+    PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -498,16 +500,21 @@ pub(crate) fn confirm_relaunch_elevated(title: &str, body: &str) -> bool {
     answer == IDYES
 }
 
-/// Starts an elevated copy of this executable and waits for it to exist.
+/// Starts an elevated copy of this executable and waits for it to settle.
 ///
-/// Uses ShellExecuteExW rather than ShellExecuteW because the caller has to know
-/// whether the new process actually started. ShellExecuteW returns success as
-/// soon as it hands the request off, so a caller that exits on success kills its
-/// own UAC prompt before the user can answer it — the app closed and nothing
-/// happened. SEE_MASK_NOCLOSEPROCESS yields the process handle, and
-/// SEE_MASK_NOASYNC keeps the call from returning before the shell has finished
-/// with it, so an Ok here means there is something to hand over to.
-pub(crate) fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateError> {
+/// "Created" is not "running". The elevated copy has a whole startup ahead of
+/// it — a GPU-backed window, a HUD thread, three global hotkeys that this
+/// process may still be holding — and any of it can fail. A GUI-subsystem
+/// binary that panics there dies without a word, and a caller that has already
+/// exited on "the process was created" leaves the user staring at nothing.
+///
+/// So this watches the child for `settle`. Exiting inside that window is a
+/// failure and its exit code is reported; still being alive at the end of it is
+/// the closest thing to proof available without the two processes talking.
+pub(crate) fn relaunch_elevated(
+    skip_arguments: &[&str],
+    settle: Duration,
+) -> Result<(), ElevateError> {
     const ERROR_CANCELLED: u32 = 1223;
 
     let executable = std::env::current_exe().map_err(|_| ElevateError::NoExecutablePath)?;
@@ -547,7 +554,18 @@ pub(crate) fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateEr
     if info.hProcess.is_invalid() {
         return Err(ElevateError::Failed(0));
     }
-    // SAFETY: the handle came from ShellExecuteExW and is closed exactly once.
+
+    // SAFETY: the handle came from ShellExecuteExW and is closed below.
+    let waited = unsafe { WaitForSingleObject(info.hProcess, settle.as_millis() as u32) };
+    let outcome = if waited == WAIT_OBJECT_0 {
+        let mut code = 0_u32;
+        // SAFETY: the process has exited, so its code is final.
+        let _ = unsafe { GetExitCodeProcess(info.hProcess, &raw mut code) };
+        Err(ElevateError::ExitedImmediately { code })
+    } else {
+        Ok(())
+    };
+    // SAFETY: closed exactly once, after the wait that needed it.
     let _ = unsafe { CloseHandle(info.hProcess) };
-    Ok(())
+    outcome
 }

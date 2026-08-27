@@ -334,6 +334,28 @@ impl AppShell {
                     self.offer_elevation(cx);
                 }
                 PlatformEvent::ElevationConfirmed => self.relaunch_elevated(cx),
+                // The replacement survived its own startup, so this one can go.
+                // Waiting for that is the difference between a restart and the
+                // window simply disappearing.
+                PlatformEvent::ElevationSucceeded => cx.quit(),
+                PlatformEvent::ElevationFailed { declined, detail } => {
+                    let text = self.t();
+                    let shown = if declined {
+                        text.notice_elevate_declined
+                    } else {
+                        text.notice_elevate_failed
+                    };
+                    let kind = if declined {
+                        StatusKind::Warning
+                    } else {
+                        StatusKind::Error
+                    };
+                    self.notice = Some((kind, shown.into()));
+                    self.push_log(LogKind::Meta, shown.to_owned());
+                    if !declined {
+                        self.push_log(LogKind::Meta, format!("{}:{detail}", text.log_error_prefix));
+                    }
+                }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
                         backend.settings.hud_placement = poe_alarm_settings::HudPlacement {
@@ -1096,28 +1118,16 @@ impl AppShell {
     }
 
     pub fn relaunch_elevated(&mut self, cx: &mut Context<Self>) {
-        #[cfg(windows)]
-        {
-            use poe_alarm_platform_win::ElevateError;
-
-            let text = self.t();
-            match poe_alarm_platform_win::relaunch_elevated(&[]) {
-                // The elevated copy is starting; this one steps aside so two
-                // instances never contend for the same global hotkeys.
-                Ok(()) => cx.quit(),
-                Err(ElevateError::Declined) => {
-                    self.notice = Some((StatusKind::Warning, text.notice_elevate_declined.into()));
-                }
-                Err(_) => {
-                    self.notice = Some((StatusKind::Error, text.notice_elevate_failed.into()));
-                }
-            }
+        let text = self.t();
+        let Some(backend) = &mut self.backend else {
+            self.notice = Some((StatusKind::Error, text.notice_backend_missing.into()));
             cx.notify();
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = cx;
-        }
+            return;
+        };
+        backend.begin_relaunch_elevated();
+        self.notice = Some((StatusKind::Monitoring, text.notice_elevating.into()));
+        self.push_log(LogKind::Meta, text.notice_elevating.to_owned());
+        cx.notify();
     }
 
     /// 测试规则:拿粘贴框里的物品文本跑一次判定。
