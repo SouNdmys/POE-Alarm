@@ -48,11 +48,18 @@ const COPY_DEADLINE: Duration = Duration::from_millis(12);
 /// comparison confirms the game outranks this process.
 const SILENT_FAILURE_STREAK: u32 = 60;
 
-/// How far the cursor may drift between polls and still count as resting.
+/// How fast the cursor may drift and still count as resting, in pixels per
+/// second.
 ///
-/// A hand trembles by a pixel or two while spam-clicking one spot; travelling
-/// to an item covers tens of pixels per poll. Nothing meaningful lives between.
-const CURSOR_REST_TOLERANCE: i32 = 3;
+/// A speed, not a per-poll distance. The distance a cursor covers between two
+/// polls depends on how often they happen, so a fixed pixel budget silently
+/// loosens the moment polling speeds up — raising the timer resolution alone
+/// would have turned slow travel into "resting" and started injecting through
+/// it. Expressed as a speed the threshold means the same thing at any poll
+/// rate.
+///
+/// 200px/s is a hand trembling on one spot, not a hand crossing an inventory.
+const CURSOR_REST_SPEED: f64 = 200.0;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
@@ -106,8 +113,10 @@ pub struct ClipboardSource {
     last_item: Option<ParsedItem>,
     /// Consecutive unanswered copies while the game held focus.
     unanswered: u32,
-    /// Where the cursor was at the previous poll, for the travel gate.
-    last_cursor: Option<PointI>,
+    /// Where the cursor was at the previous poll, and when, for the travel
+    /// gate. The instant is what makes the threshold a speed rather than a
+    /// per-poll distance.
+    last_cursor: Option<(PointI, Instant)>,
 }
 
 impl Default for ClipboardSource {
@@ -170,11 +179,16 @@ impl AffixSource for ClipboardSource {
         // every cycle went dark.
         let resting = match cursor_position() {
             Some(position) => {
-                let moved = self.last_cursor.is_some_and(|last| {
-                    (position.x - last.x).abs() > CURSOR_REST_TOLERANCE
-                        || (position.y - last.y).abs() > CURSOR_REST_TOLERANCE
+                let moved = self.last_cursor.is_some_and(|(last, at)| {
+                    let seconds = started.saturating_duration_since(at).as_secs_f64();
+                    if seconds <= 0.0 {
+                        return false;
+                    }
+                    let dx = f64::from(position.x - last.x);
+                    let dy = f64::from(position.y - last.y);
+                    dx.hypot(dy) / seconds > CURSOR_REST_SPEED
                 });
-                self.last_cursor = Some(position);
+                self.last_cursor = Some((position, started));
                 !moved
             }
             None => true,
@@ -279,6 +293,34 @@ mod tests {
             }
             .is_actionable()
         );
+    }
+
+    /// The travel gate must mean the same thing at any poll rate.
+    ///
+    /// It used to be a per-poll pixel budget, which quietly loosened whenever
+    /// polling sped up: raising the timer resolution alone would have turned
+    /// slow travel into "resting" and started injecting through it. This walks
+    /// one cursor speed past the threshold at two very different poll rates and
+    /// requires the same verdict from both.
+    #[test]
+    fn the_travel_gate_does_not_drift_with_the_poll_rate() {
+        fn is_travelling(pixels_per_second: f64, poll: Duration) -> bool {
+            let seconds = poll.as_secs_f64();
+            let step = pixels_per_second * seconds;
+            step / seconds > CURSOR_REST_SPEED
+        }
+
+        let slow_poll = Duration::from_millis(16);
+        let fast_poll = Duration::from_millis(4);
+
+        for speed in [50.0, 150.0, 199.0] {
+            assert!(!is_travelling(speed, slow_poll), "{speed} resting at 16ms");
+            assert!(!is_travelling(speed, fast_poll), "{speed} resting at 4ms");
+        }
+        for speed in [201.0, 400.0, 2000.0] {
+            assert!(is_travelling(speed, slow_poll), "{speed} moving at 16ms");
+            assert!(is_travelling(speed, fast_poll), "{speed} moving at 4ms");
+        }
     }
 
     #[test]
