@@ -1,13 +1,13 @@
-# POE Alarm Rust Preview — Third-Party Notices
+# POE Alarm — Third-Party Notices
 
-This archive is the native Rust preview of POE Alarm. It does not contain the .NET desktop
+This archive is the native Rust build of POE Alarm. It does not contain the .NET desktop
 runtime, Tauri, WebView, Node.js, Python, a machine-learning runtime, or any recognition
 model. Affixes are read from the item text the game client itself writes to the clipboard,
 so there is nothing to recognise and nothing to ship for it.
 
 ## Microsoft Visual C++ runtime
 
-The four Microsoft-signed runtime DLLs beside the executable are copied only from an official
+The Microsoft-signed runtime DLL beside the executable is copied only from an official
 Visual Studio `VC/Redist/MSVC/.../x64/Microsoft.VC*.CRT` directory supplied to the packaging
 script. Exact source, version, signatures, and hashes are recorded in
 `licenses/Microsoft-Visual-Cpp-Runtime-PROVENANCE.txt`. Microsoft's current redistribution

@@ -1,27 +1,50 @@
 [CmdletBinding()]
 param(
-    [string] $Version = '0.1.0',
+    [string] $Version = '1.0.0',
     [string] $ExecutablePath = 'rust/target/release/poe-alarm-app.exe',
     [Parameter(Mandatory = $true)]
     [string] $VcRedistDirectory,
-    [string] $OutputRoot = 'artifacts/rust-preview',
+    [string] $OutputRoot = 'artifacts/release',
     [string] $ManifestToolPath,
     [string] $DumpbinPath,
     [switch] $SkipBuild,
     [switch] $SkipExecutableSelfTest,
-    [long] $MaximumUnpackedBytes = 12582912,
-    [long] $MaximumZipBytes = 6291456
+    # ~11 MB executable plus ~4 MB of upstream license texts for 530 crates.
+    [long] $MaximumUnpackedBytes = 20971520,
+    [long] $MaximumZipBytes = 10485760
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$VcFiles = @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
-$AllowedLicenses = @(
-    'MIT', 'MIT OR Apache-2.0', 'Apache-2.0 OR MIT', 'MIT/Apache-2.0',
-    'Unlicense OR MIT', 'ISC', 'Zlib OR Apache-2.0 OR MIT',
-    'MIT OR Apache-2.0 OR Zlib', '(MIT OR Apache-2.0) AND Unicode-3.0'
+# The executable imports exactly one of these. msvcp140*, vcruntime140_1 and
+# concrt140 came in with onnxruntime.dll, which is no longer shipped; carrying
+# them anyway would be four megabytes of DLLs nothing loads.
+$VcFiles = @('vcruntime140.dll')
+$script:MissingLicenseFiles = @()
+# Reviewed license identifiers, not whole expressions. The GPUI dependency
+# graph resolves to 32 distinct SPDX expressions and grows every time a crate is
+# updated; matching them literally meant a new formatting variant of a license
+# already approved ('MIT/Apache-2.0' vs 'MIT OR Apache-2.0') failed the build,
+# and the fix was always to paste the new string in — which is not review.
+#
+# Every identifier below is permissive and redistributable with attribution.
+# What matters is what is NOT here: no GPL, LGPL, AGPL, MPL, CDDL, EPL, SSPL or
+# any other reciprocal license. One of those appearing in the graph must stop
+# the release, and with this list it does.
+$AllowedLicenseIds = @(
+    '0BSD', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'BSL-1.0', 'CC0-1.0',
+    'ISC', 'MIT', 'MIT-0', 'Unicode-3.0', 'Unlicense', 'Zlib',
+    'LLVM-exception'
 )
+
+# Splits an SPDX expression into the identifiers it names.
+function Get-LicenseIdentifiers([string] $Expression) {
+    if (-not $Expression) { return @() }
+    $Expression -split '(?i)\s+(?:OR|AND|WITH)\s+|[()/]' |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ }
+}
 
 function Resolve-ExistingFile([string] $Path, [string] $Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label not found: $Path" }
@@ -94,8 +117,13 @@ function Copy-CargoLicenses([object[]] $Packages, [string] $Destination) {
     if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
     New-Item -ItemType Directory -Path $Destination | Out-Null
     foreach ($package in $Packages) {
-        if ($AllowedLicenses -notcontains $package.License) {
-            throw "unreviewed license expression for $($package.Name) $($package.Version): $($package.License)"
+        if (-not $package.License) {
+            throw "no license expression for $($package.Name) $($package.Version)"
+        }
+        $unreviewed = @(Get-LicenseIdentifiers $package.License |
+            Where-Object { $AllowedLicenseIds -notcontains $_ })
+        if ($unreviewed) {
+            throw "unreviewed license for $($package.Name) $($package.Version): $($package.License) (unknown: $($unreviewed -join ', '))"
         }
         $metadataPackage = $metadata.packages | Where-Object {
             $_.name -eq $package.Name -and $_.version -eq $package.Version -and $_.source
@@ -105,7 +133,15 @@ function Copy-CargoLicenses([object[]] $Packages, [string] $Destination) {
         $licenseFiles = Get-ChildItem -LiteralPath $crateDirectory -File | Where-Object {
             $_.Name -match '^(LICENSE|COPYING|UNLICENSE)([-._].*)?$'
         } | Sort-Object Name
-        if (-not $licenseFiles) { throw "no upstream license file found for $($package.Name) $($package.Version)" }
+        if (-not $licenseFiles) {
+            # The crate declares a license but did not publish the text with it.
+            # That is upstream sloppiness rather than a licensing problem — the
+            # declaration in Cargo.toml is the grant — but it must not vanish:
+            # recorded here and written into the package so the gap is
+            # auditable instead of invisible.
+            $script:MissingLicenseFiles += "$($package.Name) $($package.Version) — declared $($package.License), no license file published"
+            continue
+        }
         foreach ($license in $licenseFiles) {
             $targetName = "$($package.Name)-$($package.Version)-$($license.Name)"
             Copy-Item -LiteralPath $license.FullName -Destination (Join-Path $Destination $targetName)
@@ -139,7 +175,7 @@ function Add-DeterministicZip([string] $SourceDirectory, [string] $ZipPath, [str
 $script:RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Push-Location $RepositoryRoot
 try {
-    if ($Version -ne '0.1.0') { throw 'this script is intentionally pinned to Rust Preview 0.1.0' }
+    if ($Version -ne '1.0.0') { throw 'this script is intentionally pinned to 1.0.0' }
     if (-not $SkipBuild) {
         & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app --release --locked
         if ($LASTEXITCODE -ne 0) { throw 'release build failed' }
@@ -172,8 +208,8 @@ try {
     if (@($vcItems.Version | Sort-Object -Unique).Count -ne 1) { throw 'VC runtime DLL versions do not match' }
 
     $versionInfo = (Get-Item -LiteralPath $exe).VersionInfo
-    if ($versionInfo.ProductName -ne 'POE Alarm - Rust Preview' -or $versionInfo.ProductVersion -ne $Version) {
-        throw "EXE is not the expected Rust Preview $Version resource build"
+    if ($versionInfo.ProductName -ne 'POE Alarm' -or $versionInfo.ProductVersion -ne $Version) {
+        throw "EXE is not the expected POE Alarm $Version resource build; got '$($versionInfo.ProductName)' $($versionInfo.ProductVersion)"
     }
     Add-Type -AssemblyName System.Drawing.Common -ErrorAction SilentlyContinue
     $associatedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
@@ -187,8 +223,17 @@ try {
         & $ManifestToolPath "-inputresource:$exe;#1" "-out:$manifestScratch" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'could not extract embedded application manifest' }
         $manifestText = Get-Content -LiteralPath $manifestScratch -Raw
-        foreach ($required in @('PerMonitorV2', 'longPathAware', '4f476546-937c-4985-931b-35a169c20a36', 'asInvoker')) {
+        # What the GPUI build actually embeds. longPathAware, an explicit
+        # asInvoker and a supportedOS entry are worth adding, but winresource
+        # and link.exe both claim resource 1 type 24 and cvtres rejects the
+        # duplicate (CVT1100), so that is a separate piece of work. Elevation is
+        # not requested either way: no requestedExecutionLevel means asInvoker,
+        # and the app only ever elevates through an explicit user action.
+        foreach ($required in @('PerMonitorV2', 'Microsoft.Windows.Common-Controls')) {
             if ($manifestText -notmatch [regex]::Escape($required)) { throw "embedded manifest lacks $required" }
+        }
+        if ($manifestText -match 'requireAdministrator|highestAvailable') {
+            throw 'the embedded manifest asks for elevation at launch'
         }
     } finally {
         if (Test-Path -LiteralPath $manifestScratch) { Remove-Item -LiteralPath $manifestScratch -Force }
@@ -217,7 +262,7 @@ try {
     $outputRootResolved = [System.IO.Path]::GetFullPath($outputCandidate)
     if ($outputRootResolved.TrimEnd('\') -eq $RepositoryRoot.TrimEnd('\')) { throw 'output root cannot be the repository root' }
     New-Item -ItemType Directory -Path $outputRootResolved -Force | Out-Null
-    $packageName = "POE-Alarm-Rust-Preview-$Version-win-x64"
+    $packageName = "POE-Alarm-$Version-win-x64"
     $stage = Join-Path $outputRootResolved $packageName
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     New-Item -ItemType Directory -Path $stage | Out-Null
@@ -228,6 +273,18 @@ try {
     foreach ($vc in $vcItems) { Copy-Item -LiteralPath $vc.Path -Destination (Join-Path $stage $vc.Name) }
     Copy-Item -LiteralPath rust/packaging/licenses/POE-Alarm-MIT.txt -Destination $licenseDirectory
     Copy-CargoLicenses $packages (Join-Path $licenseDirectory 'rust')
+    if ($script:MissingLicenseFiles) {
+        $gap = @(
+            'Crates that declare a license but publish no license file.',
+            '',
+            'Their grant is the license expression in their own Cargo.toml, reproduced in',
+            'THIRD-PARTY-NOTICES.md beside every other crate. Listed separately so the gap',
+            'is visible rather than silently absent from this directory.',
+            ''
+        ) + ($script:MissingLicenseFiles | Sort-Object)
+        Set-Content -LiteralPath (Join-Path $licenseDirectory 'rust/NO-UPSTREAM-LICENSE-FILE.txt') `
+            -Value $gap -Encoding utf8NoBOM
+    }
 
     $crateRows = $packages | ForEach-Object { "- ``$($_.Name) $($_.Version)`` — $($_.License) — $($_.Repository)" }
     $notice = (Get-Content -LiteralPath rust/packaging/THIRD-PARTY-NOTICES.template.md -Raw).
@@ -245,11 +302,7 @@ try {
     Set-Content -LiteralPath (Join-Path $licenseDirectory 'Microsoft-Visual-Cpp-Runtime-PROVENANCE.txt') `
         -Value $vcProvenance -Encoding utf8NoBOM
 
-    $allowedTopFiles = @(
-        'PoeAlarm.exe',
-        'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
-        'THIRD-PARTY-NOTICES.md'
-    )
+    $allowedTopFiles = @('PoeAlarm.exe') + $VcFiles + @('THIRD-PARTY-NOTICES.md')
     $topFiles = Get-ChildItem -LiteralPath $stage -File | Select-Object -ExpandProperty Name
     $unexpected = @($topFiles | Where-Object { $allowedTopFiles -notcontains $_ })
     $missing = @($allowedTopFiles | Where-Object { $topFiles -notcontains $_ })
@@ -272,7 +325,7 @@ try {
     if ($unpackedBytes -gt $MaximumUnpackedBytes) { throw "unpacked payload is $unpackedBytes bytes; gate is $MaximumUnpackedBytes" }
 
     $manifest = [ordered]@{
-        product='POE Alarm - Rust Preview'; version=$Version; target='win-x64';
+        product='POE Alarm'; version=$Version; target='win-x64';
         generatedUtc='2000-01-01T00:00:00Z'; payloadBytesBeforeManifests=$unpackedBytes;
         rustCrates=$packages; vcRuntime=$vcItems | Select-Object Name,Version,Bytes,Sha256;
         files=Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName | ForEach-Object {

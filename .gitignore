@@ -25,3 +25,6 @@ tests/screenshots/**/*.jpeg
 rust/vendor/
 rust/.cargo-vendor-config.toml
 _to_delete/
+
+# Release packages are built artifacts, reproducible from the tagged source.
+/artifacts/release/

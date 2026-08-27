@@ -8,6 +8,16 @@ pub struct PlatformSelfTestReport {
     pub mouse_hook_create_cleanup: bool,
 }
 
+impl PlatformSelfTestReport {
+    /// True when every native resource was created and released cleanly.
+    #[must_use]
+    pub fn is_healthy(&self) -> bool {
+        self.hud_window_create_cleanup
+            && self.hot_key_register_cleanup
+            && self.mouse_hook_create_cleanup
+    }
+}
+
 /// Creates and cleans each native resource used by the platform crate.
 ///
 /// The hot-key probe uses Ctrl+Alt+Shift+F24 rather than the product bindings,

@@ -7,7 +7,7 @@ fn main() {
         resource.set("ProductName", "POE Alarm");
         resource.set(
             "FileDescription",
-            "POE Alarm — OCR crafting alarm for Path of Exile",
+            "POE Alarm — crafting alarm for Path of Exile",
         );
         resource.set("LegalCopyright", "\u{a9} SouNd");
         if let Err(error) = resource.compile() {
