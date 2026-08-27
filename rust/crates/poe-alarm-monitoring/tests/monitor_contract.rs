@@ -24,6 +24,8 @@ impl fmt::Display for TestError {
     }
 }
 
+impl poe_alarm_monitoring::ReadFailure for TestError {}
+
 #[derive(Clone)]
 enum OcrStep {
     Return(RecognitionResult),

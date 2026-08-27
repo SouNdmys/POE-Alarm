@@ -108,6 +108,7 @@ impl RuntimeHandle {
                         generation: None,
                         operation: RuntimeOperation::Startup,
                         detail: error.to_string(),
+                        actionable: false,
                     });
                 }
             })?;
@@ -589,6 +590,7 @@ impl RuntimeActor {
                     detail: format!(
                         "could not start the monitor cleanup worker; resources will be reclaimed at process exit: {error}"
                     ),
+                    actionable: false,
                 });
                 false
             }
@@ -642,13 +644,14 @@ impl RuntimeActor {
         self.state = state;
         if state == RuntimeState::Faulted {
             let _ = self.stop_live(false);
-            self.fault(
+            self.fault_with(
                 Some(generation),
                 RuntimeOperation::Monitoring,
                 snapshot
                     .detail
                     .clone()
                     .unwrap_or_else(|| "monitoring failed".to_owned()),
+                snapshot.detail_is_actionable,
             );
         }
         *self
@@ -737,11 +740,22 @@ impl RuntimeActor {
         operation: RuntimeOperation,
         detail: String,
     ) {
+        self.fault_with(generation, operation, detail, false);
+    }
+
+    fn fault_with(
+        &mut self,
+        generation: Option<RuntimeGeneration>,
+        operation: RuntimeOperation,
+        detail: String,
+        actionable: bool,
+    ) {
         self.state = RuntimeState::Faulted;
         let _ = self.events.send(RuntimeEvent::Fault {
             generation,
             operation,
             detail,
+            actionable,
         });
     }
 }

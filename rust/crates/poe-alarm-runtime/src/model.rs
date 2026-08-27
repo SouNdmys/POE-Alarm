@@ -191,6 +191,9 @@ pub enum RuntimeEvent {
         generation: Option<RuntimeGeneration>,
         operation: RuntimeOperation,
         detail: String,
+        /// The user can act on this — the UI should say so rather than logging
+        /// it and moving on.
+        actionable: bool,
     },
     ShutdownComplete {
         elapsed: Duration,

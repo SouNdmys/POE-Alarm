@@ -3,7 +3,10 @@
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND};
-use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+use windows::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
+    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenElevation, TokenIntegrityLevel,
+};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
     GetClipboardSequenceNumber, OpenClipboard,
@@ -398,10 +401,52 @@ pub(crate) fn process_is_elevated() -> Option<bool> {
 /// ours, reading our own token succeeds, and the answer comes back "no
 /// mismatch" for a process that has been failing for a minute. That is why the
 /// privilege prompt fired on the hotkey path and never on the monitoring one.
-pub(crate) fn game_process_outranks_us() -> bool {
-    if process_is_elevated() != Some(false) {
-        return false;
+/// The mandatory integrity level of a process, as its RID.
+///
+/// Medium is 0x2000 and High is 0x3000, so a plain comparison orders them.
+fn integrity_level(process: HANDLE) -> Option<u32> {
+    let mut token = HANDLE::default();
+    // SAFETY: `token` receives an owned handle, closed below.
+    unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.ok()?;
+
+    let mut needed = 0_u32;
+    // SAFETY: asking for the required size; failure is expected here.
+    let _ = unsafe { GetTokenInformation(token, TokenIntegrityLevel, None, 0, &raw mut needed) };
+    let mut buffer = vec![0_u8; needed as usize];
+    // SAFETY: the buffer is `needed` bytes as the call just reported.
+    let queried = unsafe {
+        GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buffer.as_mut_ptr().cast()),
+            needed,
+            &raw mut needed,
+        )
+    };
+    // SAFETY: token came from OpenProcessToken.
+    let _ = unsafe { CloseHandle(token) };
+    queried.ok()?;
+
+    // SAFETY: on success the buffer holds a TOKEN_MANDATORY_LABEL whose Sid
+    // points inside it, and the RID is the last subauthority.
+    unsafe {
+        let label = &*(buffer.as_ptr() as *const TOKEN_MANDATORY_LABEL);
+        let count = *GetSidSubAuthorityCount(label.Label.Sid);
+        if count == 0 {
+            return None;
+        }
+        Some(*GetSidSubAuthority(label.Label.Sid, u32::from(count) - 1))
     }
+}
+
+/// Whether the game runs at a higher integrity level than this process.
+///
+/// Compares the levels rather than asking whether the game's token can be
+/// opened at all. The default mandatory policy is NO_WRITE_UP, not NO_READ_UP,
+/// so a medium-integrity process usually *can* read an elevated process's
+/// token — which made the old test answer "no mismatch" for a game that was
+/// discarding every keystroke sent to it.
+pub(crate) fn game_process_outranks_us() -> bool {
     let Some(window) = game_window() else {
         return false;
     };
@@ -411,21 +456,24 @@ pub(crate) fn game_process_outranks_us() -> bool {
     if pid == 0 {
         return false;
     }
-    // SAFETY: a refused open simply yields Err.
+    // SAFETY: a refused open simply yields Err. Being unable to open the game
+    // at all already means it is out of reach.
     let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
     else {
         return true;
     };
-    let mut token = HANDLE::default();
-    // SAFETY: `process` is live; `token` receives an owned handle.
-    let readable = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }.is_ok();
-    if readable && !token.is_invalid() {
-        // SAFETY: token came from OpenProcessToken.
-        let _ = unsafe { CloseHandle(token) };
-    }
+    let game = integrity_level(process);
     // SAFETY: process came from OpenProcess.
     let _ = unsafe { CloseHandle(process) };
-    !readable
+
+    // SAFETY: a pseudo-handle needing no close.
+    let ours = integrity_level(unsafe { GetCurrentProcess() });
+    match (game, ours) {
+        (Some(game), Some(ours)) => game > ours,
+        // Unreadable is itself a sign of being outranked, and saying so costs
+        // the user a dialog they can decline.
+        _ => true,
+    }
 }
 
 pub(crate) fn confirm_relaunch_elevated(title: &str, body: &str) -> bool {

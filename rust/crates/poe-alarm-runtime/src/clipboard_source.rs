@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use poe_alarm_clipboard::{ParsedItem, parse};
 use poe_alarm_monitoring::{
-    AffixSource, CancellationToken, MonitorPlan, RecognitionResult, StructuredOcrSupport,
+    AffixSource, CancellationToken, MonitorPlan, ReadFailure, RecognitionResult,
+    StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
     ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
@@ -70,6 +71,16 @@ impl fmt::Display for SourceError {
             ),
             Self::Other(detail) => formatter.write_str(detail),
         }
+    }
+}
+
+impl ReadFailure for SourceError {
+    fn is_actionable(&self) -> bool {
+        // Sixty unanswered copies is never a hiccup, and the fix is always
+        // something only the user can do. Deliberately not conditioned on the
+        // privilege check: that is a guess about the cause, and the whole
+        // reason this exists is that a wrong guess left the failure silent.
+        matches!(self, Self::Unanswered { .. })
     }
 }
 
@@ -198,5 +209,40 @@ impl AffixSource for ClipboardSource {
             was_cached: first_reading,
             ..RecognitionResult::default()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poe_alarm_platform_win::ClipboardError;
+    use std::time::Duration;
+
+    #[test]
+    fn an_unanswered_streak_is_actionable_whatever_the_privilege_probe_thinks() {
+        // Both spellings, because the probe's answer only picks the wording.
+        // Tying the report to it is what let a real failure stay silent: the
+        // check ran after the user alt-tabbed back, saw our own window in
+        // front, and cheerfully concluded there was no problem.
+        for outranked in [true, false] {
+            assert!(
+                SourceError::Unanswered {
+                    attempts: SILENT_FAILURE_STREAK,
+                    outranked,
+                }
+                .is_actionable()
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordinary_clipboard_hiccup_is_not_actionable() {
+        // A craft in flight looks exactly like this and needs no dialog.
+        assert!(
+            !SourceError::Clipboard(ClipboardError::Timeout {
+                waited: Duration::from_millis(25)
+            })
+            .is_actionable()
+        );
     }
 }

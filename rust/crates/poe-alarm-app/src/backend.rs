@@ -95,7 +95,11 @@ pub enum BridgeEvent {
     },
     AlertPresented,
     AlertAcknowledged,
-    Fault(String),
+    Fault {
+        detail: String,
+        /// The user can fix this; the UI must interrupt rather than log.
+        actionable: bool,
+    },
     SoundFallback,
 }
 
@@ -444,11 +448,20 @@ impl Backend {
                 E::AlertPresented { .. } => out.push(BridgeEvent::AlertPresented),
                 E::AlertAcknowledged { .. } => out.push(BridgeEvent::AlertAcknowledged),
                 E::AlertSoundFailed { detail, .. } => {
-                    out.push(BridgeEvent::Fault(format!("提示音播放失败:{detail}")));
+                    out.push(BridgeEvent::Fault {
+                        detail: format!("提示音播放失败:{detail}"),
+                        actionable: false,
+                    });
                 }
                 E::Fault {
-                    operation, detail, ..
-                } => out.push(BridgeEvent::Fault(format!("{operation:?}: {detail}"))),
+                    operation,
+                    detail,
+                    actionable,
+                    ..
+                } => out.push(BridgeEvent::Fault {
+                    detail: format!("{operation:?}: {detail}"),
+                    actionable,
+                }),
                 E::ItemCheckCompleted(report) => {
                     let matched = report.evaluation.is_match;
                     let detail = report.evaluation.detail.clone().unwrap_or_default();

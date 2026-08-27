@@ -416,13 +416,16 @@ impl AppShell {
                     self.apply_runtime_state(BridgeState::Idle);
                     self.push_log(LogKind::Meta, self.t().log_acknowledged.to_owned());
                 }
-                BridgeEvent::Fault(detail) => {
+                BridgeEvent::Fault { detail, actionable } => {
                     // The runtime's own wording is English and technical. It
                     // belongs in the log; what the user reads is this app's
                     // copy, in this app's language.
-                    let outranked = privileges_are_mismatched();
-                    let shown = if outranked {
-                        self.t().notice_copy_refused_elevated
+                    let shown = if actionable {
+                        if privileges_are_mismatched() {
+                            self.t().notice_copy_refused_elevated
+                        } else {
+                            self.t().notice_copy_refused
+                        }
                     } else {
                         self.t().notice_backend_failed
                     };
@@ -431,7 +434,9 @@ impl AppShell {
                         LogKind::Meta,
                         format!("{}:{detail}", self.t().log_error_prefix),
                     );
-                    if outranked {
+                    // The runtime already decided this is the user's to fix.
+                    // Whether the privilege probe agrees only changes wording.
+                    if actionable {
                         self.offer_elevation(cx);
                     }
                     self.apply_runtime_state(BridgeState::Idle);

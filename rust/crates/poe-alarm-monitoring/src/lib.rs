@@ -17,6 +17,6 @@ pub use clock::{CACHED_SCAN_DELAY, MonitorClock, ScanPace, SystemClock, UNCACHED
 pub use engine::Monitor;
 pub use model::{
     AffixSource, EventSink, MonitorDetection, MonitorEvent, MonitorPlan, MonitorSnapshot,
-    MonitorState, NoopEventSink, RecognitionResult, SessionId, StartError, StopError,
+    MonitorState, NoopEventSink, ReadFailure, RecognitionResult, SessionId, StartError, StopError,
     StructuredOcrSupport,
 };

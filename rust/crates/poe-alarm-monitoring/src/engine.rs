@@ -8,8 +8,8 @@ use poe_alarm_core::RuleEvaluationResult;
 
 use crate::{
     AffixSource, CancellationToken, EventSink, MonitorClock, MonitorDetection, MonitorEvent,
-    MonitorPlan, MonitorSnapshot, MonitorState, RecognitionResult, ScanPace, SessionId, StartError,
-    StopError, StructuredOcrSupport,
+    MonitorPlan, MonitorSnapshot, MonitorState, ReadFailure, RecognitionResult, ScanPace,
+    SessionId, StartError, StopError, StructuredOcrSupport,
 };
 
 struct Resources<S, K> {
@@ -319,7 +319,15 @@ fn run_loop<S, K, E>(
         let reading = match resources.source.read(plan, &session.cancellation) {
             Ok(reading) => reading,
             Err(error) => {
-                fault(shared, session, events, scan_count, error.to_string());
+                let actionable = error.is_actionable();
+                fault(
+                    shared,
+                    session,
+                    events,
+                    scan_count,
+                    error.to_string(),
+                    actionable,
+                );
                 return;
             }
         };
@@ -405,6 +413,7 @@ fn evaluate(
                 ocr_elapsed: recognition.total_elapsed(),
                 last_lines: recognition.lines.clone(),
                 detail: Some(matched.original_text.clone()),
+                detail_is_actionable: false,
                 ocr_was_cached: recognition.was_cached,
             };
             Some(MonitorDetection::Quick { matched, snapshot })
@@ -427,6 +436,7 @@ fn evaluate(
                 ocr_elapsed: recognition.total_elapsed(),
                 last_lines: recognition.lines.clone(),
                 detail: Some(detected_text.clone()),
+                detail_is_actionable: false,
                 ocr_was_cached: recognition.was_cached,
             };
             Some(MonitorDetection::Structured {
@@ -476,6 +486,7 @@ fn running_snapshot(
         ocr_elapsed,
         last_lines,
         detail: None,
+        detail_is_actionable: false,
         ocr_was_cached,
     }
 }
@@ -536,6 +547,7 @@ fn fault<E: EventSink>(
     events: &E,
     scan_count: u64,
     detail: String,
+    actionable: bool,
 ) {
     let claimed = {
         let mut lifecycle = shared
@@ -565,6 +577,7 @@ fn fault<E: EventSink>(
             ocr_elapsed: Duration::ZERO,
             last_lines: Vec::new(),
             detail: Some(detail),
+            detail_is_actionable: actionable,
             ocr_was_cached: false,
         }));
     }

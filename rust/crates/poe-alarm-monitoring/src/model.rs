@@ -68,8 +68,24 @@ impl RecognitionResult {
 /// knows what "unchanged" means for its medium. Reporting
 /// [`RecognitionResult::was_cached`] lets the loop skip an evaluation that
 /// would reach the same verdict, and pace down while nothing is happening.
+/// A failure to read, and whether the user can do anything about it.
+///
+/// The distinction has to survive the trip out of the monitor. Rediscovering it
+/// afterwards means guessing from a formatted string, or re-probing the system
+/// long after the moment that produced the failure has passed — which is how a
+/// privilege mismatch ended up being reported as "no mismatch" by a check run
+/// once the user had already alt-tabbed away.
+pub trait ReadFailure: fmt::Display + Send + 'static {
+    /// True when this is something the user can fix, not a passing hiccup.
+    fn is_actionable(&self) -> bool {
+        false
+    }
+}
+
+impl ReadFailure for String {}
+
 pub trait AffixSource: Send + 'static {
-    type Error: fmt::Display + Send + 'static;
+    type Error: ReadFailure;
 
     fn structured_support(&self) -> StructuredOcrSupport {
         StructuredOcrSupport::Unsupported
@@ -95,6 +111,8 @@ pub struct MonitorSnapshot {
     pub ocr_elapsed: Duration,
     pub last_lines: Vec<String>,
     pub detail: Option<String>,
+    /// The fault in `detail` is one the user can act on.
+    pub detail_is_actionable: bool,
     pub ocr_was_cached: bool,
 }
 
@@ -108,6 +126,7 @@ impl MonitorSnapshot {
             ocr_elapsed: Duration::ZERO,
             last_lines: Vec::new(),
             detail: None,
+            detail_is_actionable: false,
             ocr_was_cached: false,
         }
     }
