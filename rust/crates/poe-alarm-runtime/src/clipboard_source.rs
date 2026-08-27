@@ -16,8 +16,7 @@ use poe_alarm_monitoring::{
     StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us,
+    ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -47,19 +46,6 @@ const COPY_DEADLINE: Duration = Duration::from_millis(12);
 /// item is hovered. The streak earns a report only when the integrity
 /// comparison confirms the game outranks this process.
 const SILENT_FAILURE_STREAK: u32 = 60;
-
-/// How fast the cursor may drift and still count as resting, in pixels per
-/// second.
-///
-/// A speed, not a per-poll distance. The distance a cursor covers between two
-/// polls depends on how often they happen, so a fixed pixel budget silently
-/// loosens the moment polling speeds up — raising the timer resolution alone
-/// would have turned slow travel into "resting" and started injecting through
-/// it. Expressed as a speed the threshold means the same thing at any poll
-/// rate.
-///
-/// 200px/s is a hand trembling on one spot, not a hand crossing an inventory.
-const CURSOR_REST_SPEED: f64 = 200.0;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
@@ -113,10 +99,6 @@ pub struct ClipboardSource {
     last_item: Option<ParsedItem>,
     /// Consecutive unanswered copies while the game held focus.
     unanswered: u32,
-    /// Where the cursor was at the previous poll, and when, for the travel
-    /// gate. The instant is what makes the threshold a speed rather than a
-    /// per-poll distance.
-    last_cursor: Option<(PointI, Instant)>,
 }
 
 impl Default for ClipboardSource {
@@ -133,7 +115,6 @@ impl ClipboardSource {
             last_payload: None,
             last_item: None,
             unanswered: 0,
-            last_cursor: None,
         }
     }
 
@@ -169,41 +150,24 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // Nothing is injected while the cursor is travelling: a travelling
-        // cursor is never over the item the user means, so the client would
-        // not answer. There is deliberately no mid-click gate any more. It
-        // existed to keep the Shift lift away from the user's presses; with
-        // the lift gone the chord touches nothing of theirs, and pausing for
-        // the whole of a macro's hold time was costing the probe exactly the
-        // window it needed — at an 80ms cadence with a 40ms hold, half of
-        // every cycle went dark.
-        let resting = match cursor_position() {
-            Some(position) => {
-                let moved = self.last_cursor.is_some_and(|(last, at)| {
-                    let seconds = started.saturating_duration_since(at).as_secs_f64();
-                    if seconds <= 0.0 {
-                        return false;
-                    }
-                    let dx = f64::from(position.x - last.x);
-                    let dy = f64::from(position.y - last.y);
-                    dx.hypot(dy) / seconds > CURSOR_REST_SPEED
-                });
-                self.last_cursor = Some((position, started));
-                !moved
-            }
-            None => true,
-        };
-        if !resting {
-            return Ok(Self::unchanged(started.elapsed()));
-        }
-
-        // No pacing beyond the monitor's own. The injected chord leaves the
-        // user's modifiers alone, so a copy has no visible effect and there is
-        // nothing to ration. Three generations of click-gating, chase windows
-        // and keepalives existed to ration a Shift flicker that a misdiagnosis
-        // had made necessary; with the lift gone, free running is both the
-        // simplest and the fastest this has ever been.
-
+        // There is deliberately no gate here beyond the game having focus.
+        //
+        // Two used to stand in this spot — one skipping polls while the mouse
+        // button was down, one while the cursor was travelling — and both
+        // existed to keep the Shift lift away from the user's own keystrokes.
+        // The lift is gone: the chord touches nothing the user is holding, so
+        // an injection during travel costs a keystroke the client ignores and
+        // nothing else. Meanwhile each gate skipped polls at the exact moment
+        // a roll lands, and the travel one did it unpredictably, because the
+        // distance a cursor covers between two polls depends on how long the
+        // previous poll happened to take. Expressing it as a speed did not
+        // help: at an eleven-millisecond poll the two-pixel recoil of a click
+        // reads as two hundred pixels per second, so the same physical twitch
+        // gated or did not gate depending on timing noise. That is what made
+        // detection unstable at every cadence rather than slow at fast ones.
+        //
+        // Polling straight through is also what the experimental branch did,
+        // which is the configuration that was ever measured reliable at 80ms.
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
             // The client goes quiet for the duration of a craft, so a missing
@@ -293,34 +257,6 @@ mod tests {
             }
             .is_actionable()
         );
-    }
-
-    /// The travel gate must mean the same thing at any poll rate.
-    ///
-    /// It used to be a per-poll pixel budget, which quietly loosened whenever
-    /// polling sped up: raising the timer resolution alone would have turned
-    /// slow travel into "resting" and started injecting through it. This walks
-    /// one cursor speed past the threshold at two very different poll rates and
-    /// requires the same verdict from both.
-    #[test]
-    fn the_travel_gate_does_not_drift_with_the_poll_rate() {
-        fn is_travelling(pixels_per_second: f64, poll: Duration) -> bool {
-            let seconds = poll.as_secs_f64();
-            let step = pixels_per_second * seconds;
-            step / seconds > CURSOR_REST_SPEED
-        }
-
-        let slow_poll = Duration::from_millis(16);
-        let fast_poll = Duration::from_millis(4);
-
-        for speed in [50.0, 150.0, 199.0] {
-            assert!(!is_travelling(speed, slow_poll), "{speed} resting at 16ms");
-            assert!(!is_travelling(speed, fast_poll), "{speed} resting at 4ms");
-        }
-        for speed in [201.0, 400.0, 2000.0] {
-            assert!(is_travelling(speed, slow_poll), "{speed} moving at 16ms");
-            assert!(is_travelling(speed, fast_poll), "{speed} moving at 4ms");
-        }
     }
 
     #[test]

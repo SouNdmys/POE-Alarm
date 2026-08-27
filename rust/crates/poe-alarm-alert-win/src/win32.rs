@@ -25,15 +25,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
     DispatchMessageW, GA_ROOT, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetMessageW,
-    GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, HTCLIENT, HWND_TOPMOST, IsWindow,
-    IsWindowVisible, KillTimer, MA_NOACTIVATE, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
-    RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetTimer, SetWindowDisplayAffinity,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, ULW_ALPHA, UpdateLayeredWindow,
-    WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_CREATE,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_MOUSEACTIVATE, WM_NCCREATE,
-    WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WindowFromPoint,
+    GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, HTCLIENT, HWND_TOPMOST, IDC_ARROW,
+    IsWindow, IsWindowVisible, KillTimer, LoadCursorW, MA_NOACTIVATE, MSG, PM_NOREMOVE,
+    PeekMessageW, PostThreadMessageW, RegisterClassExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SetTimer, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, TranslateMessage, ULW_ALPHA, UpdateLayeredWindow, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_CREATE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_LBUTTONDOWN, WM_MOUSEACTIVATE, WM_NCCREATE, WM_NCDESTROY, WM_NCHITTEST, WM_PAINT, WM_TIMER,
+    WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WindowFromPoint,
 };
 use windows::core::{PCWSTR, w};
 
@@ -743,12 +744,21 @@ fn ensure_class() -> Result<(), AlertFailure> {
             let module = unsafe { GetModuleHandleW(None) }.map_err(|error| {
                 windows_failure(AlertFailureKind::WindowCreation, "GetModuleHandleW", error)
             })?;
+            // A NULL class cursor leaves whatever the previous window set,
+            // which over a fullscreen shield meant the busy spinner sat on
+            // screen for the whole alert and read as a hang. It never was one —
+            // the hook lives on its own thread and the shield's message loop
+            // keeps pumping — but a lock screen that looks frozen is a lock
+            // screen nobody trusts.
+            // SAFETY: a null instance asks for a predefined system cursor.
+            let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
             let class = WNDCLASSEXW {
                 cbSize: size_of::<WNDCLASSEXW>() as u32,
                 style: CS_HREDRAW | CS_VREDRAW,
                 lpfnWndProc: Some(window_proc),
                 hInstance: module.into(),
                 lpszClassName: CLASS_NAME,
+                hCursor: cursor,
                 ..Default::default()
             };
             if unsafe { RegisterClassExW(&class) } == 0 {
