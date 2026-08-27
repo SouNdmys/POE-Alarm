@@ -1089,13 +1089,17 @@ impl AppShell {
                     .child(hotkey_chips(&["Ctrl", "\u{21e7}", "F11"])),
             )
             .child(
+                // Tall enough to read a whole item without scrolling. An item
+                // runs to a dozen lines and the box was showing one, which made
+                // pasting one impossible to check by eye.
                 div()
                     .flex_none()
+                    .h(px(196.))
                     .px_3()
                     .py_2()
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(Input::new(&self.s.item_text_input)),
+                    .child(Input::new(&self.s.item_text_input).h_full()),
             )
             .child(div().flex_1().min_h_0().child(self.log_block(15)))
     }

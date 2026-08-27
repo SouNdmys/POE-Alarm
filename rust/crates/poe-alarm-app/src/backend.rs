@@ -21,8 +21,19 @@ pub enum PlatformEvent {
     HotKeyStart,
     /// 光标下物品的 Ctrl+C 原文,已在热键线程上取好。
     ItemUnderCursor(String),
-    /// 取不到物品文本(游戏没在前台,或光标不在物品上)。
+    /// 全局热键一个都没注册上(被别的软件占用)。
+    ///
+    /// 注册是全有全无的,所以这条一旦出现就意味着 F10/F11 都不会响应。
+    /// 以前它只往 stderr 打一行,而发布版是 GUI 子系统、没有控制台。
+    HotKeysUnavailable,
+    /// 游戏没在前台,热键按早了。
+    GameNotFocused,
+    /// 复制到了东西,但光标下不是一件物品。
     NoItemUnderCursor,
+    /// 游戏在前台,但没有回应复制键。多半是权限不匹配。
+    CopyRefused {
+        outranked: bool,
+    },
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
     HudMoved(f64, f64),
 }
@@ -487,6 +498,7 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
             Ok(manager) => manager,
             Err(error) => {
                 eprintln!("global hotkey registration failed: {error}");
+                let _ = tx.send(PlatformEvent::HotKeysUnavailable);
                 return;
             }
         };
@@ -515,10 +527,7 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
                     // fires while the game holds focus and the cursor is still
                     // over the item, and both stop being true the moment the
                     // user looks away.
-                    HotKeyAction::CheckItemUnderCursor => match copy_item_under_cursor() {
-                        Some(text) => PlatformEvent::ItemUnderCursor(text),
-                        None => PlatformEvent::NoItemUnderCursor,
-                    },
+                    HotKeyAction::CheckItemUnderCursor => copy_item_under_cursor(),
                     HotKeyAction::StopOrAcknowledge => continue,
                 };
                 if tx.send(event).is_err() {
@@ -536,16 +545,27 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
 /// slow answer means a craft is in flight and waiting would blind it; here the
 /// user has asked a direct question and is waiting for the reply.
 #[cfg(windows)]
-fn copy_item_under_cursor() -> Option<String> {
-    use poe_alarm_platform_win::{KeyMethod, copy_hovered_item, game_is_foreground};
+fn copy_item_under_cursor() -> PlatformEvent {
+    use poe_alarm_platform_win::{
+        KeyMethod, copy_hovered_item, foreground_process_outranks_us, game_is_foreground,
+    };
 
     if !game_is_foreground() {
-        return None;
+        return PlatformEvent::GameNotFocused;
     }
-    copy_hovered_item(std::time::Duration::from_millis(250), KeyMethod::default())
-        .ok()
-        .map(|outcome| outcome.text)
-        .filter(|text| poe_alarm_clipboard::looks_like_item(text))
+    // Three different things used to come back as "no item found", which read
+    // as the hotkey not working at all. They need different answers: press it
+    // again over an item, or fix the privilege mismatch that is silently
+    // eating the keystroke.
+    match copy_hovered_item(std::time::Duration::from_millis(250), KeyMethod::default()) {
+        Ok(outcome) if poe_alarm_clipboard::looks_like_item(&outcome.text) => {
+            PlatformEvent::ItemUnderCursor(outcome.text)
+        }
+        Ok(_) => PlatformEvent::NoItemUnderCursor,
+        Err(_) => PlatformEvent::CopyRefused {
+            outranked: foreground_process_outranks_us(),
+        },
+    }
 }
 
 #[cfg(windows)]

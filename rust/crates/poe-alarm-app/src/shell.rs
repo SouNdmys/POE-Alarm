@@ -95,7 +95,7 @@ impl AppShell {
         let item_text_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
-                .rows(6)
+                .rows(10)
                 .placeholder(text.item_text_placeholder)
         });
 
@@ -297,6 +297,25 @@ impl AppShell {
                         StatusKind::Warning,
                         self.t().notice_no_item_under_cursor.into(),
                     ));
+                }
+                PlatformEvent::HotKeysUnavailable => {
+                    let detail = self.t().notice_hotkeys_unavailable;
+                    self.notice = Some((StatusKind::Error, detail.into()));
+                    self.push_log(LogKind::Meta, detail.to_owned());
+                }
+                PlatformEvent::GameNotFocused => {
+                    self.notice =
+                        Some((StatusKind::Warning, self.t().notice_game_not_focused.into()));
+                }
+                PlatformEvent::CopyRefused { outranked } => {
+                    let text = self.t();
+                    let detail = if outranked {
+                        text.notice_copy_refused_elevated
+                    } else {
+                        text.notice_copy_refused
+                    };
+                    self.notice = Some((StatusKind::Error, detail.into()));
+                    self.push_log(LogKind::Meta, detail.to_owned());
                 }
                 PlatformEvent::HudMoved(rx, ry) => {
                     if let Some(backend) = &mut self.backend {
@@ -1010,6 +1029,11 @@ impl AppShell {
     /// privilege without restarting, and no reason to ask for it up front:
     /// most people never need it, and a UAC prompt on every launch is a worse
     /// tax than a button nobody presses.
+    ///
+    /// Quitting is the last thing this does, and only once the elevated process
+    /// exists. Exiting on "the request was submitted" tore down the UAC prompt
+    /// along with the process that owned it, so the app closed and nothing
+    /// else happened.
     pub fn relaunch_elevated(&mut self, cx: &mut Context<Self>) {
         #[cfg(windows)]
         {

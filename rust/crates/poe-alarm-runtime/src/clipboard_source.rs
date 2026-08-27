@@ -34,7 +34,8 @@ const COPY_DEADLINE: Duration = Duration::from_millis(25);
 /// A craft blocks the client for a fraction of a second — a handful of polls at
 /// most. Windows refusing to deliver the keystroke at all looks identical from
 /// here, except that it never stops. This is the line between the two, set far
-/// enough out that no craft can reach it.
+/// enough out that no craft can reach it and near enough that a user notices
+/// within seconds rather than after a league of empty scans.
 const SILENT_FAILURE_STREAK: u32 = 60;
 
 /// Why a reading could not be taken.
@@ -42,9 +43,13 @@ const SILENT_FAILURE_STREAK: u32 = 60;
 pub enum SourceError {
     /// The client refused or ignored the request.
     Clipboard(ClipboardError),
-    /// Windows is dropping the keystroke because the game outranks this
-    /// process. Monitoring cannot work until that is fixed.
-    OutrankedByGame,
+    /// The client stopped answering the copy request and never resumed.
+    ///
+    /// Carries whether the elevation check agreed, but does not depend on it:
+    /// that check is a heuristic, and gating the report on it is what let this
+    /// failure stay silent through 2330 scans in the field. A monitor that has
+    /// been talking to nothing for a minute has to say so whatever the cause.
+    Unanswered { attempts: u32, outranked: bool },
     /// A source that is not the clipboard failed.
     Other(String),
 }
@@ -53,8 +58,16 @@ impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
-            Self::OutrankedByGame => formatter.write_str(
-                "the game is running with higher privileges than POE Alarm, so Windows is                  discarding the copy request. Restart POE Alarm as administrator.",
+            Self::Unanswered {
+                attempts,
+                outranked: true,
+            } => write!(
+                formatter,
+                "the game did not answer {attempts} copy requests in a row. It is running with                  higher privileges than POE Alarm, so Windows is discarding them. Restart POE                  Alarm as administrator: Settings -> Privileges.",
+            ),
+            Self::Unanswered { attempts, .. } => write!(
+                formatter,
+                "the game did not answer {attempts} copy requests in a row. The usual cause is                  the game running as administrator while POE Alarm is not, which makes Windows                  discard them: try Settings -> Privileges -> Restart as administrator.",
             ),
             Self::Other(detail) => formatter.write_str(detail),
         }
@@ -133,8 +146,11 @@ impl AffixSource for ClipboardSource {
                 // started it as administrator — after which Windows drops every
                 // keystroke this process sends and monitoring runs forever
                 // without ever alarming. Saying so beats looking healthy.
-                if self.unanswered >= SILENT_FAILURE_STREAK && foreground_process_outranks_us() {
-                    return Err(SourceError::OutrankedByGame);
+                if self.unanswered >= SILENT_FAILURE_STREAK {
+                    return Err(SourceError::Unanswered {
+                        attempts: self.unanswered,
+                        outranked: foreground_process_outranks_us(),
+                    });
                 }
                 return Ok(Self::unchanged(started.elapsed()));
             }

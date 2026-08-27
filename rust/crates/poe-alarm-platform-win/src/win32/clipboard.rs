@@ -17,7 +17,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_MENU,
     VK_SHIFT,
 };
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::Shell::{
+    SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_SHOWNORMAL,
@@ -418,8 +420,17 @@ pub(crate) fn foreground_process_outranks_us() -> bool {
     !readable
 }
 
+/// Starts an elevated copy of this executable and waits for it to exist.
+///
+/// Uses ShellExecuteExW rather than ShellExecuteW because the caller has to know
+/// whether the new process actually started. ShellExecuteW returns success as
+/// soon as it hands the request off, so a caller that exits on success kills its
+/// own UAC prompt before the user can answer it — the app closed and nothing
+/// happened. SEE_MASK_NOCLOSEPROCESS yields the process handle, and
+/// SEE_MASK_NOASYNC keeps the call from returning before the shell has finished
+/// with it, so an Ok here means there is something to hand over to.
 pub(crate) fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateError> {
-    const SE_ERR_ACCESSDENIED: isize = 5;
+    const ERROR_CANCELLED: u32 = 1223;
 
     let executable = std::env::current_exe().map_err(|_| ElevateError::NoExecutablePath)?;
     let arguments = std::env::args()
@@ -434,21 +445,31 @@ pub(crate) fn relaunch_elevated(skip_arguments: &[&str]) -> Result<(), ElevateEr
     let parameters = HSTRING::from(arguments);
     let working_directory = HSTRING::from(directory.as_os_str());
 
-    // SAFETY: every pointer is a live HSTRING for the duration of the call.
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            &operation,
-            &file,
-            &parameters,
-            &working_directory,
-            SW_SHOWNORMAL,
-        )
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+        lpVerb: windows::core::PCWSTR(operation.as_ptr()),
+        lpFile: windows::core::PCWSTR(file.as_ptr()),
+        lpDirectory: windows::core::PCWSTR(working_directory.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
     };
-    // ShellExecuteW returns above 32 on success and an error code below.
-    match result.0 as isize {
-        code if code > 32 => Ok(()),
-        SE_ERR_ACCESSDENIED => Err(ElevateError::Declined),
-        code => Err(ElevateError::Failed(code as i32)),
+    if !parameters.is_empty() {
+        info.lpParameters = windows::core::PCWSTR(parameters.as_ptr());
     }
+
+    // SAFETY: every pointer above outlives the call, and cbSize matches.
+    let launched = unsafe { ShellExecuteExW(&raw mut info) };
+    if let Err(error) = launched {
+        return Err(match error.code().0 as u32 & 0xFFFF {
+            ERROR_CANCELLED => ElevateError::Declined,
+            _ => ElevateError::Failed(error.code().0),
+        });
+    }
+    if info.hProcess.is_invalid() {
+        return Err(ElevateError::Failed(0));
+    }
+    // SAFETY: the handle came from ShellExecuteExW and is closed exactly once.
+    let _ = unsafe { CloseHandle(info.hProcess) };
+    Ok(())
 }
