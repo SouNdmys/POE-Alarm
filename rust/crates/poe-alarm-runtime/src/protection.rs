@@ -194,6 +194,22 @@ impl ProtectionBookkeeping {
     }
 }
 
+/// Arms a hook-level click block for the gap between a match and a shield.
+///
+/// `None` on any failure: a match with a slower lock is still a match, and the
+/// present-only path is exactly what shipped before this existed.
+fn armed_guard_for_latch() -> Option<PendingMouseInputGuard> {
+    let mut guard = PendingMouseInputGuard::new();
+    if guard.prepare().is_err() {
+        return None;
+    }
+    if guard.arm().is_err() {
+        guard.release();
+        return None;
+    }
+    Some(guard)
+}
+
 struct GuardSlot {
     generation: RuntimeGeneration,
     guard: PendingMouseInputGuard,
@@ -328,7 +344,16 @@ impl ProtectionService for NativeProtection {
         {
             state.guard.take().map(|slot| slot.guard)
         } else {
-            None
+            // Fast mode arms one right here, at the instant of the match. The
+            // shield window takes tens of milliseconds to present and verify,
+            // and a crafting macro clicks faster than that: the winning roll
+            // was being clicked past while the window was still on its way up.
+            // The hook arms in microseconds on this thread, so the very next
+            // click is swallowed however soon it comes. The alert service owns
+            // the rest of the lifecycle it was already built for: transfer to
+            // the overlay once it is verified, or fail open on a bounded
+            // timeout so a stuck presentation can never wedge the mouse.
+            armed_guard_for_latch()
         };
         match state.alert.trigger(trigger, pending_guard) {
             Ok(AlertTriggerStatus::Accepted(alert_id)) => {
