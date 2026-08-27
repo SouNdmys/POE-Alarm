@@ -101,12 +101,25 @@ fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
         }
     };
 
-    let inputs = [
+    // The trailing Ctrl-up is omitted when the user is already holding Ctrl.
+    // There is one global key state, so releasing a key they are physically
+    // pressing writes a lie into it that nothing restores — and at a poll every
+    // eleven milliseconds, Ctrl would read as up essentially all the time. That
+    // turns their Ctrl+click, which moves an item to the stash, into a plain
+    // click that picks it up instead. Same failure as the Shift lift this file
+    // used to perform; Ctrl is simply the key the chord itself needs.
+    //
+    // Self-healing: if they release Ctrl in the microseconds between this read
+    // and SendInput, the next chord sends the full four events and clears the
+    // stale down state.
+    let mut inputs = vec![
         key(VK_CONTROL, SCAN_LCONTROL, false),
         key(VK_C, SCAN_C, false),
         key(VK_C, SCAN_C, true),
-        key(VK_CONTROL, SCAN_LCONTROL, true),
     ];
+    if !held_modifiers().control {
+        inputs.push(key(VK_CONTROL, SCAN_LCONTROL, true));
+    }
 
     let expected = inputs.len() as u32;
     // SAFETY: `inputs` is a live slice of correctly sized INPUT records.

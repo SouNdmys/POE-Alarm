@@ -441,10 +441,6 @@ fn hook_thread_main(token: u64, ready: mpsc::SyncSender<Result<(), PlatformError
     shared
         .thread_id
         .store(unsafe { GetCurrentThreadId() }, Ordering::Release);
-    shared
-        .state
-        .initialize_released(read_physical_button_mask());
-
     let module = match unsafe { GetModuleHandleW(None) } {
         Ok(module) => HINSTANCE(module.0),
         Err(error) => {
@@ -466,6 +462,17 @@ fn hook_thread_main(token: u64, ready: mpsc::SyncSender<Result<(), PlatformError
         }
     };
     shared.hook_handle.store(hook.0 as isize, Ordering::Release);
+    // Sampled only now that the callback is live. Read before the handle was
+    // published, the sample was a snapshot of a window in which events still
+    // passed through unseen: a button that changed inside it left the state
+    // machine holding a stale bit, arm() then chose WaitingForExistingRelease
+    // on the strength of a press that had already ended, and the next press —
+    // the orb going onto the item — was passed straight to the game. Nothing
+    // corrects a stale sample afterwards, so exactly one click escaped the
+    // suppression this whole path exists to perform.
+    shared
+        .state
+        .initialize_released(read_physical_button_mask());
     let _ = ready.send(Ok(()));
 
     #[cfg(test)]
