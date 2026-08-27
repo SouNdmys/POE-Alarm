@@ -39,10 +39,8 @@ pub enum PlatformEvent {
     GameNotFocused,
     /// 复制到了东西,但光标下不是一件物品。
     NoItemUnderCursor,
-    /// 游戏在前台,但没有回应复制键。多半是权限不匹配。
-    CopyRefused {
-        outranked: bool,
-    },
+    /// 游戏在前台却没有回应复制键,且完整性比较确认它权限更高。
+    CopyRefused,
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
     HudMoved(f64, f64),
 }
@@ -649,15 +647,17 @@ fn copy_item_under_cursor() -> PlatformEvent {
     // Three different things used to come back as "no item found", which read
     // as the hotkey not working at all. They need different answers: press it
     // again over an item, or fix the privilege mismatch that is silently
-    // eating the keystroke.
+    // eating the keystroke. An unanswered copy with no privilege mismatch is
+    // the cursor not being over an item — the client simply does not respond
+    // then — and telling that user to elevate would send them fixing the
+    // wrong thing.
     match copy_hovered_item(std::time::Duration::from_millis(250), KeyMethod::default()) {
         Ok(outcome) if poe_alarm_clipboard::looks_like_item(&outcome.text) => {
             PlatformEvent::ItemUnderCursor(outcome.text)
         }
         Ok(_) => PlatformEvent::NoItemUnderCursor,
-        Err(_) => PlatformEvent::CopyRefused {
-            outranked: game_process_outranks_us(),
-        },
+        Err(_) if game_process_outranks_us() => PlatformEvent::CopyRefused,
+        Err(_) => PlatformEvent::NoItemUnderCursor,
     }
 }
 

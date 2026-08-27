@@ -6,9 +6,9 @@ mod self_test;
 mod wave;
 
 pub(crate) use clipboard::{
-    clipboard_sequence_number, confirm_relaunch_elevated, copy_hovered_item,
+    clipboard_sequence_number, confirm_relaunch_elevated, copy_hovered_item, cursor_position,
     foreground_window_description, game_process_outranks_us, game_window_rect, held_modifiers,
-    process_is_elevated, read_clipboard_text, relaunch_elevated,
+    primary_button_down, process_is_elevated, read_clipboard_text, relaunch_elevated,
 };
 pub(crate) use hotkeys::{register_hot_key, unregister_hot_key};
 pub(crate) use hud::NativeHudWindow;

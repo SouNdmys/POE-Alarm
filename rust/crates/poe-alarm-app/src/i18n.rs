@@ -141,7 +141,6 @@ pub struct Text {
     pub notice_hotkeys_unavailable: &'static str,
     pub elevate_prompt_title: &'static str,
     pub elevate_prompt_body: &'static str,
-    pub notice_copy_refused: &'static str,
     pub notice_copy_refused_elevated: &'static str,
     pub log_check_failed_prefix: &'static str,
     pub notice_sound_fallback: &'static str,
@@ -326,7 +325,6 @@ pub static ZH: Text = Text {
 在这种状态下监控不会报警,规则写得再对也没用。
 
 现在以管理员身份重启 POE Alarm 吗?",
-    notice_copy_refused: "游戏没有回应复制键。如果游戏是以管理员权限启动的(加速器常这样),请到 设置 → 权限 → 以管理员身份重启",
     notice_copy_refused_elevated: "游戏的权限比本程序高,Windows 正在丢弃复制请求。请到 设置 → 权限 → 以管理员身份重启",
     log_check_failed_prefix: "测试失败",
     notice_sound_fallback: "自定义提示音无效,已回退内置音效",
@@ -506,7 +504,6 @@ pub static EN: Text = Text {
 Monitoring cannot alarm in this state, however correct your rules are.
 
 Restart POE Alarm as administrator now?",
-    notice_copy_refused: "The game did not answer the copy key. If a launcher started it as administrator, use Settings -> Privileges -> Restart as administrator",
     notice_copy_refused_elevated: "The game has higher privileges than POE Alarm, so Windows is discarding the copy request. Use Settings -> Privileges -> Restart as administrator",
     log_check_failed_prefix: "Test failed",
     notice_sound_fallback: "Custom alert sound is invalid; using the built-in sound",

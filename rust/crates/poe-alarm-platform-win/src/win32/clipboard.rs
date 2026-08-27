@@ -20,8 +20,8 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_MENU,
-    VK_SHIFT,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_LBUTTON,
+    VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::Shell::{
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -36,7 +36,7 @@ use crate::clipboard::{
     ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
     describes_game,
 };
-use crate::geometry::RectI;
+use crate::geometry::{PointI, RectI};
 
 /// `CF_UNICODETEXT`. Spelled out so the crate need not take the OLE feature.
 const CF_UNICODETEXT: u32 = 13;
@@ -275,6 +275,18 @@ pub(crate) fn held_modifiers() -> HeldModifiers {
         shift: down(VK_SHIFT),
         alt: down(VK_MENU),
     }
+}
+
+pub(crate) fn cursor_position() -> Option<PointI> {
+    let mut point = windows::Win32::Foundation::POINT::default();
+    // SAFETY: `point` is a live out-parameter.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&raw mut point) }.ok()?;
+    Some(PointI::new(point.x, point.y))
+}
+
+pub(crate) fn primary_button_down() -> bool {
+    // SAFETY: reads global key state.
+    (unsafe { GetAsyncKeyState(i32::from(VK_LBUTTON.0)) } as u16 & 0x8000) != 0
 }
 
 pub(crate) fn foreground_window_description() -> (String, String) {

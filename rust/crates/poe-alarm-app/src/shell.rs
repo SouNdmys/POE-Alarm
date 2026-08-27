@@ -6,18 +6,6 @@
 
 use std::time::{Duration, Instant};
 
-/// True when the game window outranks this process, so Windows is discarding
-/// the keystrokes sent to it.
-#[cfg(windows)]
-fn privileges_are_mismatched() -> bool {
-    poe_alarm_platform_win::game_process_outranks_us()
-}
-
-#[cfg(not(windows))]
-fn privileges_are_mismatched() -> bool {
-    false
-}
-
 use gpui::{Context, Div, FocusHandle, SharedString, Window, div, prelude::*, px};
 use gpui_component::{StyledExt, input::InputState};
 use poe_alarm_core::{NumericConstraint, NumericConstraintMode, ResultGroupMode};
@@ -322,13 +310,8 @@ impl AppShell {
                     self.notice =
                         Some((StatusKind::Warning, self.t().notice_game_not_focused.into()));
                 }
-                PlatformEvent::CopyRefused { outranked } => {
-                    let text = self.t();
-                    let detail = if outranked {
-                        text.notice_copy_refused_elevated
-                    } else {
-                        text.notice_copy_refused
-                    };
+                PlatformEvent::CopyRefused => {
+                    let detail = self.t().notice_copy_refused_elevated;
                     self.notice = Some((StatusKind::Error, detail.into()));
                     self.push_log(LogKind::Meta, detail.to_owned());
                     self.offer_elevation(cx);
@@ -442,12 +425,10 @@ impl AppShell {
                     // The runtime's own wording is English and technical. It
                     // belongs in the log; what the user reads is this app's
                     // copy, in this app's language.
+                    // `actionable` already means the source confirmed the
+                    // privilege mismatch; no second opinion is asked for.
                     let shown = if actionable {
-                        if privileges_are_mismatched() {
-                            self.t().notice_copy_refused_elevated
-                        } else {
-                            self.t().notice_copy_refused
-                        }
+                        self.t().notice_copy_refused_elevated
                     } else {
                         self.t().notice_backend_failed
                     };

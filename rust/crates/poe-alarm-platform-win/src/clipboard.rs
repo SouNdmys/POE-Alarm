@@ -293,6 +293,32 @@ pub fn held_modifiers() -> HeldModifiers {
     }
 }
 
+/// Where the pointer is, in virtual-desktop pixels.
+#[must_use]
+pub fn cursor_position() -> Option<crate::geometry::PointI> {
+    #[cfg(windows)]
+    {
+        crate::win32::cursor_position()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// True while the primary mouse button is physically held.
+#[must_use]
+pub fn primary_button_down() -> bool {
+    #[cfg(windows)]
+    {
+        crate::win32::primary_button_down()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// Title and class of the foreground window.
 #[must_use]
 pub fn foreground_window_description() -> (String, String) {

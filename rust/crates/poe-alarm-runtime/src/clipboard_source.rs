@@ -16,7 +16,8 @@ use poe_alarm_monitoring::{
     StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground, game_process_outranks_us,
+    ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
+    game_process_outranks_us, primary_button_down,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -36,20 +37,33 @@ const COPY_DEADLINE: Duration = Duration::from_millis(25);
 /// here, except that it never stops. This is the line between the two, set far
 /// enough out that no craft can reach it and near enough that a user notices
 /// within seconds rather than after a league of empty scans.
+///
+/// Crossing it proves nothing by itself: a cursor resting over empty ground
+/// produces exactly this silence, because the client only answers while an
+/// item is hovered. The streak earns a report only when the integrity
+/// comparison confirms the game outranks this process.
 const SILENT_FAILURE_STREAK: u32 = 60;
+
+/// How far the cursor may drift between polls and still count as resting.
+///
+/// A hand trembles by a pixel or two while spam-clicking one spot; travelling
+/// to an item covers tens of pixels per poll. Nothing meaningful lives between.
+const CURSOR_REST_TOLERANCE: i32 = 3;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
 pub enum SourceError {
     /// The client refused or ignored the request.
     Clipboard(ClipboardError),
-    /// The client stopped answering the copy request and never resumed.
+    /// The client never answered while the game outranks this process.
     ///
-    /// Carries whether the elevation check agreed, but does not depend on it:
-    /// that check is a heuristic, and gating the report on it is what let this
-    /// failure stay silent through 2330 scans in the field. A monitor that has
-    /// been talking to nothing for a minute has to say so whatever the cause.
-    Unanswered { attempts: u32, outranked: bool },
+    /// Only produced when the integrity comparison agrees, because unanswered
+    /// alone is the ordinary state of a cursor resting over nothing. The
+    /// comparison errs toward reporting — every failure to read a token counts
+    /// as outranked — so the silent-forever failure this once had cannot come
+    /// back through it; only a confident same-level-or-lower answer suppresses
+    /// the report, and elevating genuinely cannot help then.
+    Unanswered { attempts: u32 },
     /// A source that is not the clipboard failed.
     Other(String),
 }
@@ -58,16 +72,11 @@ impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
-            Self::Unanswered {
-                attempts,
-                outranked: true,
-            } => write!(
+            Self::Unanswered { attempts } => write!(
                 formatter,
-                "the game did not answer {attempts} copy requests in a row. It is running with                  higher privileges than POE Alarm, so Windows is discarding them. Restart POE                  Alarm as administrator: Settings -> Privileges.",
-            ),
-            Self::Unanswered { attempts, .. } => write!(
-                formatter,
-                "the game did not answer {attempts} copy requests in a row. The usual cause is                  the game running as administrator while POE Alarm is not, which makes Windows                  discard them: try Settings -> Privileges -> Restart as administrator.",
+                "the game did not answer {attempts} copy requests in a row. It is running with \
+                 higher privileges than POE Alarm, so Windows is discarding them. Restart POE \
+                 Alarm as administrator: Settings -> Privileges."
             ),
             Self::Other(detail) => formatter.write_str(detail),
         }
@@ -93,6 +102,8 @@ pub struct ClipboardSource {
     last_item: Option<ParsedItem>,
     /// Consecutive unanswered copies while the game held focus.
     unanswered: u32,
+    /// Where the cursor was at the previous poll, for the travel gate.
+    last_cursor: Option<PointI>,
 }
 
 impl Default for ClipboardSource {
@@ -109,6 +120,7 @@ impl ClipboardSource {
             last_payload: None,
             last_item: None,
             unanswered: 0,
+            last_cursor: None,
         }
     }
 
@@ -144,6 +156,28 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
+        // A travelling cursor is never over the item the user means, and the
+        // client only answers while an item is hovered — so injecting during
+        // travel is a no-op for this monitor and a real keystroke to the game.
+        // One of those, with its momentary Shift lift, landing just as the
+        // user pressed Shift to start clicking is what kept knocking the
+        // currency-use state off their cursor. A held mouse button gets the
+        // same restraint: nothing is injected mid-click.
+        let resting = match cursor_position() {
+            Some(position) => {
+                let moved = self.last_cursor.is_some_and(|last| {
+                    (position.x - last.x).abs() > CURSOR_REST_TOLERANCE
+                        || (position.y - last.y).abs() > CURSOR_REST_TOLERANCE
+                });
+                self.last_cursor = Some(position);
+                !moved
+            }
+            None => true,
+        };
+        if !resting || primary_button_down() {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
+
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
             // The client goes quiet for the duration of a craft, so a missing
@@ -151,16 +185,20 @@ impl AffixSource for ClipboardSource {
             // fault would end the session every time the user crafted.
             Err(error) if error.is_transient() => {
                 self.unanswered = self.unanswered.saturating_add(1);
-                // Silence that never ends is not a craft. The usual cause is
-                // the game running elevated — an accelerator or a launcher
-                // started it as administrator — after which Windows drops every
-                // keystroke this process sends and monitoring runs forever
-                // without ever alarming. Saying so beats looking healthy.
+                // Silence that never ends is not a craft — but it is also the
+                // ordinary state of a cursor resting over empty ground, so the
+                // streak alone must not interrupt anyone. The integrity
+                // comparison decides, and it errs toward reporting: only a
+                // confident answer that the game does not outrank us quietly
+                // forgives the streak, and elevating could not have helped
+                // then anyway.
                 if self.unanswered >= SILENT_FAILURE_STREAK {
-                    return Err(SourceError::Unanswered {
-                        attempts: self.unanswered,
-                        outranked: game_process_outranks_us(),
-                    });
+                    if game_process_outranks_us() {
+                        return Err(SourceError::Unanswered {
+                            attempts: self.unanswered,
+                        });
+                    }
+                    self.unanswered = 0;
                 }
                 return Ok(Self::unchanged(started.elapsed()));
             }
@@ -219,20 +257,16 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn an_unanswered_streak_is_actionable_whatever_the_privilege_probe_thinks() {
-        // Both spellings, because the probe's answer only picks the wording.
-        // Tying the report to it is what let a real failure stay silent: the
-        // check ran after the user alt-tabbed back, saw our own window in
-        // front, and cheerfully concluded there was no problem.
-        for outranked in [true, false] {
-            assert!(
-                SourceError::Unanswered {
-                    attempts: SILENT_FAILURE_STREAK,
-                    outranked,
-                }
-                .is_actionable()
-            );
-        }
+    fn an_unanswered_streak_is_actionable() {
+        // By the time this error exists, the integrity comparison has already
+        // confirmed the mismatch — the read path cannot construct the variant
+        // any other way — so it is always the user's to fix.
+        assert!(
+            SourceError::Unanswered {
+                attempts: SILENT_FAILURE_STREAK,
+            }
+            .is_actionable()
+        );
     }
 
     #[test]
