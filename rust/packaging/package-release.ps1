@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $Version = '1.0.0',
+    [string] $Version = '1.0.1',
     [string] $ExecutablePath = 'rust/target/release/poe-alarm-app.exe',
     [Parameter(Mandatory = $true)]
     [string] $VcRedistDirectory,
@@ -175,7 +175,7 @@ function Add-DeterministicZip([string] $SourceDirectory, [string] $ZipPath, [str
 $script:RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Push-Location $RepositoryRoot
 try {
-    if ($Version -ne '1.0.0') { throw 'this script is intentionally pinned to 1.0.0' }
+    if ($Version -ne '1.0.1') { throw 'this script is intentionally pinned to 1.0.1' }
     if (-not $SkipBuild) {
         & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app --release --locked
         if ($LASTEXITCODE -ne 0) { throw 'release build failed' }

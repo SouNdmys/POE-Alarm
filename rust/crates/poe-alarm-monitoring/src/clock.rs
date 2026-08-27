@@ -2,8 +2,27 @@ use std::time::{Duration, Instant};
 
 use crate::CancellationToken;
 
-pub const UNCACHED_SCAN_DELAY: Duration = Duration::from_millis(4);
-pub const CACHED_SCAN_DELAY: Duration = Duration::from_millis(8);
+/// How long to pace between readings.
+///
+/// Both are 35ms because that is what measured best against a real client, by a
+/// wide margin and against the intuition that guided every earlier value. Over
+/// roughly 1500 crafts at a 50ms click cadence this produced one overshoot;
+/// halving it to an effective 31ms produced more than ten times that rate, and
+/// the 15.5ms these constants used to resolve to was worse still.
+///
+/// Two forces cross here. Poll faster and the client spends its time
+/// serializing item text for us instead of applying the orb, so the roll itself
+/// arrives later; poll slower and the roll is on time but sampled late. The
+/// optimum is not deducible from this side of the boundary — three earlier
+/// attempts to reason it out were wrong, twice in the direction of polling
+/// harder — so it is a measurement, and `POE_ALARM_SCAN_MS` exists to repeat
+/// that measurement rather than argue with it.
+///
+/// Both values are identical because Windows quantises these waits to its
+/// 15.6ms tick: anything from 31 to 45 resolves to the same ~46.5ms, so a
+/// distinction between them would be fiction.
+pub const UNCACHED_SCAN_DELAY: Duration = Duration::from_millis(35);
+pub const CACHED_SCAN_DELAY: Duration = Duration::from_millis(35);
 
 /// The cooperative pacing selected after one monitor decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
