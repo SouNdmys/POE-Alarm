@@ -44,13 +44,6 @@ fn run_self_test() -> i32 {
 }
 
 fn main() {
-    // Held for the whole process. Without it Windows rounds every wait up to a
-    // 15.6ms tick, which flattens the monitor's 4ms and 8ms polling constants
-    // into the same 15.5ms and adds that difference to how long a winning roll
-    // sits unnoticed. Dropped on the way out, restoring the default.
-    #[cfg(windows)]
-    let _timer = poe_alarm_platform_win::TimerResolutionGuard::acquire();
-
     #[cfg(windows)]
     if std::env::args()
         .skip(1)
