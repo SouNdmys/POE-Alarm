@@ -919,8 +919,8 @@ mod tests {
     /// thread has not been scheduled to update yet. Under a loaded
     /// `cargo test --workspace` that shows up as a spurious
     /// `WaitingForExistingRelease`. No real caller arms microseconds after
-    /// releasing, and the guard is dormant in the shipped build anyway —
-    /// `input_guard_enabled` is false, so nothing ever installs the hook.
+    /// releasing. The shipped build does install this hook, but only at the
+    /// instant a rule matches, which is nothing like this loop.
     ///
     /// Still worth running before a release: the peak thread and handle
     /// assertions below are the part that catches real leaks.

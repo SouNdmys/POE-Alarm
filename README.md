@@ -14,7 +14,7 @@ The UI ships in English and 简体中文 — switch instantly in Settings; the U
 
 ## Download & run
 
-Grab the ZIP from [Releases](https://github.com/SouNdmys/POE-Alarm/releases), extract, and run `poe-alarm-app.exe`. No runtime installation required. Windows may show an unsigned-binary warning on first run.
+Grab the ZIP from [Releases](https://github.com/SouNdmys/POE-Alarm/releases), extract, and run `PoeAlarm.exe`. No runtime installation required. Windows may show an unsigned-binary warning on first run.
 
 Build from source:
 

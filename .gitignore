@@ -12,11 +12,6 @@ rust/target/
 rust/target-*/
 artifacts/
 TestResults/
-# Local gameplay captures are large and may contain private desktop details. Keep the
-# compact JSON manifests/corpora in Git, but do not publish raw screenshot fixtures.
-tests/screenshots/**/*.png
-tests/screenshots/**/*.jpg
-tests/screenshots/**/*.jpeg
 *.user
 *.suo
 *.nupkg

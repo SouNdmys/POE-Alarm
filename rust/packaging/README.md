@@ -11,14 +11,15 @@ Example with Visual Studio 18 Preview/Insiders installed:
   -VcRedistDirectory 'C:\Program Files\Microsoft Visual Studio\18\Insiders\VC\Redist\MSVC\14.50.35710\x64\Microsoft.VC145.CRT'
 ```
 
-Inputs for the EXE, ONNX Runtime, model, dictionary, output root, `mt.exe`, and `dumpbin.exe`
+Inputs for the EXE, the VC redistributable directory, output root, `mt.exe` and `dumpbin.exe`
 are parameters; repository-relative defaults are provided where the repository already owns the
-input. The script verifies immutable OCR hashes, Microsoft signatures, PE imports/resources,
-the runtime Cargo license graph, an exact file allowlist, and unpacked/ZIP size gates. It writes
-`PACKAGE-MANIFEST.json` and `SHA256SUMS.txt` before producing a timestamp-normalized ZIP.
+input. The script verifies Microsoft signatures, PE imports and resources, the runtime Cargo
+licence graph, an exact file allowlist, and unpacked/ZIP size gates. It also reads the finished
+executable back and refuses to package if any build-machine path survived the remapping. It
+writes `PACKAGE-MANIFEST.json` and `SHA256SUMS.txt` before producing a timestamp-normalized ZIP.
 
-For the Rust preview, the default gates are 50 MiB unpacked and 45 MiB zipped. The output remains
-version `0.1.0` and must not be published as the final 1.0 release.
+The default gates are 20 MiB unpacked and 10 MiB zipped, and the script is pinned to the version
+it was last released with, so bumping a release is a deliberate edit rather than a flag.
 
 After packaging, the following smoke test starts the real executable with an empty isolated user
 profile and a minimal system `PATH`, finds the real configuration window, closes it normally, and

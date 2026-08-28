@@ -1004,7 +1004,9 @@ mod app {
                                         // Where this binary actually is, so the instruction is right on
                                         // any machine instead of only on the author's.
                                         match std::env::current_exe() {
-                                            Ok(path) => println!("     {}", path.display()),
+                                            Ok(path) => {
+                                                println!("     & {:?}", path.display().to_string())
+                                            }
                                             Err(_) => {
                                                 println!("     the clip-only-lab.exe you just ran")
                                             }

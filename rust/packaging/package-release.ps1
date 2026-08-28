@@ -22,6 +22,9 @@ Set-StrictMode -Version Latest
 # them anyway would be four megabytes of DLLs nothing loads.
 $VcFiles = @('vcruntime140.dll')
 $script:MissingLicenseFiles = @()
+# Set only on the build path, read unconditionally in `finally`. Strict mode rejects reading an
+# unset variable, so -SkipBuild would throw on the way out without this.
+$script:SavedBuildEnv = $null
 # Reviewed license identifiers, not whole expressions. The GPUI dependency
 # graph resolves to 32 distinct SPDX expressions and grows every time a crate is
 # updated; matching them literally meant a new formatting variant of a license
@@ -183,6 +186,18 @@ try {
         # CARGO_ENCODED_RUSTFLAGS, not RUSTFLAGS: the latter splits on whitespace and these are paths.
         $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
         $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }
+        # The cc crate splits CFLAGS on whitespace unless CC_SHELL_ESCAPED_FLAGS is set, and a
+        # quoted value ending in a backslash is its own trap. Refusing up front beats letting
+        # cl.exe fail on a half-path, or worse, silently skipping the trim so the gate below
+        # blames the Rust flags for a C problem.
+        if ($cargoHome -match '\s') {
+            throw "CARGO_HOME contains a space ('$cargoHome'); the C compiler flag cannot be passed safely. Set CARGO_HOME to a path without spaces for release builds."
+        }
+        $script:SavedBuildEnv = @{
+            CARGO_ENCODED_RUSTFLAGS = $env:CARGO_ENCODED_RUSTFLAGS
+            CFLAGS                  = $env:CFLAGS
+            CXXFLAGS                = $env:CXXFLAGS
+        }
         $env:CARGO_ENCODED_RUSTFLAGS = @(
             "--remap-path-prefix=$cargoHome=/cargo"
             "--remap-path-prefix=$rustupHome=/rustup"
@@ -190,7 +205,9 @@ try {
         ) -join [char]0x1f
         # --remap-path-prefix is a rustc flag and does not reach the C sources the cc crate builds
         # (tree-sitter, pulled in by gpui, bakes __FILE__ into its assertion messages as UTF-16).
-        # /d1trimfile is MSVC's equivalent; cc forwards CFLAGS to the compiler it invokes.
+        # /d1trimfile is MSVC's equivalent. Note this is graph-wide, not tree-sitter-only: every
+        # cc-built crate here (ring, psm, stacker, tree-sitter*, vswhom-sys, embed-resource) gets
+        # it, and cc treats a set CFLAGS as a signal to stop adding its own warning defaults.
         $env:CFLAGS = "/d1trimfile:$cargoHome\registry\src\"
         $env:CXXFLAGS = $env:CFLAGS
         & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app --release --locked
@@ -200,18 +217,26 @@ try {
     $exe = Resolve-ExistingFile $ExecutablePath 'release executable'
 
     # Read the shipped bytes back rather than trusting that the remaps above were applied — a stale
-    # --skip-build, an edited flag or a future toolchain change would all pass silently otherwise.
-    # Both encodings: Rust emits path metadata as ASCII, the resource compiler as UTF-16LE.
+    # -SkipBuild, an edited flag or a future toolchain change would all pass silently otherwise.
+    # Three passes, because the leak this was written for was UTF-16: Rust emits path metadata as
+    # ASCII, the resource compiler as UTF-16LE, and a UTF-16 string starting at an odd byte offset
+    # is invisible to a decode that begins at zero.
     # The version resource's "(c) SouNd" is deliberate authorship, so only path shapes are rejected.
     $exeBytes = [System.IO.File]::ReadAllBytes($exe)
     $exeText = @(
         [System.Text.Encoding]::ASCII.GetString($exeBytes)
         [System.Text.Encoding]::Unicode.GetString($exeBytes)
+        [System.Text.Encoding]::Unicode.GetString($exeBytes, 1, $exeBytes.Length - 1)
     )
     foreach ($needle in @(':\Users\', $RepositoryRoot, '.cargo\registry', '.rustup\toolchains')) {
         foreach ($text in $exeText) {
             if ($text.Contains($needle)) {
-                throw "the built executable still embeds '$needle' — the --remap-path-prefix flags did not take"
+                $why = if ($SkipBuild) {
+                    'the build was skipped, so nothing remapped these paths — rerun without -SkipBuild'
+                } else {
+                    'the --remap-path-prefix / /d1trimfile flags did not take'
+                }
+                throw "the built executable still embeds '$needle' — $why"
             }
         }
     }
@@ -307,7 +332,7 @@ try {
     # The project's own licence, and the ONLY statement of it a downloader sees, so it has to match
     # LICENSE.md at the repo root. Through 1.0.1 this shipped MIT by accident: the MIT file predated
     # LICENSE.md and nobody updated the copy when the project settled on PolyForm Noncommercial.
-    Copy-Item -LiteralPath rust/packaging/licenses/POE-Alarm-LICENSE.md -Destination $licenseDirectory
+    Copy-Item -LiteralPath LICENSE.md -Destination (Join-Path $licenseDirectory 'POE-Alarm-LICENSE.md')
     Copy-CargoLicenses $packages (Join-Path $licenseDirectory 'rust')
     if ($script:MissingLicenseFiles) {
         $gap = @(
@@ -405,5 +430,13 @@ try {
         ZipBytes=$zipBytes; ZipSha256=(Get-FileHash $zip -Algorithm SHA256).Hash
     } | Format-List
 } finally {
+    # Restore rather than leak: these are process-scoped, and a .ps1 run in an interactive
+    # session would otherwise leave every later cargo build in that window rebuilding the
+    # whole graph with remapped paths and cc's warning defaults switched off.
+    if ($script:SavedBuildEnv) {
+        $env:CARGO_ENCODED_RUSTFLAGS = $script:SavedBuildEnv.CARGO_ENCODED_RUSTFLAGS
+        $env:CFLAGS = $script:SavedBuildEnv.CFLAGS
+        $env:CXXFLAGS = $script:SavedBuildEnv.CXXFLAGS
+    }
     Pop-Location
 }

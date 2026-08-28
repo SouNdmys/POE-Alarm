@@ -51,7 +51,7 @@ struct Poe2Case {
 
 #[test]
 fn poedb_traditional_full_corpus_preserves_strict_match_contract() {
-    let path = repository_root().join("tests/screenshots/poedb-traditional-affix-corpus.json");
+    let path = repository_root().join("tests/fixtures/poedb-traditional-affix-corpus.json");
     let corpus: PoedbCorpus = read_json(&path);
     assert_eq!(corpus.cases.len(), POEDB_EXPECTED_CASES);
 
@@ -171,7 +171,7 @@ fn poedb_traditional_full_corpus_preserves_strict_match_contract() {
 
 #[test]
 fn poe2db_bilingual_full_corpus_preserves_all_hard_invariants() {
-    let path = repository_root().join("tests/screenshots/poe2/poe2db-affix-corpus.json");
+    let path = repository_root().join("tests/fixtures/poe2db-affix-corpus.json");
     let corpus: Poe2Corpus = read_json(&path);
     assert_eq!(corpus.cases.len(), POE2DB_EXPECTED_CASES);
 

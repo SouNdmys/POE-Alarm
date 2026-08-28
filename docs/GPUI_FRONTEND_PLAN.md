@@ -45,7 +45,7 @@
 
 ## 1. 分阶段计划
 
-### Phase 0 — 本机快照与 .NET 清理(用户执行 `scripts/phase0-snapshot-and-cleanup.ps1`)
+### Phase 0 — 本机快照与 .NET 清理(已完成;当时的一次性脚本已随迁移完成删除)
 
 1. `git add -A` + commit:快照当前 rust 工作区与设计稿,push 到
    `origin codex/rust-native-migration`(首次 `-u`)。
