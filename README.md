@@ -2,11 +2,11 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.0.5**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.0.6**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 It does send one thing into the game: a `Ctrl+C` keystroke, to make the client write the hovered item to the clipboard. That is the whole of it — see [Safety boundaries](#safety-boundaries).
 
-Between a click and the new affixes existing sits a server round trip, and nothing here can outrun it. The cadence you can sustain therefore follows your network latency, not this program. Two anchors, measured on the same machine on the same day: a client at 25ms in-game latency held an 80ms cadence, while one at 60ms needed 150ms — and the same client has swung between those worlds overnight as routing changed. If you start overshooting, slow down until it stops; lowering your latency raises the catch rate more than anything this program can change. When an alert fails to block the next click for a reason other than timing, the app now says so explicitly in its log — a silent failure and a slow network no longer look alike.
+Between a click and the new affixes existing sits a server round trip, and nothing here can outrun it. The cadence you can sustain therefore follows your network latency, and sits well above it: measured on one machine, 25ms in-game latency wanted roughly 100ms between clicks and overshot every single time at 50ms, while 60ms latency wanted roughly 150ms. Start slow, shorten it while you watch, and back off as soon as anything gets past you — lowering your latency raises the catch rate more than anything this program can change. When an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log, so a silent failure and a slow network no longer look alike.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 
