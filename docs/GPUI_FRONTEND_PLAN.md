@@ -53,7 +53,7 @@
    `src/`、`tools/`、C# 的 `tests/PoeAlarm.*` 六个工程、`PoeAlarm.slnx`、
    `global.json`、`Directory.Build.props`、`README-运行说明.txt`、
    `licenses/DotNet-*.txt`。
-3. **保留**:`tests/fixtures/`、`tests/screenshots/`(rust 测试依赖这些 JSON 语料)、
+3. **保留**:`tests/fixtures/`、`tests/corpus/`(rust 测试依赖这些语料;`tests/screenshots/` 随 OCR 链路一同删除)、
    `RELEASE_NOTES_*.md`(历史)、ONNX/Paddle license(rust 仍在用)。
 4. 删除本地未跟踪的 .NET 工具目录:`.dotnet-cli/.dotnet-home/.packages/.tools`。
 

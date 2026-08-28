@@ -463,10 +463,15 @@ fn structured_detail(evaluation: &RuleEvaluationResult) -> String {
                 .then_some(observation.original_text.as_str())
         })
         .collect::<Vec<_>>();
-    if observations.is_empty() {
-        group.name.clone()
-    } else {
-        format!("{}: {}", group.name, observations.join(" + "))
+    // An unnamed plan prints only what matched. The name is a label the app
+    // renders in the current UI language, so carrying an empty one through as
+    // "": text would put a bare colon in front of the affix.
+    let name = group.name.trim();
+    match (name.is_empty(), observations.is_empty()) {
+        (true, true) => "Structured rule matched.".to_owned(),
+        (true, false) => observations.join(" + "),
+        (false, true) => name.to_owned(),
+        (false, false) => format!("{}: {}", name, observations.join(" + ")),
     }
 }
 

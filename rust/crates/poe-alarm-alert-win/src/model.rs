@@ -16,28 +16,40 @@ pub struct AlertText {
     pub title: String,
     pub detail: String,
     pub button: String,
+    pub notice: String,
+    pub footer: String,
 }
 
 impl AlertText {
     pub const MAXIMUM_TITLE_CHARACTERS: usize = 160;
     pub const MAXIMUM_DETAIL_CHARACTERS: usize = 2_048;
     pub const MAXIMUM_BUTTON_CHARACTERS: usize = 200;
+    pub const MAXIMUM_NOTICE_CHARACTERS: usize = 200;
+    pub const MAXIMUM_FOOTER_CHARACTERS: usize = 200;
 
     pub fn new(
         title: impl Into<String>,
         detail: impl Into<String>,
         button: impl Into<String>,
+        notice: impl Into<String>,
+        footer: impl Into<String>,
     ) -> Result<Self, AlertTextError> {
         let title = normalize_text(title.into());
         let detail = normalize_text(detail.into());
         let button = normalize_text(button.into());
+        let notice = normalize_text(notice.into());
+        let footer = normalize_text(footer.into());
         validate_field("title", &title, Self::MAXIMUM_TITLE_CHARACTERS)?;
         validate_field("detail", &detail, Self::MAXIMUM_DETAIL_CHARACTERS)?;
         validate_field("button", &button, Self::MAXIMUM_BUTTON_CHARACTERS)?;
+        validate_field("notice", &notice, Self::MAXIMUM_NOTICE_CHARACTERS)?;
+        validate_field("footer", &footer, Self::MAXIMUM_FOOTER_CHARACTERS)?;
         Ok(Self {
             title,
             detail,
             button,
+            notice,
+            footer,
         })
     }
 }

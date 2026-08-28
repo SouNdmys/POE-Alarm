@@ -78,6 +78,10 @@ pub enum RuntimeCommand {
 pub struct AlertCopy {
     pub title: String,
     pub button: String,
+    /// Amber line under the detail: input is taken, check the item first.
+    pub notice: String,
+    /// Footer: the keyboard equivalent and the tail-click absorption window.
+    pub footer: String,
 }
 
 impl AlertCopy {
@@ -86,11 +90,17 @@ impl AlertCopy {
             Self {
                 title: "Target found".to_owned(),
                 button: "Acknowledge".to_owned(),
+                notice: "Further mouse clicks are blocked. Check the item first.".to_owned(),
+                footer:
+                    "Or Ctrl \u{21e7} F12 \u{b7} clicks within 300ms of acknowledging are absorbed"
+                        .to_owned(),
             }
         } else {
             Self {
                 title: "已命中目标".to_owned(),
                 button: "确认".to_owned(),
+                notice: "后续鼠标点击已被阻挡,请先检查装备".to_owned(),
+                footer: "或 Ctrl \u{21e7} F12 \u{b7} 确认后 300ms 吸收尾击".to_owned(),
             }
         }
     }

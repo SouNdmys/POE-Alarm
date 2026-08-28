@@ -326,6 +326,8 @@ impl ProtectionService for NativeProtection {
             presentation.copy.title,
             presentation.detail,
             presentation.copy.button,
+            presentation.copy.notice,
+            presentation.copy.footer,
         )
         .map_err(|error| ProtectionError(error.to_string()))?;
         let mut trigger = AlertTrigger::new(text);
@@ -444,6 +446,8 @@ mod tests {
                     copy: AlertCopy {
                         title: "Target found".to_owned(),
                         button: "Acknowledge".to_owned(),
+                        notice: "Further mouse clicks are blocked.".to_owned(),
+                        footer: "Or Ctrl F12".to_owned(),
                     },
                     detail: "Native protection smoke test".to_owned(),
                     anchor_region: RectI::new(0, 0, 64, 64),

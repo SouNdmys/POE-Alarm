@@ -172,6 +172,24 @@ pub struct RuleProfileSettings {
     pub structured_rule_set: Option<RuleSetDefinition>,
 }
 
+/// Whether a plan name is one the app generated rather than one a person wrote.
+///
+/// Older builds stamped a literal name onto every new plan, so a rule created in
+/// one language kept showing that language after the UI was switched — including
+/// inside the alert window, which is the one place a wrong language costs the
+/// user a moment they do not have. The name is not editable in the UI and is not
+/// an identity anywhere, so clearing exactly the strings the app itself produced
+/// lets the label follow the current language again. Anything a person typed,
+/// including a name that merely starts this way, is left alone.
+fn is_generated_group_name(name: &str) -> bool {
+    const GENERATED_PREFIXES: &[&str] = &["可接受结果 ", "Match option "];
+    let name = name.trim();
+    GENERATED_PREFIXES.iter().any(|prefix| {
+        name.strip_prefix(prefix)
+            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
 impl Default for RuleProfileSettings {
     fn default() -> Self {
         Self {
@@ -185,6 +203,13 @@ impl Default for RuleProfileSettings {
 impl RuleProfileSettings {
     pub fn normalize(mut self) -> Self {
         self.target_affix = self.target_affix.trim().to_owned();
+        if let Some(set) = self.structured_rule_set.as_mut() {
+            for group in &mut set.groups {
+                if is_generated_group_name(&group.name) {
+                    group.name.clear();
+                }
+            }
+        }
         self
     }
 
@@ -1196,6 +1221,56 @@ mod tests {
             fs::read_to_string(&release)
                 .unwrap()
                 .contains("\"UiLanguage\": \"en\"")
+        );
+    }
+
+    /// A plan name the app generated is a label, not user content: older builds
+    /// froze one language into it, so it kept showing Chinese in an English UI —
+    /// including inside the alert, where the name is prefixed to the affix that
+    /// matched. Clearing it lets the label follow the current language. A name a
+    /// person wrote is theirs, and survives even when it looks similar.
+    #[test]
+    fn generated_plan_names_clear_on_load_and_written_ones_survive() {
+        let group = |name: &str| AcceptableResultGroup {
+            name: name.to_owned(),
+            mode: ResultGroupMode::Any,
+            required_count: 1,
+            conditions: Vec::new(),
+        };
+        let settings = RuleProfileSettings {
+            target_affix: String::new(),
+            rule_editor_mode: RuleEditorMode::Structured,
+            structured_rule_set: Some(RuleSetDefinition {
+                schema_version: RULE_SET_SCHEMA_VERSION,
+                name: String::new(),
+                groups: vec![
+                    group("可接受结果 1"),
+                    group("Match option 12"),
+                    group("可接受结果 1 (bow)"),
+                    group("Match option"),
+                    group("crit + attack speed"),
+                ],
+            }),
+        }
+        .normalize();
+
+        let names: Vec<&str> = settings
+            .structured_rule_set
+            .as_ref()
+            .unwrap()
+            .groups
+            .iter()
+            .map(|group| group.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "",
+                "",
+                "可接受结果 1 (bow)",
+                "Match option",
+                "crit + attack speed"
+            ]
         );
     }
 

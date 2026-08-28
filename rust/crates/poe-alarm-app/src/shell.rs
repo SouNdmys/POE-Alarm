@@ -174,7 +174,7 @@ impl AppShell {
                 .structured_rule_set
                 .get_or_insert_with(Default::default);
             set.groups.push(poe_alarm_core::AcceptableResultGroup {
-                name: "可接受结果 1".to_owned(),
+                name: String::new(),
                 mode: ResultGroupMode::Any,
                 required_count: 1,
                 conditions: vec![poe_alarm_core::AffixCondition {
@@ -389,8 +389,9 @@ impl AppShell {
                     for line in lines.into_iter().take(4) {
                         self.push_log(LogKind::Match, line);
                     }
-                    let group =
-                        matched_group.unwrap_or_else(|| self.t().log_target_fallback.to_owned());
+                    let group = matched_group
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or_else(|| self.t().log_target_fallback.to_owned());
                     self.push_log(
                         LogKind::Hit,
                         format!("{} · {group} · {detail}", self.t().log_rule_hit_prefix),
@@ -862,9 +863,11 @@ impl AppShell {
         let set = rules
             .structured_rule_set
             .get_or_insert_with(Default::default);
-        let n = set.groups.len() + 1;
         set.groups.push(poe_alarm_core::AcceptableResultGroup {
-            name: format!("可接受结果 {n}"),
+            // Left blank on purpose: the tree and the alert both render an
+            // unnamed plan in the current UI language, and a literal here
+            // would freeze one language into the user's saved settings.
+            name: String::new(),
             mode: ResultGroupMode::Any,
             required_count: 1,
             conditions: vec![poe_alarm_core::AffixCondition::default()],
@@ -888,7 +891,7 @@ impl AppShell {
             .get_or_insert_with(Default::default);
         if set.groups.is_empty() {
             set.groups.push(poe_alarm_core::AcceptableResultGroup {
-                name: "可接受结果 1".to_owned(),
+                name: String::new(),
                 mode: ResultGroupMode::Any,
                 required_count: 1,
                 conditions: Vec::new(),

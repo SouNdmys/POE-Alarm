@@ -1011,3 +1011,31 @@ fn production_constructor_and_source_factory_are_compile_checked() {
         RuntimeHandle::start_production;
     let _factory: Arc<dyn AffixSourceFactory> = Arc::new(crate::ProductionSourceFactory);
 }
+
+/// The alert is the one screen a user reads under time pressure, and for a long
+/// while two of its five lines were painted from literals in the window code
+/// rather than from the caller-supplied copy — so an English user got English
+/// chrome around Chinese instructions. Asserting on the alphabet rather than on
+/// the wording catches the next line someone forgets to route through here,
+/// which is what actually went wrong.
+#[test]
+fn the_english_alert_carries_no_chinese() {
+    let copy = crate::AlertCopy::for_ui_language("en");
+    for (field, value) in [
+        ("title", &copy.title),
+        ("button", &copy.button),
+        ("notice", &copy.notice),
+        ("footer", &copy.footer),
+    ] {
+        assert!(
+            !value.is_empty(),
+            "the English alert leaves {field} empty, and the window refuses to draw it"
+        );
+        if let Some(offender) = value.chars().find(|c| {
+            // Typographic marks the footer legitimately uses are not letters.
+            !c.is_ascii() && !matches!(c, '\u{b7}' | '\u{21e7}' | '\u{2014}' | '\u{2019}')
+        }) {
+            panic!("the English alert's {field} contains {offender:?}: {value}");
+        }
+    }
+}

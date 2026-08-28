@@ -439,6 +439,8 @@ impl WindowContext {
                 title: String::new(),
                 detail: String::new(),
                 button: String::new(),
+                notice: String::new(),
+                footer: String::new(),
             },
             card: RECT::default(),
             acknowledgement_requested: false,
@@ -970,7 +972,7 @@ unsafe fn render_layered(hwnd: HWND, context: &WindowContext) -> Result<(), Aler
             memory,
             notice_font.0,
             rgb(106, 74, 10),
-            "后续鼠标点击已被阻挡,请先检查装备",
+            &context.text.notice,
             RECT {
                 left: context.card.left + horizontal,
                 top: button_top - 44,
@@ -1000,7 +1002,7 @@ unsafe fn render_layered(hwnd: HWND, context: &WindowContext) -> Result<(), Aler
             memory,
             footer_font.0,
             rgb(140, 47, 36),
-            "或 Ctrl ⇧ F12 · 确认后 300ms 吸收尾击",
+            &context.text.footer,
             RECT {
                 left: context.card.left + horizontal,
                 top: context.card.bottom - CARD_MARGIN - FOOTER_STRIP + 4,
@@ -1277,7 +1279,16 @@ mod tests {
     }
 
     fn trigger() -> AlertTrigger {
-        AlertTrigger::new(AlertText::new("Match", "Check the item", "Acknowledge").unwrap())
+        AlertTrigger::new(
+            AlertText::new(
+                "Match",
+                "Check the item",
+                "Acknowledge",
+                "Blocked",
+                "Or Ctrl F12",
+            )
+            .unwrap(),
+        )
     }
 
     fn wait_for(
@@ -1361,7 +1372,14 @@ mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let (mut overlay, _affinity_warning) = NativeOverlay::create(true, false).unwrap();
-        let text = AlertText::new("Match", "Check the item", "Acknowledge").unwrap();
+        let text = AlertText::new(
+            "Match",
+            "Check the item",
+            "Acknowledge",
+            "Blocked",
+            "Or Ctrl F12",
+        )
+        .unwrap();
 
         overlay.present(&text, None).unwrap();
         assert_eq!(overlay.topology_query_count, 1);
