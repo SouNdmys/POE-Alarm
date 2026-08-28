@@ -20,19 +20,19 @@ const HYBRID_BOW: &str =
 const CORPORA: &[(&str, &str)] = &[
     (
         "poe1-en",
-        include_str!("../../../../tests/语料/poe1/en.txt"),
+        include_str!("../../../../tests/corpus/poe1/en.txt"),
     ),
     (
         "poe1-zh-tw",
-        include_str!("../../../../tests/语料/poe1/zh-tw.txt"),
+        include_str!("../../../../tests/corpus/poe1/zh-tw.txt"),
     ),
     (
         "poe2-en",
-        include_str!("../../../../tests/语料/poe2/en.txt"),
+        include_str!("../../../../tests/corpus/poe2/en.txt"),
     ),
     (
         "poe2-zh-tw",
-        include_str!("../../../../tests/语料/poe2/zh-tw.txt"),
+        include_str!("../../../../tests/corpus/poe2/zh-tw.txt"),
     ),
 ];
 

@@ -99,7 +99,7 @@ cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --locked 
 cargo test --manifest-path rust\Cargo.toml --workspace --all-targets --locked --release --no-fail-fast
 ```
 
-The parser is held to real client output: `tests/语料/` carries 50 items copied byte-for-byte out of both games in both languages, and the corpus tests assert that every modifier the client annotated reaches the rules. `rust/crates/poe-alarm-clip-only` is a console harness that drives the shipped code against a running client, which is the one thing a unit test cannot do.
+The parser is held to real client output: `tests/corpus/` carries 50 items copied byte-for-byte out of both games in both languages, and the corpus tests assert that every modifier the client annotated reaches the rules. `rust/crates/poe-alarm-clip-only` is a console harness that drives the shipped code against a running client, which is the one thing a unit test cannot do.
 
 Release ZIPs include `THIRD-PARTY-NOTICES.md` and `licenses/`; do not strip them from redistributed packages.
 

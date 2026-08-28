@@ -20,7 +20,7 @@ const CORPUS_FILES: &[&str] = &[
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../tests/语料")
+        .join("../../../tests/corpus")
         .canonicalize()
         .expect("corpus directory exists")
 }
