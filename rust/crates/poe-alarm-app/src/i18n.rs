@@ -356,7 +356,7 @@ pub static ZH: Text = Text {
         "· 词缀文本直接来自游戏客户端,不做图像识别,所以不存在看错字的可能;匹配按整行严格判定,不做关键词模糊匹配。",
         "· 数值条件比较的是每条词缀自己的实际值。提示框会把同类词缀加起来显示(两条物理伤害显示成一条),复制出来的文本不会,所以这里不受影响。",
         "· \"测试规则\"可以随时拿一件现成装备验证规则写得对不对,不用真的去洗。",
-        "· 每次点击到看见新词缀之间隔着一次服务器往返,程序追不了比这更快的东西。实测每 50 毫秒点一次仍能稳定拦下;再快就有拦不住的风险,那时锁定窗弹出前你的下一次点击已经打出去了。",
+        "· 每次点击到新词缀出现之间隔着一次服务器往返,程序追不了比这更快的东西。所以能点多快不是本程序的属性,它随你的硬件、当天的网络延迟和 Windows 调度而变。50 毫秒是实测见过能拦下的理论极限,同一台机器换一天也曾在这个速度下拦不住。这是上限而不是推荐值 —— 请用更慢的速率,一旦开始点过头就再放慢。",
     ],
     help_hud_title: "状态浮窗与红色锁定窗",
     help_hud: [
@@ -536,7 +536,7 @@ Restart POE Alarm as administrator now?",
         "· Affix text comes straight from the game client, so there is nothing to misread. Matching is strict on the whole line — no keyword fuzziness.",
         "· Numeric rules compare each modifier's own value. The tooltip adds same-stat modifiers together and shows one number; copied text does not, so this is unaffected.",
         "· \"Test rules\" checks any item you already own, so you can verify a rule without rolling for it.",
-        "· Between your click and the new affixes appearing sits a server round trip, and nothing here can outrun it. Measured, a click every 50ms is still caught reliably; faster than that risks your next click landing before the lock screen does.",
+        "· Between your click and the new affixes existing sits a server round trip, and nothing here can outrun it. How fast you can click is therefore not a property of this app: it moves with your hardware, your latency, and how Windows happens to be scheduling that day. 50ms is the fastest that has ever been measured working here, and the same build on the same machine has missed at that speed on another day. It is a ceiling, not a setting to aim for — pick something slower, and slow down further the moment you start overshooting.",
     ],
     help_hud_title: "STATUS OVERLAY & RED LOCK SCREEN",
     help_hud: [
