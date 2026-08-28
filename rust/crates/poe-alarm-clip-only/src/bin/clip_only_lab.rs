@@ -1001,8 +1001,14 @@ mod app {
                                         println!(
                                             "   right-click it, choose Run as administrator, then:"
                                         );
-                                        println!(r"     cd <repo>");
-                                        println!(r"     rust\target\release\clip-only-lab.exe");
+                                        // Where this binary actually is, so the instruction is right on
+                                        // any machine instead of only on the author's.
+                                        match std::env::current_exe() {
+                                            Ok(path) => println!("     {}", path.display()),
+                                            Err(_) => {
+                                                println!("     the clip-only-lab.exe you just ran")
+                                            }
+                                        }
                                         println!("   The title bar must read \"Administrator:\".");
                                     }
                                     _ => {

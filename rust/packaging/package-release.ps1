@@ -177,11 +177,44 @@ Push-Location $RepositoryRoot
 try {
     if ($Version -ne '1.0.1') { throw 'this script is intentionally pinned to 1.0.1' }
     if (-not $SkipBuild) {
+        # Rust records file!() for every dependency, so an unremapped release build ships several
+        # hundred absolute paths rooted at the builder's home directory. The remaps are computed
+        # from the environment rather than written down, so they stay correct on any machine.
+        # CARGO_ENCODED_RUSTFLAGS, not RUSTFLAGS: the latter splits on whitespace and these are paths.
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
+        $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }
+        $env:CARGO_ENCODED_RUSTFLAGS = @(
+            "--remap-path-prefix=$cargoHome=/cargo"
+            "--remap-path-prefix=$rustupHome=/rustup"
+            "--remap-path-prefix=$RepositoryRoot=/poe-alarm"
+        ) -join [char]0x1f
+        # --remap-path-prefix is a rustc flag and does not reach the C sources the cc crate builds
+        # (tree-sitter, pulled in by gpui, bakes __FILE__ into its assertion messages as UTF-16).
+        # /d1trimfile is MSVC's equivalent; cc forwards CFLAGS to the compiler it invokes.
+        $env:CFLAGS = "/d1trimfile:$cargoHome\registry\src\"
+        $env:CXXFLAGS = $env:CFLAGS
         & cargo build --manifest-path rust/Cargo.toml -p poe-alarm-app --release --locked
         if ($LASTEXITCODE -ne 0) { throw 'release build failed' }
     }
 
     $exe = Resolve-ExistingFile $ExecutablePath 'release executable'
+
+    # Read the shipped bytes back rather than trusting that the remaps above were applied — a stale
+    # --skip-build, an edited flag or a future toolchain change would all pass silently otherwise.
+    # Both encodings: Rust emits path metadata as ASCII, the resource compiler as UTF-16LE.
+    # The version resource's "(c) SouNd" is deliberate authorship, so only path shapes are rejected.
+    $exeBytes = [System.IO.File]::ReadAllBytes($exe)
+    $exeText = @(
+        [System.Text.Encoding]::ASCII.GetString($exeBytes)
+        [System.Text.Encoding]::Unicode.GetString($exeBytes)
+    )
+    foreach ($needle in @(':\Users\', $RepositoryRoot, '.cargo\registry', '.rustup\toolchains')) {
+        foreach ($text in $exeText) {
+            if ($text.Contains($needle)) {
+                throw "the built executable still embeds '$needle' — the --remap-path-prefix flags did not take"
+            }
+        }
+    }
     $vcDirectory = Resolve-ExistingDirectory $VcRedistDirectory 'VC Redistributable directory'
     if ($vcDirectory -notmatch '(?i)\\VC\\Redist\\MSVC\\[^\\]+\\x64\\Microsoft\.VC\d+\.CRT$') {
         throw 'VC runtime source must be an official x64 Visual Studio VC/Redist/MSVC/.../Microsoft.VC*.CRT directory'
@@ -271,7 +304,10 @@ try {
 
     Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'PoeAlarm.exe')
     foreach ($vc in $vcItems) { Copy-Item -LiteralPath $vc.Path -Destination (Join-Path $stage $vc.Name) }
-    Copy-Item -LiteralPath rust/packaging/licenses/POE-Alarm-MIT.txt -Destination $licenseDirectory
+    # The project's own licence, and the ONLY statement of it a downloader sees, so it has to match
+    # LICENSE.md at the repo root. Through 1.0.1 this shipped MIT by accident: the MIT file predated
+    # LICENSE.md and nobody updated the copy when the project settled on PolyForm Noncommercial.
+    Copy-Item -LiteralPath rust/packaging/licenses/POE-Alarm-LICENSE.md -Destination $licenseDirectory
     Copy-CargoLicenses $packages (Join-Path $licenseDirectory 'rust')
     if ($script:MissingLicenseFiles) {
         $gap = @(
