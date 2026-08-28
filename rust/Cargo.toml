@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.4"
+version = "1.0.5"
 authors = ["SouNd <soundmys1994@gmail.com>"]
 edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
