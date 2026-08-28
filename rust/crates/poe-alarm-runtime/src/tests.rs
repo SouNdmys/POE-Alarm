@@ -148,6 +148,8 @@ enum SafetyCall {
 struct FakeProtection {
     calls: Mutex<Vec<SafetyCall>>,
     fail_latch: AtomicBool,
+    /// When set, latches succeed but report the click-block hook as failed.
+    unguarded_reason: Mutex<Option<String>>,
     events: Mutex<VecDeque<ProtectionEvent>>,
     active_generation: Mutex<Option<RuntimeGeneration>>,
 }
@@ -213,7 +215,9 @@ impl ProtectionService for FakeProtection {
         if self.fail_latch.load(Ordering::Acquire) {
             Err(ProtectionError("injected alert failure".to_owned()))
         } else {
-            Ok(AlertLatchStatus::Accepted)
+            Ok(AlertLatchStatus::Accepted {
+                unguarded: self.unguarded_reason.lock().unwrap().clone(),
+            })
         }
     }
 
@@ -1025,6 +1029,7 @@ fn the_english_alert_carries_no_chinese() {
         ("title", &copy.title),
         ("button", &copy.button),
         ("notice", &copy.notice),
+        ("notice_unguarded", &copy.notice_unguarded),
         ("footer", &copy.footer),
     ] {
         assert!(
@@ -1038,4 +1043,50 @@ fn the_english_alert_carries_no_chinese() {
             panic!("the English alert's {field} contains {offender:?}: {value}");
         }
     }
+}
+
+/// A guard failure used to be discarded inside the latch, which made a dead
+/// hook indistinguishable from a lost timing race — the two need opposite
+/// responses, and the user can only tell them apart if the reason survives
+/// the trip. The actor is the sole courier between the latch status and the
+/// UI event, so this pins that it copies the reason onto the detection
+/// instead of flattening the status back to a bare "accepted".
+#[test]
+fn an_unguarded_latch_carries_its_reason_to_the_match_event() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    let protection = Arc::new(FakeProtection::default());
+    *protection.unguarded_reason.lock().unwrap() =
+        Some("the click-block hook could not arm: injected".to_owned());
+    let handle = runtime(&sources, &protection);
+    handle.start(poe2_quick_settings()).unwrap();
+    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(event, RuntimeEvent::MatchFound { .. })
+    });
+    let RuntimeEvent::MatchFound { detection, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(
+        detection.unguarded.as_deref(),
+        Some("the click-block hook could not arm: injected"),
+        "the reason must reach the UI verbatim, or the log cannot name the failure"
+    );
+    shutdown(&handle);
+}
+
+/// The ordinary path must stay quiet: a guarded latch reports no reason, so
+/// the log gains no line and the alert keeps its normal notice.
+#[test]
+fn a_guarded_latch_reports_no_unguarded_reason() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    let protection = Arc::new(FakeProtection::default());
+    let handle = runtime(&sources, &protection);
+    handle.start(poe2_quick_settings()).unwrap();
+    let event = wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(event, RuntimeEvent::MatchFound { .. })
+    });
+    let RuntimeEvent::MatchFound { detection, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(detection.unguarded, None);
+    shutdown(&handle);
 }

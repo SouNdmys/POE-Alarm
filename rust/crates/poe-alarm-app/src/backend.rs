@@ -92,6 +92,8 @@ pub enum BridgeEvent {
         detail: String,
         lines: Vec<String>,
         matched_group: Option<String>,
+        /// `Some(reason)` when the alert presented without its click-block hook.
+        unguarded: Option<String>,
     },
     ItemCheckReport {
         lines: Vec<String>,
@@ -501,6 +503,7 @@ impl Backend {
                     detail: detection.detail.clone(),
                     lines: detection.lines.clone(),
                     matched_group: detection.matched_group.clone(),
+                    unguarded: detection.unguarded.clone(),
                 }),
                 E::AlertPresented { .. } => out.push(BridgeEvent::AlertPresented),
                 E::AlertAcknowledged { .. } => out.push(BridgeEvent::AlertAcknowledged),

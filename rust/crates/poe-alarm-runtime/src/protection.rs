@@ -26,11 +26,26 @@ pub struct AlertPresentation {
     pub anchor_region: Option<RectI>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AlertLatchStatus {
-    Accepted,
+    Accepted {
+        /// `Some(reason)` when the click-block hook did not arm: the overlay
+        /// still presents, but the next click is not swallowed. The reason is
+        /// for the log; the alert swaps its notice line so the user can tell
+        /// at a glance which kind of overshoot they are looking at.
+        unguarded: Option<String>,
+    },
     AlreadyLatched,
 }
+
+/// Environment variable that forces every latch onto the unguarded path.
+///
+/// The whole point of reporting a guard failure is that it is otherwise
+/// indistinguishable from losing the timing race. This lever lets anyone see
+/// the full reporting chain — log line and swapped alert notice — on a real
+/// match, without having to genuinely break the hook. The reason string names
+/// the variable so a forgotten setting cannot masquerade as a real failure.
+pub const FORCE_UNGUARDED_OVERRIDE: &str = "POE_ALARM_FORCE_UNGUARDED";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtectionError(pub String);
@@ -196,18 +211,38 @@ impl ProtectionBookkeeping {
 
 /// Arms a hook-level click block for the gap between a match and a shield.
 ///
-/// `None` on any failure: a match with a slower lock is still a match, and the
-/// present-only path is exactly what shipped before this existed.
-fn armed_guard_for_latch() -> Option<PendingMouseInputGuard> {
+/// A match with a slower lock is still a match, so the caller proceeds either
+/// way — but a failure here means the alert will NOT stop the next click, and
+/// for a long time that was invisible: the error was discarded, and the only
+/// symptom was the user clicking past a winning roll with no way to tell a
+/// dead hook from a lost timing race. The reason now travels with the status
+/// so the log can say which one it was.
+fn armed_guard_for_latch() -> Result<PendingMouseInputGuard, String> {
+    if let Some(reason) =
+        forced_unguarded_reason(std::env::var_os(FORCE_UNGUARDED_OVERRIDE).as_deref())
+    {
+        return Err(reason);
+    }
     let mut guard = PendingMouseInputGuard::new();
-    if guard.prepare().is_err() {
-        return None;
+    if let Err(error) = guard.prepare() {
+        return Err(format!("the click-block hook could not prepare: {error}"));
     }
-    if guard.arm().is_err() {
+    if let Err(error) = guard.arm() {
         guard.release();
-        return None;
+        return Err(format!("the click-block hook could not arm: {error}"));
     }
-    Some(guard)
+    Ok(guard)
+}
+
+/// The override decision, taken on the raw environment value so it is testable
+/// without process-global environment mutation (this crate forbids the unsafe
+/// `set_var`). Empty means unset: `POE_ALARM_FORCE_UNGUARDED=` clears it.
+fn forced_unguarded_reason(value: Option<&std::ffi::OsStr>) -> Option<String> {
+    value.filter(|value| !value.is_empty()).map(|_| {
+        format!(
+            "forced by {FORCE_UNGUARDED_OVERRIDE} (diagnostic override; unset it for real runs)"
+        )
+    })
 }
 
 struct GuardSlot {
@@ -322,29 +357,21 @@ impl ProtectionService for NativeProtection {
         generation: RuntimeGeneration,
         presentation: AlertPresentation,
     ) -> Result<AlertLatchStatus, ProtectionError> {
-        let text = AlertText::new(
-            presentation.copy.title,
-            presentation.detail,
-            presentation.copy.button,
-            presentation.copy.notice,
-            presentation.copy.footer,
-        )
-        .map_err(|error| ProtectionError(error.to_string()))?;
-        let mut trigger = AlertTrigger::new(text);
-        trigger.anchor_region = presentation.anchor_region;
-
         let mut state = self.state();
         if !state.bookkeeping.is_active(generation) {
             return Err(ProtectionError(
                 "the detection belongs to a stopped runtime session".to_owned(),
             ));
         }
-        let pending_guard = if state
+        // The guard arms before the text is even validated: the hook arms in
+        // microseconds and every step in front of it is part of the race the
+        // user's next click is running.
+        let (pending_guard, unguarded) = if state
             .guard
             .as_ref()
             .is_some_and(|slot| slot.generation == generation)
         {
-            state.guard.take().map(|slot| slot.guard)
+            (state.guard.take().map(|slot| slot.guard), None)
         } else {
             // Fast mode arms one right here, at the instant of the match. The
             // shield window takes tens of milliseconds to present and verify,
@@ -355,12 +382,38 @@ impl ProtectionService for NativeProtection {
             // the rest of the lifecycle it was already built for: transfer to
             // the overlay once it is verified, or fail open on a bounded
             // timeout so a stuck presentation can never wedge the mouse.
-            armed_guard_for_latch()
+            match armed_guard_for_latch() {
+                Ok(guard) => (Some(guard), None),
+                Err(reason) => (None, Some(reason)),
+            }
         };
+        let notice = if unguarded.is_some() {
+            presentation.copy.notice_unguarded
+        } else {
+            presentation.copy.notice
+        };
+        let text = match AlertText::new(
+            presentation.copy.title,
+            presentation.detail,
+            presentation.copy.button,
+            notice,
+            presentation.copy.footer,
+        ) {
+            Ok(text) => text,
+            Err(error) => {
+                // A guard with no alert to hand it to must not stay armed.
+                if let Some(mut guard) = pending_guard {
+                    guard.release();
+                }
+                return Err(ProtectionError(error.to_string()));
+            }
+        };
+        let mut trigger = AlertTrigger::new(text);
+        trigger.anchor_region = presentation.anchor_region;
         match state.alert.trigger(trigger, pending_guard) {
             Ok(AlertTriggerStatus::Accepted(alert_id)) => {
                 state.bookkeeping.insert_alert(alert_id, generation);
-                Ok(AlertLatchStatus::Accepted)
+                Ok(AlertLatchStatus::Accepted { unguarded })
             }
             Ok(AlertTriggerStatus::AlreadyLatched(_)) => Ok(AlertLatchStatus::AlreadyLatched),
             Err(error) => Err(ProtectionError(error.to_string())),
@@ -425,6 +478,21 @@ mod tests {
         assert!(!bookkeeping.is_active(generation));
     }
 
+    /// The override sits in front of any native hook work, and its reason
+    /// must name the variable — a forgotten setting has to read as what it is
+    /// in the user's log instead of masquerading as a real hook failure.
+    #[test]
+    fn the_forced_unguarded_override_names_itself_and_ignores_empty_values() {
+        let reason = forced_unguarded_reason(Some(std::ffi::OsStr::new("1")))
+            .expect("a set override must force the failure path");
+        assert!(reason.contains(FORCE_UNGUARDED_OVERRIDE), "{reason}");
+        assert_eq!(
+            forced_unguarded_reason(Some(std::ffi::OsStr::new(""))),
+            None
+        );
+        assert_eq!(forced_unguarded_reason(None), None);
+    }
+
     /// Manual production-boundary smoke test. It intentionally owns the real
     /// process-wide alert worker and can briefly present the native red shield,
     /// so the normal unit suite exercises the pure bookkeeping regression above.
@@ -447,6 +515,7 @@ mod tests {
                         title: "Target found".to_owned(),
                         button: "Acknowledge".to_owned(),
                         notice: "Further mouse clicks are blocked.".to_owned(),
+                        notice_unguarded: "This alert did NOT block clicks.".to_owned(),
                         footer: "Or Ctrl F12".to_owned(),
                     },
                     detail: "Native protection smoke test".to_owned(),
@@ -454,7 +523,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(status, AlertLatchStatus::Accepted);
+        assert_eq!(status, AlertLatchStatus::Accepted { unguarded: None });
         protection.stop_pending(generation);
         let _ = protection.acknowledge();
         protection.shutdown_fail_open().unwrap();

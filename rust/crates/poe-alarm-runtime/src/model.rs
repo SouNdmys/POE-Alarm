@@ -80,6 +80,10 @@ pub struct AlertCopy {
     pub button: String,
     /// Amber line under the detail: input is taken, check the item first.
     pub notice: String,
+    /// Replaces `notice` when the click-block hook failed to arm for this
+    /// alert, so the one screen read under time pressure says the truth:
+    /// the next click is NOT being swallowed.
+    pub notice_unguarded: String,
     /// Footer: the keyboard equivalent and the tail-click absorption window.
     pub footer: String,
 }
@@ -91,6 +95,9 @@ impl AlertCopy {
                 title: "Target found".to_owned(),
                 button: "Acknowledge".to_owned(),
                 notice: "Further mouse clicks are blocked. Check the item first.".to_owned(),
+                notice_unguarded:
+                    "This alert did NOT block your clicks — the hook failed to arm. See the log."
+                        .to_owned(),
                 footer:
                     "Or Ctrl \u{21e7} F12 \u{b7} clicks within 300ms of acknowledging are absorbed"
                         .to_owned(),
@@ -100,6 +107,7 @@ impl AlertCopy {
                 title: "已命中目标".to_owned(),
                 button: "确认".to_owned(),
                 notice: "后续鼠标点击已被阻挡,请先检查装备".to_owned(),
+                notice_unguarded: "本次红窗未能拦截后续点击,原因见程序日志".to_owned(),
                 footer: "或 Ctrl \u{21e7} F12 \u{b7} 确认后 300ms 吸收尾击".to_owned(),
             }
         }
@@ -139,6 +147,9 @@ pub struct DetectionSummary {
     pub detail: String,
     pub lines: Vec<String>,
     pub matched_group: Option<String>,
+    /// `Some(reason)` when the red alert presented without its click-block
+    /// hook. The alert still fired; the very next click was not swallowed.
+    pub unguarded: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

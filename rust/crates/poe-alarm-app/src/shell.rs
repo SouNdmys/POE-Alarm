@@ -384,6 +384,7 @@ impl AppShell {
                     detail,
                     lines,
                     matched_group,
+                    unguarded,
                 } => {
                     self.s.hit_count += 1;
                     for line in lines.into_iter().take(4) {
@@ -396,6 +397,15 @@ impl AppShell {
                         LogKind::Hit,
                         format!("{} · {group} · {detail}", self.t().log_rule_hit_prefix),
                     );
+                    // A dead hook and a lost timing race look identical from
+                    // the stash tab. This line is the only thing that tells
+                    // them apart, so it carries the runtime's raw reason.
+                    if let Some(reason) = unguarded {
+                        self.push_log(
+                            LogKind::Meta,
+                            format!("{} {reason}", self.t().log_unguarded_prefix),
+                        );
+                    }
                 }
                 BridgeEvent::ItemCheckReport {
                     lines,

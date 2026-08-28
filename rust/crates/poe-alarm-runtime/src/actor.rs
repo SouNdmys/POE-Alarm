@@ -855,8 +855,13 @@ impl EventSink for MonitorBridge {
                     .protection
                     .latch_red_alert(self.generation, presentation)
                 {
-                    Ok(AlertLatchStatus::Accepted | AlertLatchStatus::AlreadyLatched) => {
+                    Ok(AlertLatchStatus::Accepted { unguarded }) => {
                         // Ownership is latched synchronously before this callback returns.
+                        let mut summary = summary;
+                        summary.unguarded = unguarded;
+                        self.send(BridgeMonitorEvent::Detection(summary));
+                    }
+                    Ok(AlertLatchStatus::AlreadyLatched) => {
                         self.send(BridgeMonitorEvent::Detection(summary));
                     }
                     Err(error) => {
@@ -879,6 +884,7 @@ fn detection_summary(detection: &MonitorDetection) -> DetectionSummary {
             detail: matched.original_text.clone(),
             lines: snapshot.last_lines.clone(),
             matched_group: None,
+            unguarded: None,
         },
         MonitorDetection::Structured {
             evaluation,
@@ -888,6 +894,7 @@ fn detection_summary(detection: &MonitorDetection) -> DetectionSummary {
             detail: detected_text.clone(),
             lines: snapshot.last_lines.clone(),
             matched_group: evaluation.matched_group_id().map(str::to_owned),
+            unguarded: None,
         },
     }
 }
