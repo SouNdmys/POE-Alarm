@@ -2,12 +2,12 @@
 
 *This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.*
 
-> ## This branch: click-invoked copies, no timer
+> ## Since 1.1.0: click-invoked copies, no timer
 >
 > GGG's [developer documentation](https://www.pathofexile.com/developer/docs/index) requires
 > any synthesized input that affects the game to be invoked manually, naming timers among the
-> disallowed triggers — which is what the timed monitoring in releases up to 1.0.6 was. On
-> this branch **every copy is invoked by a press of yours**: a pass-through hook counts your
+> disallowed triggers — which is what the timed monitoring in releases up to 1.0.6 was.
+> Since 1.1.0 **every copy is invoked by a press of yours**: a pass-through hook counts your
 > clicks (it suppresses and synthesizes nothing), and each click is followed by one `Ctrl+C`
 > after a delay for the server round trip — at most three chords per click when the client
 > answers late, never on a timer, never while you are idle. A manual `Ctrl+C` works too.
@@ -20,7 +20,7 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current build on this branch: **1.1.0** (passive monitoring, unreleased), a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.1.0**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` follows each click you make (with a bounded retry when the client answers late), and a manual `Ctrl+C` is honored as well. Nothing is sent on a timer and nothing is sent while you are idle — see [Safety boundaries](#safety-boundaries).
 
