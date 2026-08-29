@@ -1,32 +1,25 @@
 # POE Alarm
 
-> ## ⚠️ Read this before using it on an account you care about
+*This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.*
+
+> ## ⚠️ Compliance status — read before using
 >
-> **This tool may not comply with Path of Exile's rules on automation, and I have not yet
-> received an answer from GGG.**
+> **GGG answered by pointing to their [developer documentation](https://www.pathofexile.com/developer/docs/index),
+> and under its macro rules the timed monitoring in every release up to 1.0.7 is not
+> compliant.** The rules require any synthesized input that affects the game to be *invoked
+> manually by the user*, and they name **timers** first among the disallowed triggers. These
+> builds send `Ctrl+C` on a timer, about twenty times a second, regardless of what you press
+> (see [Safety boundaries](#safety-boundaries)). That is exactly the shape the rules exclude.
 >
-> To notice that an item changed, the app sends `Ctrl+C` into the game **on a timer** — about
-> twenty times a second for as long as monitoring runs, whether or not you press anything (see
-> [Safety boundaries](#safety-boundaries)). The rule most often quoted for macros is the
-> opposite of that:
+> What follows from that:
 >
-> > "Each macro must be activated by a button press; automation of any kind is against the
-> > rules. Your macro also cannot conditionally perform actions or select between multiple
-> > actions."
->
-> A timer is not a button press. Whether that makes this tool disallowed is **GGG's call, not
-> mine**, and I am not going to argue either way here.
->
-> Two community threads for context — note that **neither is an official GGG ruling**: the
-> first is a player-written guide whose author states outright that he is not a GGG employee,
-> and the second is a player discussion that quotes the policy above, with no GGG staff reply
-> in it.
->
-> - [\[Guide\] What a macro is allowed to do in Path of Exile](https://www.pathofexile.com/forum/view-thread/2077975/page/1)
-> - [@Lutbot macro set confirmed by Zizaran in his latest video](https://www.pathofexile.com/forum/view-thread/2686839)
->
-> **Until GGG answers, do not use this on an account you would mind losing.** I have asked;
-> if and when there is a response, it goes here.
+> - **Do not run the timed monitoring of 1.0.7 or earlier on an account you care about.**
+> - The manual item check (`Ctrl+Shift+F11`) already complies: one manual press, one copy,
+>   one fixed function.
+> - A redesign is in progress on the `passive-clipboard` branch in which monitoring injects
+>   **nothing at all**: you press `Ctrl+C` yourself — the game's own copy feature — and the
+>   app only reads the clipboard, evaluates, and alarms. If it holds up in testing it becomes
+>   the only monitoring mode.
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
