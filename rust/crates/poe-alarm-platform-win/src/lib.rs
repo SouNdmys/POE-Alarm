@@ -7,6 +7,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod alert_cue;
+mod click_observer;
 mod clipboard;
 mod error;
 mod geometry;
@@ -22,6 +23,7 @@ mod wave;
 mod win32;
 
 pub use alert_cue::built_in_alert_wave;
+pub use click_observer::{ClickObserver, observed_clicks, start_click_observer};
 pub use clipboard::{
     ClipboardError, CopyOutcome, ElevateError, HeldModifiers, KeyMethod, SYNTHETIC_INPUT_SIGNATURE,
     confirm_relaunch_elevated, copy_hovered_item, cursor_position, describes_game,

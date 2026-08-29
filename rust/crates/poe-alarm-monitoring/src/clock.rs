@@ -4,13 +4,12 @@ use crate::CancellationToken;
 
 /// How long to pace between readings.
 ///
-/// The passive source injects nothing: each poll reads the clipboard sequence
-/// number — one syscall — and touches the clipboard only after the user's own
-/// copy has moved it. The contention that shaped the injector's 35ms (every
-/// request made the client serialize the whole item, so polling harder made
-/// the roll arrive later) does not exist here, because nothing is asked of
-/// the client at all. What remains is a plain sampling delay on a counter,
-/// so it is set low: 10ms, which Windows quantises up to its ~15.6ms tick.
+/// Each poll here reads two counters — the click count and the clipboard
+/// sequence number — and asks nothing of the client. Chords are sent only on
+/// the click-invoked schedule, so the contention that shaped the injector's
+/// 35ms (polling harder made the client serialize instead of applying the
+/// orb) no longer rides on this value. It is a plain sampling delay: 10ms,
+/// which Windows quantises up to its ~15.6ms tick.
 ///
 /// Both values are identical because anything below the tick resolves to the
 /// tick anyway; distinguishing them would be fiction. `POE_ALARM_SCAN_MS`

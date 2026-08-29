@@ -1,3 +1,4 @@
+mod click_observer;
 mod clipboard;
 mod hotkeys;
 mod hud;
@@ -5,6 +6,7 @@ mod mouse_hook;
 mod self_test;
 mod wave;
 
+pub(crate) use click_observer::{NativeClickObserver, observed_clicks, start_click_observer};
 pub(crate) use clipboard::{
     clipboard_sequence_number, confirm_relaunch_elevated, copy_hovered_item, cursor_position,
     foreground_window_description, game_process_outranks_us, game_window_rect, held_modifiers,
