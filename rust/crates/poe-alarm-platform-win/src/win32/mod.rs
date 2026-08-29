@@ -4,6 +4,7 @@ mod hotkeys;
 mod hud;
 mod mouse_hook;
 mod self_test;
+mod timer_resolution;
 mod wave;
 
 pub(crate) use click_observer::{NativeClickObserver, observed_clicks, start_click_observer};
@@ -16,6 +17,7 @@ pub(crate) use hotkeys::{register_hot_key, unregister_hot_key};
 pub(crate) use hud::NativeHudWindow;
 pub(crate) use mouse_hook::NativePendingMouseGuard;
 pub(crate) use self_test::run_self_test;
+pub(crate) use timer_resolution::{NativeTimerResolutionGuard, request_fine_timer_resolution};
 pub(crate) use wave::{play_wave, stop_wave};
 
 use crate::PlatformError;

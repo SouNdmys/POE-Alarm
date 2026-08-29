@@ -18,6 +18,7 @@ mod mouse_guard;
 #[cfg(not(windows))]
 mod non_windows;
 mod self_test;
+mod timer_resolution;
 mod wave;
 #[cfg(windows)]
 mod win32;
@@ -47,6 +48,7 @@ pub use mouse_guard::{
     MouseGuardStateMachine, MouseInput, PendingMouseInputGuard,
 };
 pub use self_test::{PlatformSelfTestReport, run_windows_self_test};
+pub use timer_resolution::{TimerResolutionGuard, request_fine_timer_resolution};
 pub use wave::{
     LoopingWavePlayer, PcmWaveFormat, ValidatedWave, WaveValidationError, WaveValidationErrorKind,
     validate_pcm_wave,

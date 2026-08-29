@@ -24,8 +24,9 @@ use poe_alarm_monitoring::{
     StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClickObserver, ClipboardError, KeyMethod, copy_hovered_item, game_is_foreground,
-    game_process_outranks_us, observed_clicks, read_text, sequence_number, start_click_observer,
+    ClickObserver, ClipboardError, KeyMethod, TimerResolutionGuard, copy_hovered_item,
+    game_is_foreground, game_process_outranks_us, observed_clicks, read_text,
+    request_fine_timer_resolution, sequence_number, start_click_observer,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
@@ -35,18 +36,27 @@ use poe_alarm_platform_win::{
 /// out only delays the retry.
 const COPY_DEADLINE: Duration = Duration::from_millis(12);
 
-/// How long after a click before the copy is sent.
+/// Where the click-to-copy delay starts before adaptation takes over.
 ///
 /// The new affixes exist only after a server round trip, so a copy fired too
-/// early reads the old item. 80ms clears a ~60ms in-game latency with margin;
-/// `POE_ALARM_COPY_DELAY_MS` overrides it for other connections.
+/// early reads the old item — and one fired late gives the roll away to the
+/// next click. The right value is a property of the connection and the hour,
+/// so it is *learned*: every click teaches whether the first copy was early
+/// (a retry was needed: raise) or comfortably late (it answered fresh:
+/// probe lower). `POE_ALARM_COPY_DELAY_MS` pins it and disables adaptation.
 const DEFAULT_COPY_DELAY: Duration = Duration::from_millis(80);
+
+/// Adaptation bounds and steps: additive-increase, gentle-decrease.
+const MIN_COPY_DELAY: Duration = Duration::from_millis(40);
+const MAX_COPY_DELAY: Duration = Duration::from_millis(150);
+const DELAY_RAISE: Duration = Duration::from_millis(15);
+const DELAY_PROBE: Duration = Duration::from_millis(5);
 
 /// Environment variable overriding the click-to-copy delay, in milliseconds.
 pub const COPY_DELAY_OVERRIDE: &str = "POE_ALARM_COPY_DELAY_MS";
 
 /// Gap between re-copies when the first copy still shows the old text.
-const RECOPY_GAP: Duration = Duration::from_millis(50);
+const RECOPY_GAP: Duration = Duration::from_millis(30);
 
 /// Most chords one click may cost, counting the first copy and re-copies.
 ///
@@ -105,6 +115,20 @@ fn copy_delay_override(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
         .then(|| Duration::from_millis(millis))
 }
 
+/// One step of the delay controller.
+///
+/// A retry (or a late answer caught passively) means the first copy fired
+/// before the roll arrived: raise decisively, losing a roll costs currency.
+/// A fresh first-copy answer means there is room below: probe down gently,
+/// early copies only cost a bounded retry. Additive both ways, clamped.
+fn adapted_delay(current: Duration, needed_retry: bool) -> Duration {
+    if needed_retry {
+        (current + DELAY_RAISE).min(MAX_COPY_DELAY)
+    } else {
+        current.saturating_sub(DELAY_PROBE).max(MIN_COPY_DELAY)
+    }
+}
+
 /// Where the start-invoked baseline copy stands.
 ///
 /// The first reading is never evaluated (an item that already matches must
@@ -159,6 +183,10 @@ pub struct ClipboardSource {
     /// Why the observer is `None`, reported once.
     observer_failure: Option<String>,
     copy_delay: Duration,
+    /// `true` when `POE_ALARM_COPY_DELAY_MS` pinned the delay: no adaptation.
+    delay_pinned: bool,
+    /// Holds the scheduler at 1ms so tick jitter stops eating the margin.
+    _timer_resolution: TimerResolutionGuard,
     /// Clicks already answered with a copy (or given up on).
     clicks_handled: u64,
     /// When the newest unanswered click was observed.
@@ -192,12 +220,14 @@ impl ClipboardSource {
             Ok(observer) => (Some(observer), None),
             Err(error) => (None, Some(error.to_string())),
         };
+        let pinned = copy_delay_override(std::env::var_os(COPY_DELAY_OVERRIDE).as_deref());
         Self {
             key_method: KeyMethod::default(),
             _observer: observer,
             observer_failure,
-            copy_delay: copy_delay_override(std::env::var_os(COPY_DELAY_OVERRIDE).as_deref())
-                .unwrap_or(DEFAULT_COPY_DELAY),
+            delay_pinned: pinned.is_some(),
+            _timer_resolution: request_fine_timer_resolution(),
+            copy_delay: pinned.unwrap_or(DEFAULT_COPY_DELAY),
             clicks_handled: observed_clicks(),
             click_seen_at: None,
             copies_this_click: 0,
@@ -372,6 +402,12 @@ impl AffixSource for ClipboardSource {
                     self.last_sequence = Some(sequence);
                     match self.ingest(text, started, CopyOrigin::Manual) {
                         Ingested::Evidence(result) | Ingested::Settled(result) => {
+                            // Evidence arriving while a click's copy is still
+                            // pending is a late answer the schedule missed:
+                            // the first copy fired too early. Learn from it.
+                            if !self.delay_pinned && self.click_seen_at.is_some() {
+                                self.copy_delay = adapted_delay(self.copy_delay, true);
+                            }
                             self.settle_click();
                             return Ok(result);
                         }
@@ -461,6 +497,9 @@ impl AffixSource for ClipboardSource {
         };
         match self.ingest(outcome.text, started, origin) {
             Ingested::Evidence(result) | Ingested::Settled(result) => {
+                if !self.delay_pinned && origin == CopyOrigin::Click {
+                    self.copy_delay = adapted_delay(self.copy_delay, self.copies_this_click > 1);
+                }
                 self.settle_click();
                 Ok(result)
             }
@@ -522,6 +561,18 @@ mod tests {
             None
         );
         assert_eq!(copy_delay_override(None), None);
+    }
+
+    /// The delay controller must be decisive upward (a missed roll costs
+    /// currency) and gentle downward (an early copy only costs a retry), and
+    /// must never leave its bounds.
+    #[test]
+    fn the_delay_controller_raises_hard_probes_gently_and_stays_bounded() {
+        let mid = Duration::from_millis(80);
+        assert_eq!(adapted_delay(mid, true), Duration::from_millis(95));
+        assert_eq!(adapted_delay(mid, false), Duration::from_millis(75));
+        assert_eq!(adapted_delay(MAX_COPY_DELAY, true), MAX_COPY_DELAY);
+        assert_eq!(adapted_delay(MIN_COPY_DELAY, false), MIN_COPY_DELAY);
     }
 
     /// The injection budget of one click is bounded by construction; this

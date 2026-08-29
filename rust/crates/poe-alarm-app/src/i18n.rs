@@ -355,7 +355,7 @@ pub static ZH: Text = Text {
     help_hotkey_stop: "解除命中锁定(红窗内快捷键,也可直接点红窗按钮);停止监控用界面\"停止监控\"按钮",
     help_rules_title: "规则与数值",
     help_rules: [
-        "· 复制由你的按键触发,没有任何定时器。开启监控(按钮或热键都行)后直接点石头即可:每点一次,程序等约 80 毫秒(给服务器回包留时间)自动补一次 Ctrl+C 并判定,命中即报警并拦截后续点击,第一颗石头也会被判定。开启时若正悬停在物品上,那一下还会顺带复制一次建立基准,首颗的判定更稳。复制到旧词缀最多再补两次(间隔 50 毫秒)即放弃该轮;POE_ALARM_COPY_DELAY_MS 可调首次等待,手动 Ctrl+C 一样生效。请手动点击,不要使用自动连点宏(定时触发正是规则明文禁止的);不洗石头时请停止监控。游戏以管理员运行时程序会立刻提示提权。",
+        "· 复制由你的按键触发,没有任何定时器。开启监控(按钮或热键都行)后直接点石头即可:每点一次,程序等一段自适应的延迟(默认从 80 毫秒起,按你的实际到达时间自动调节)后补一次 Ctrl+C 并判定,命中即报警并拦截后续点击,第一颗石头也会被判定。开启时若正悬停在物品上,那一下还会顺带复制一次建立基准,首颗的判定更稳。复制到旧词缀最多再补两次(间隔 30 毫秒)即放弃该轮;设 POE_ALARM_COPY_DELAY_MS 可固定延迟并关闭自适应,手动 Ctrl+C 一样生效。请手动点击,不要使用自动连点宏(定时触发正是规则明文禁止的);不洗石头时请停止监控。游戏以管理员运行时程序会立刻提示提权。",
         "· 词缀文本直接来自游戏客户端,不做图像识别,所以不存在看错字的可能;匹配按整行严格判定,不做关键词模糊匹配。",
         "· 数值条件比较的是每条词缀自己的实际值。提示框会把同类词缀加起来显示(两条物理伤害显示成一条),复制出来的文本不会,所以这里不受影响。",
         "· \"测试规则\"可以随时拿一件现成装备验证规则写得对不对,不用真的去洗。",
@@ -537,7 +537,7 @@ Restart POE Alarm as administrator now?",
     help_hotkey_stop: "Release the match lock (works on the red card; the card button does the same); stop monitoring via the UI button",
     help_rules_title: "RULES & VALUES",
     help_rules: [
-        "· Every copy is invoked by a press of yours — there is no timer. Start monitoring (button or hotkey, either works) and just click: each click is followed, ~80ms later (server round trip; POE_ALARM_COPY_DELAY_MS adjusts it), by one automatic Ctrl+C, judged on arrival — the first roll included. Starting while hovering the item also sets a baseline copy, which makes that first judgement steadier. Stale text earns at most two retries 50ms apart, then the click is given up; a manual Ctrl+C works too. Click by hand — do not use auto-clicker macros, timed triggering is exactly what the rules prohibit — and stop monitoring when you are not crafting. If the game runs as administrator the app says so immediately.",
+        "· Every copy is invoked by a press of yours — there is no timer. Start monitoring (button or hotkey, either works) and just click: each click is followed by one automatic Ctrl+C after an adaptive delay (starting at 80ms, tuned to your actual arrival times; POE_ALARM_COPY_DELAY_MS pins it), judged on arrival — the first roll included. Starting while hovering the item also sets a baseline copy, which makes that first judgement steadier. Stale text earns at most two retries 30ms apart, then the click is given up; a manual Ctrl+C works too. Click by hand — do not use auto-clicker macros, timed triggering is exactly what the rules prohibit — and stop monitoring when you are not crafting. If the game runs as administrator the app says so immediately.",
         "· Affix text comes straight from the game client, so there is nothing to misread. Matching is strict on the whole line — no keyword fuzziness.",
         "· Numeric rules compare each modifier's own value. The tooltip adds same-stat modifiers together and shows one number; copied text does not, so this is unaffected.",
         "· \"Test rules\" checks any item you already own, so you can verify a rule without rolling for it.",
