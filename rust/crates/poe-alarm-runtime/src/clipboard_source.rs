@@ -115,6 +115,17 @@ fn copy_delay_override(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
         .then(|| Duration::from_millis(millis))
 }
 
+/// The next copy's due time when a fresh click arrives.
+///
+/// A pending copy that is already due sooner survives: cancelling it on every
+/// faster click starves the pipeline outright — below the cadence floor not a
+/// single copy ever fires, and the session goes blind instead of alarming
+/// late. Firing the earlier copy keeps evidence flowing at any cadence; the
+/// per-click budget still resets, so the ceiling stays three chords per click.
+fn next_due(existing: Option<Instant>, fresh: Instant) -> Instant {
+    existing.filter(|due| *due < fresh).unwrap_or(fresh)
+}
+
 /// One step of the delay controller.
 ///
 /// A retry (or a late answer caught passively) means the first copy fired
@@ -442,7 +453,7 @@ impl AffixSource for ClipboardSource {
             self.clicks_handled = clicks;
             self.click_seen_at = Some(started);
             self.copies_this_click = 0;
-            self.next_copy_at = Some(started + self.copy_delay);
+            self.next_copy_at = Some(next_due(self.next_copy_at, started + self.copy_delay));
             // A click racing the pending baseline wins it: the copy that
             // follows is post-roll and must be judged, not filed as state.
             if self.baseline != Baseline::Done {
@@ -561,6 +572,21 @@ mod tests {
             None
         );
         assert_eq!(copy_delay_override(None), None);
+    }
+
+    /// A fresh click must not cancel a copy that is already due sooner —
+    /// that starvation is exactly how a fast cadence went completely blind.
+    #[test]
+    fn a_faster_click_keeps_the_earlier_pending_copy() {
+        let now = Instant::now();
+        let sooner = now + Duration::from_millis(20);
+        let fresh = now + Duration::from_millis(120);
+        assert_eq!(next_due(Some(sooner), fresh), sooner);
+        assert_eq!(
+            next_due(Some(fresh + Duration::from_millis(1)), fresh),
+            fresh
+        );
+        assert_eq!(next_due(None, fresh), fresh);
     }
 
     /// The delay controller must be decisive upward (a missed roll costs
