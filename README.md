@@ -25,7 +25,6 @@ Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` fo
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 
-> This repository previously hosted a .NET (WPF) implementation of 1.0. It has been retired and fully replaced by this Rust build; the history remains in git.
 
 ## Why 1.1.0 exists: compliance with GGG's developer rules
 

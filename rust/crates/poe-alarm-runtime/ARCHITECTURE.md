@@ -24,22 +24,28 @@ through `AffixSourceFactory`; `DynamicSource` is the newtype that lets a boxed
 source satisfy the trait, since a blanket impl over a foreign `Box` and a
 foreign trait cannot be written here.
 
-`ClipboardSource` injects nothing. Each poll reads the clipboard sequence
-number — a global counter, one syscall — and only when the user's own `Ctrl+C`
-has moved it does the source read the payload, parse it, and hand it to the
-rules. While the game is not the foreground window the source reads no content
-at all: the clipboard belongs to whatever else the user is doing, and a copy
-made while tabbed out must not be misread as a roll later.
+`ClipboardSource` synthesizes input only in answer to the user's own presses.
+A pass-through hook counts left clicks (its whole callback is a counter
+increment; it suppresses and forwards everything). Each click is followed by
+one `Ctrl+C` after an adaptive delay that waits out the server round trip;
+stale or missing answers earn at most two spaced retries, a ceiling of three
+chords per click pinned by a test. Starting a session invokes one equally
+bounded baseline copy. There is no timer-invoked injection anywhere, and no
+clicks means no chords. The user's own `Ctrl+C` is honored through the
+clipboard sequence number, and the pre-session clipboard is never read at all.
+While the game is not the foreground window the source reads no content and
+writes clicks off: the clipboard belongs to whatever else the user is doing.
 
-No failure here is actionable in the elevation sense. The injector's one
-actionable fault was Windows discarding keystrokes aimed at an elevated game;
-with nothing sent, elevation is irrelevant to monitoring. The manual check
-hotkey in the app crate is the only remaining caller of `copy_hovered_item`,
-and it keeps its own elevation flow.
+One failure is actionable: `Outranked`. An elevated game defeats both halves
+of the click-invoked copy at once — UIPI hides the user's clicks from an
+unelevated hook and discards the unelevated chord — so the source reports it
+on the first read and the UI offers the relaunch-elevated flow.
 
-Polling pace lives in `poe-alarm-monitoring::clock`, not here. The passive poll
-is a counter check, so it runs at the scheduler tick rather than at the
-contention-shaped interval the injector needed — see that module.
+Polling pace lives in `poe-alarm-monitoring::clock`, not here. Each poll reads
+two counters and asks nothing of the client, so it runs at the scheduler tick
+rather than at the contention-shaped interval the timed injector needed — see
+that module. The session holds the Windows timer at 1ms so tick jitter stops
+eating the click-to-copy margin.
 
 ## Live session ownership
 
@@ -108,10 +114,10 @@ observational only and never clear the live generation. Queued commands are
 coalesced before pending work is launched, and `Shutdown` takes priority over a
 queued replacement.
 
-Shutdown targets one second to application close. A passive read is a counter
-check plus at most a bounded clipboard open, so unlike the OCR build there is no
-long native call to abandon; the runtime still invalidates the tracked worker
-without joining it.
+Shutdown targets one second to application close. A poll is a counter check
+plus at most one bounded copy, so unlike the OCR build there is no long native
+call to abandon; the runtime still invalidates the tracked worker without
+joining it.
 The alert and sound services are stopped and verified synchronously on the
 runtime actor before `ShutdownComplete`.
 
