@@ -1,0 +1,63 @@
+# 被动监听改造(passive-clipboard 分支)
+
+## 目标与判据
+
+监控期间程序对游戏的注入量降为**零**:用户自己按 Ctrl+C(游戏原生复制),程序只
+监听剪贴板变化、解析、判定、报警、拦截。
+
+**验收判据(用户定)**:150ms 点击节奏下正确命中词缀。达标则此分支成为唯一监控
+模式;不达标则整条路废弃。
+
+## 合规映射
+
+开发者文档宏规则(pathofexile.com/developer/docs)逐条对照:
+
+| 规则 | 被动模式下的状态 |
+| --- | --- |
+| 注入必须由用户手动触发;timers 等自动触发不允许 | 监控**不再注入任何按键**,规则不适用 |
+| 每次触发只能有一个固定功能 | 仅剩的注入是 Ctrl+Shift+F11 检查热键:固定功能 ✓ |
+| 每次触发只产生一个与游戏交互的动作 | 该热键一次一个 Ctrl+C ✓ |
+
+轮询 `GetClipboardSequenceNumber` 是读一个 Windows 计数器,不向游戏发送任何输入;
+命中后的点击拦截是**抑制**用户输入,不是合成输入,均不落入宏规则的辖域。
+
+## 延迟预算(对照 150ms 判据)
+
+用户复制落进剪贴板后:序列号轮询间隔(10ms,量化后 ~15.6ms)+ 读取与解析
+(实测 1.5–5.7ms)+ 判定(1.5–5.7ms)+ 挂钩(微秒级)≈ **最坏 ~28ms**。
+相对 150ms 判据余量 ≥ 120ms。**采样时刻由用户的 Ctrl+C 决定**,与点击天然同步,
+不再有自由轮询的相位漂移 —— 这是比旧设计更有利的一点。
+
+风险仍在用户侧时序:Ctrl+C 若在服务器回包之前落下,复制到的是旧词缀,该轮要等
+下一次复制。这由用户宏内的 click→Ctrl+C 间隔控制,文档写明。
+
+## 施工清单
+
+1. **`poe-alarm-runtime/src/clipboard_source.rs`(核心,唯一大改)**
+   - 删:`copy_hovered_item` 调用、`COPY_DEADLINE`、光标静止门与
+     `CURSOR_REST_TOLERANCE`、`SILENT_FAILURE_STREAK`、`SourceError::Unanswered`
+     及其提权判定(无注入则 UIPI 无关)
+   - 增:`last_sequence: Option<u32>` 字段;`read()` 变为
+     前台门 → 序列号未变即 unchanged(cached)→ 变了才 `read_text` →
+     与 `last_payload` 比较 → 既有解析/身份/基准逻辑**原样保留**
+   - 隐私门:游戏不在前台时**不读剪贴板**(只比序列号也不读内容)
+2. **`poe-alarm-monitoring/src/clock.rs`**:两常量 35ms → 10ms(量化 ~15.6ms),
+   注释改写(被动轮询只查计数器,无客户端争用问题);`POE_ALARM_SCAN_MS` 原样
+3. **`poe-alarm-app/src/i18n.rs`**:使用说明重写工作流两条(中英):
+   "监控零注入;每次 roll 后自己按 Ctrl+C;游戏必须在前台"
+4. **README(分支)**:横幅与 Safety boundaries 按被动模式重写(速率段删除,
+   改为"监控注入为零;唯一合成输入是检查热键,一按一次")
+5. **不动**:engine 循环、规则引擎、解析器、报警/拦截、热键路径(含其提权流程)、
+   settings
+
+## 测试
+
+- `clipboard_source` 单元测试改写为被动语义(错误映射、Unanswered 移除)
+- 既有 176 项全绿(engine/规则/解析不动,预期零回归)
+- 变异验证:把注入调用加回 `read()`,前台门测试应失败(或以 grep 断言
+  `copy_hovered_item` 不在 clipboard_source.rs 中出现 —— 编译期契约)
+- 实机:用户以 click→延迟→Ctrl+C 的 150ms 宏验收
+
+## 回滚
+
+分支不合并即回滚;main 不受影响。

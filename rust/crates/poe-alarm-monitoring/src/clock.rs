@@ -4,25 +4,19 @@ use crate::CancellationToken;
 
 /// How long to pace between readings.
 ///
-/// Both are 35ms because that is what measured best against a real client, by a
-/// wide margin and against the intuition that guided every earlier value. Over
-/// roughly 1500 crafts at a 50ms click cadence this produced one overshoot;
-/// halving it to an effective 31ms produced more than ten times that rate, and
-/// the 15.5ms these constants used to resolve to was worse still.
+/// The passive source injects nothing: each poll reads the clipboard sequence
+/// number — one syscall — and touches the clipboard only after the user's own
+/// copy has moved it. The contention that shaped the injector's 35ms (every
+/// request made the client serialize the whole item, so polling harder made
+/// the roll arrive later) does not exist here, because nothing is asked of
+/// the client at all. What remains is a plain sampling delay on a counter,
+/// so it is set low: 10ms, which Windows quantises up to its ~15.6ms tick.
 ///
-/// Two forces cross here. Poll faster and the client spends its time
-/// serializing item text for us instead of applying the orb, so the roll itself
-/// arrives later; poll slower and the roll is on time but sampled late. The
-/// optimum is not deducible from this side of the boundary — three earlier
-/// attempts to reason it out were wrong, twice in the direction of polling
-/// harder — so it is a measurement, and `POE_ALARM_SCAN_MS` exists to repeat
-/// that measurement rather than argue with it.
-///
-/// Both values are identical because Windows quantises these waits to its
-/// 15.6ms tick: anything from 31 to 45 resolves to the same ~46.5ms, so a
-/// distinction between them would be fiction.
-pub const UNCACHED_SCAN_DELAY: Duration = Duration::from_millis(35);
-pub const CACHED_SCAN_DELAY: Duration = Duration::from_millis(35);
+/// Both values are identical because anything below the tick resolves to the
+/// tick anyway; distinguishing them would be fiction. `POE_ALARM_SCAN_MS`
+/// still overrides both, for measuring rather than arguing.
+pub const UNCACHED_SCAN_DELAY: Duration = Duration::from_millis(10);
+pub const CACHED_SCAN_DELAY: Duration = Duration::from_millis(10);
 
 /// The cooperative pacing selected after one monitor decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

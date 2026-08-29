@@ -24,19 +24,22 @@ through `AffixSourceFactory`; `DynamicSource` is the newtype that lets a boxed
 source satisfy the trait, since a blanket impl over a foreign `Box` and a
 foreign trait cannot be written here.
 
-`ClipboardSource` injects one `Ctrl+C` chord and waits for the clipboard
-sequence number to move, bounded by `COPY_DEADLINE`. Nothing else is sent into
-the game. Two failure shapes are worth distinguishing and the source does:
-an ordinary miss is retried silently, while a run of `SILENT_FAILURE_STREAK`
-unanswered copies becomes `SourceError::Unanswered` — but only when
-`game_process_outranks_us()` says the game runs at a higher integrity level
-than we do, because that is the one case the user can actually fix by
-restarting elevated. `ReadFailure::is_actionable` carries that verdict through
-`MonitorSnapshot` to `RuntimeEvent::Fault { actionable }` so the UI can say
-something true rather than something generic.
+`ClipboardSource` injects nothing. Each poll reads the clipboard sequence
+number — a global counter, one syscall — and only when the user's own `Ctrl+C`
+has moved it does the source read the payload, parse it, and hand it to the
+rules. While the game is not the foreground window the source reads no content
+at all: the clipboard belongs to whatever else the user is doing, and a copy
+made while tabbed out must not be misread as a roll later.
 
-Polling pace lives in `poe-alarm-monitoring::clock`, not here. It was settled by
-measurement against a live client, not by reasoning — see that module.
+No failure here is actionable in the elevation sense. The injector's one
+actionable fault was Windows discarding keystrokes aimed at an elevated game;
+with nothing sent, elevation is irrelevant to monitoring. The manual check
+hotkey in the app crate is the only remaining caller of `copy_hovered_item`,
+and it keeps its own elevation flow.
+
+Polling pace lives in `poe-alarm-monitoring::clock`, not here. The passive poll
+is a counter check, so it runs at the scheduler tick rather than at the
+contention-shaped interval the injector needed — see that module.
 
 ## Live session ownership
 
@@ -105,9 +108,10 @@ observational only and never clear the live generation. Queued commands are
 coalesced before pending work is launched, and `Shutdown` takes priority over a
 queued replacement.
 
-Shutdown targets one second to application close. A clipboard read in flight is
-bounded by `COPY_DEADLINE`, so unlike the OCR build there is no long native call
-to abandon; the runtime still invalidates the tracked worker without joining it.
+Shutdown targets one second to application close. A passive read is a counter
+check plus at most a bounded clipboard open, so unlike the OCR build there is no
+long native call to abandon; the runtime still invalidates the tracked worker
+without joining it.
 The alert and sound services are stopped and verified synchronously on the
 runtime actor before `ShutdownComplete`.
 

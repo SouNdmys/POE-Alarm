@@ -2,36 +2,27 @@
 
 *This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.*
 
-> ## ⚠️ Compliance status — read before using
+> ## This branch: passive monitoring, zero injection
 >
-> **GGG answered by pointing to their [developer documentation](https://www.pathofexile.com/developer/docs/index),
-> and under its macro rules the timed monitoring in every release up to 1.0.7 is not
-> compliant.** The rules require any synthesized input that affects the game to be *invoked
-> manually by the user*, and they name **timers** first among the disallowed triggers. These
-> builds send `Ctrl+C` on a timer, about twenty times a second, regardless of what you press
-> (see [Safety boundaries](#safety-boundaries)). That is exactly the shape the rules exclude.
->
-> What follows from that:
->
-> - **Do not run the timed monitoring of 1.0.7 or earlier on an account you care about.**
-> - The manual item check (`Ctrl+Shift+F11`) already complies: one manual press, one copy,
->   one fixed function.
-> - A redesign is in progress on the `passive-clipboard` branch in which monitoring injects
->   **nothing at all**: you press `Ctrl+C` yourself — the game's own copy feature — and the
->   app only reads the clipboard, evaluates, and alarms. If it holds up in testing it becomes
->   the only monitoring mode.
+> GGG's [developer documentation](https://www.pathofexile.com/developer/docs/index) requires
+> any synthesized input that affects the game to be invoked manually, naming timers among the
+> disallowed triggers — which is what the timed monitoring in releases up to 1.0.7 was. This
+> branch removes it: **monitoring sends nothing into the game.** You press `Ctrl+C` yourself
+> after each roll — the game's own copy feature — and the app only reads the clipboard,
+> evaluates, and alarms. The one synthesized input left in the whole app is the manual item
+> check (`Ctrl+Shift+F11`): one manual press, one copy, one fixed function, per those rules.
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.0.7**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current build on this branch: **1.1.0** (passive monitoring, unreleased), a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
-It does synthesize input: a `Ctrl+C` chord, sent on a timer about twenty times a second for as long as monitoring runs, because asking the client is the only way to learn what the item now says. `Ctrl+C` is the only key it ever sends, but it is not sent once and it is not tied to your clicks — see [Safety boundaries](#safety-boundaries) for the exact rate.
+Monitoring synthesizes no input. The `Ctrl+C` that feeds it is the one you press: the app watches the clipboard sequence number, and when your copy moves it, reads, parses and judges. The only input the app ever synthesizes is the manual check hotkey's single chord — see [Safety boundaries](#safety-boundaries).
 
 **It does make crafting faster, and that is the point.** Without it, every roll costs you a look at the tooltip and a decision about what you are seeing. With it you can click straight through a stack of currency without reading anything, and be interrupted only when the combination you asked for actually appears. Not having to read is the whole gain, and in practice it is a large one.
 
-**What it cannot do is outrun a fast enough macro.** Noticing takes a server round trip plus one poll, so past some click rate the alarm simply loses the race. Two numbers from my own setup — mine, not universal: in **PoE 2 at 25ms** to the Hong Kong server, a 100ms macro already outruns it; in **PoE 1 at 60ms** to Japan/Singapore, clicking every 50ms still lands, roughly one miss in 1500. Note those do not line up into a simple latency rule — the lower latency needed the *slower* clicking, because PoE 2 applies currency faster than PoE 1 at the same interval. Your servers, your latency and which game you are in all move the line, so treat my figures as illustration rather than a setting to copy.
+**The timing that decides a catch is now yours.** The app's own side is fast — once your copy lands on the clipboard, noticing, judging and arming the click block take on the order of twenty milliseconds. What decides whether a winning roll survives is when you copy: the new affixes only exist after a server round trip, so a `Ctrl+C` pressed too soon after the click captures the old item, and that roll is only judged at your next copy. Leave room between the click and the copy, and room after the copy before the next click.
 
-**Suggested use:** click at the pace shown in the video, or slower. If rolls start getting past the alarm, that is the signal to slow your clicking down — not a reason to trust it further. When an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log, so a silent failure and a slow connection do not look alike.
+**Suggested use:** start monitoring, copy the item once to set the baseline, then roll in a steady rhythm of click, copy, pause. If rolls start getting past the alarm, widen the gaps — that is the signal to slow down, not a reason to trust it further. When an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log, so a silent failure and bad timing do not look alike.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 
@@ -96,15 +87,15 @@ The app keeps no affix database and needs no updates when GGG adds modifiers. Th
 
 ## Safety boundaries
 
-- **`Ctrl+C` is the only key that goes in — and it goes in on a timer, not once.** To read an item the app sends `Ctrl+C` to the focused game window, which makes the client copy the hovered item to the clipboard. There is no event the client offers to say "this item changed", so the app asks on a fixed interval. The constant is 35ms (`UNCACHED_SCAN_DELAY`/`CACHED_SCAN_DELAY` in `poe-alarm-monitoring/src/clock.rs`), but Windows rounds that wait up to its scheduler tick, so the delivered cadence is roughly 46.5ms on a default system and can approach the literal 35ms if anything on the machine raises the timer resolution: **about 20 to 28 copies a second, 1,200 to 1,700 a minute**, for as long as the session runs. `POE_ALARM_SCAN_MS` overrides the constant and accepts anything from 1 to 1000ms, so a user who sets it to 1 is asking for a few hundred a second. **This is not one copy per click.** The timer does not know about your clicks and is not started by them.
-- **What one copy actually puts on the wire.** A single `SendInput` call carrying four key events — Ctrl down, C down, C up, Ctrl up — or three of them when you are already holding Ctrl, because releasing a key you are physically pressing would leave Windows' key state lying about it. The app never clicks, never moves the mouse, never presses anything else, records no macros, and replays nothing you did. Two honest asterisks: when you are already holding Ctrl the app sends a Ctrl-down it deliberately never releases — balancing it would write a lie into Windows' one global key state and turn your Ctrl+click into a plain click — so that branch is *more* synthetic input outstanding, not less; and the GUI framework this links (GPUI) carries its own Alt-key `SendInput` in a window-activation path, which this app does not call, so the precise claim is that `Ctrl+C` is the only input **this project's own code** synthesizes.
-- **It keeps going when you do nothing.** Two conditions pause the copying: the game window losing focus, and the cursor moving. A *resting* cursor passes that check, so a session left running with the cursor parked on an item keeps copying at the full rate until you stop it. Nothing caps the total for a session: there is no scan ceiling and no deadline, and the `SILENT_FAILURE_STREAK` of 60 unanswered copies is a diagnostic that raises a privilege error, not a limiter — when it does not fire it resets the counter and copying continues. The one other thing that injects is the check-item hotkey (`Ctrl+Shift+F11`), which sends a single chord per press and can run while a session is already polling.
+- **Monitoring injects nothing.** While a session runs, the app polls the clipboard *sequence number* — a Windows counter, read with one syscall, no input sent, nothing opened — and only when your own `Ctrl+C` moves that counter does it read the clipboard text and judge it. No keystroke, click, or any other input is synthesized by monitoring, ever.
+- **The one synthesized input in the whole app is the manual check hotkey.** `Ctrl+Shift+F11` sends a single `Ctrl+C` chord per press — one `SendInput` call carrying four key events (three when you already hold Ctrl, because releasing a key you are physically pressing would corrupt Windows' key state). One manual press, one fixed function, one action. The GUI framework this links (GPUI) carries its own Alt-key `SendInput` in a window-activation path this app never calls, so the precise claim is that `Ctrl+C` is the only input **this project's own code** synthesizes.
+- **The clipboard is read only while the game is in the foreground.** That gate is a privacy boundary: tab out, and the app stops reading clipboard content entirely — a copy made in another program is never read, and cannot be misread as a roll when you tab back in.
 - **Nothing else touches the game.** No memory reads or writes, no DLL injection, no packet inspection, no overlay hooked into the renderer, no network traffic of any kind. The app talks to Windows and to the clipboard.
 - The one call site is `send_ctrl_c` in `rust/crates/poe-alarm-platform-win/src/win32/clipboard.rs:126`. Check it yourself: `grep -rn SendInput rust/crates` returns eight lines — that call, its `use` import, four mentions in doc comments and error text, and two in the `poe-alarm-clip-only` README. Exactly one of the eight executes anything.
 - Reading the clipboard means overwriting whatever you had on it. That is a real cost of this design and there is no way around it while the client only offers text this way.
 - No low-level mouse guard is armed before a confirmed match; every click passes straight to the game while the app is reading.
 - At the instant of a confirmed match a hook-level click block arms, so the very next click cannot take the roll away while the red layer is still appearing. The layer is then presented and *verified* visible, clickable, and covering the whole virtual desktop; the block hands over to the verified layer, or fails open on a bounded timeout and reports the error instead of pretending a hidden window protects you. No block of any kind exists before a confirmed match.
-- **Administrator rights are not requested at launch**, and the app runs unelevated for almost everyone. Windows refuses to deliver synthesized input from a lower-integrity process to a higher-integrity window, so if a launcher or accelerator started the game *as administrator*, the `Ctrl+C` is silently discarded and monitoring would run forever without ever alarming. The app detects that case and says so, and **Settings → Privileges → Restart as administrator** relaunches it. Elevation is used for nothing else: it does not unlock any extra capability, it only lets those keystrokes reach an elevated window.
+- **Administrator rights are not requested at launch**, and monitoring never needs them: reading a counter and the clipboard works at any integrity level. Elevation matters only to the manual check hotkey — Windows refuses to deliver synthesized input from a lower-integrity process to a higher-integrity window, so if a launcher started the game *as administrator*, that one hotkey's copy is silently discarded. The app detects that case and says so, and **Settings → Privileges → Restart as administrator** relaunches it. Elevation is used for nothing else.
 - Settings live at `%LOCALAPPDATA%/PoeAlarm/settings.json`. Upgrading from the Rust preview migrates its settings automatically on first launch; a .NET-era file is kept as `settings.json.dotnet-1.0.bak`.
 
 ## Project layout

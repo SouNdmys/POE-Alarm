@@ -355,11 +355,11 @@ pub static ZH: Text = Text {
     help_hotkey_stop: "解除命中锁定(红窗内快捷键,也可直接点红窗按钮);停止监控用界面\"停止监控\"按钮",
     help_rules_title: "规则与数值",
     help_rules: [
+        "· 监控不再向游戏发送任何按键:每次 roll 之后你自己按 Ctrl+C(游戏自带的复制),程序只读剪贴板并判定,命中即报警并拦截后续点击。游戏必须在前台;开始监控后先复制一次当基准。复制落进剪贴板后程序侧全程约 20 毫秒,真正的时序在你手里——点击和 Ctrl+C 之间要给服务器留出回包时间,复制早了拿到的还是旧词缀,那一轮就得等你下一次复制。",
         "· 词缀文本直接来自游戏客户端,不做图像识别,所以不存在看错字的可能;匹配按整行严格判定,不做关键词模糊匹配。",
         "· 数值条件比较的是每条词缀自己的实际值。提示框会把同类词缀加起来显示(两条物理伤害显示成一条),复制出来的文本不会,所以这里不受影响。",
         "· \"测试规则\"可以随时拿一件现成装备验证规则写得对不对,不用真的去洗。",
         "· 本程序与 Grinding Gear Games 无任何关联，亦未获其认可。(This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.)",
-        "· 每次点击到新词缀出现之间隔着一次服务器往返,程序追不了比这更快的东西。手点根本够不到这个上限,正常手速下程序总是先你一步。只有到机器速度才会变成赛跑,那时间隔要跟着网络延迟走、而且远大于延迟本身:实测同一台机器,游戏内延迟 25ms 时 50 毫秒间隔百分百点过头、100 毫秒左右才稳,延迟 60ms 时要 150 毫秒左右。真有漏掉的,就是间隔短过了你这条线路能承受的程度。",
     ],
     help_hud_title: "状态浮窗与红色锁定窗",
     help_hud: [
@@ -537,11 +537,11 @@ Restart POE Alarm as administrator now?",
     help_hotkey_stop: "Release the match lock (works on the red card; the card button does the same); stop monitoring via the UI button",
     help_rules_title: "RULES & VALUES",
     help_rules: [
+        "· Monitoring no longer sends anything into the game: after each roll you press Ctrl+C yourself — the game's own copy — and the app only reads the clipboard, evaluates, and alarms, blocking further clicks on a hit. The game must be in the foreground; copy once after starting to set the baseline. The app's side takes about 20ms once a copy lands. The timing that matters is yours: leave room for the server round trip between the click and the Ctrl+C — a copy made too early captures the old affixes, and that roll waits for your next copy.",
         "· Affix text comes straight from the game client, so there is nothing to misread. Matching is strict on the whole line — no keyword fuzziness.",
         "· Numeric rules compare each modifier's own value. The tooltip adds same-stat modifiers together and shows one number; copied text does not, so this is unaffected.",
         "· \"Test rules\" checks any item you already own, so you can verify a rule without rolling for it.",
         "· This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.",
-        "· Between your click and the new affixes existing sits a server round trip, and nothing here can outrun it. Clicking by hand never comes close to that limit, so the alarm is always ahead of you. It only turns into a race at machine speeds, and there the interval has to track your latency and sit well above it: on one machine, 25ms in-game latency overshot every single time at 50ms between clicks and settled near 100ms, while 60ms latency needed about 150ms. Anything that gets past you means the interval was too short for your connection.",
     ],
     help_hud_title: "STATUS OVERLAY & RED LOCK SCREEN",
     help_hud: [

@@ -1,11 +1,17 @@
-//! Reads affix lines by asking the client for the item under the cursor.
+//! Reads affix lines from copies the user makes, injecting nothing.
 //!
-//! This is what replaced the OCR pipeline. Where that captured a frame, masked
-//! it for blue text, split it into bands and recognised each one, this presses
-//! Ctrl+C and parses the reply. The client hands over the item exactly, so
-//! there is no recognition step left to be wrong about — and no capture region
-//! to select, no model to ship, and nothing to recalibrate when the scene
-//! behind the tooltip changes.
+//! This is the passive successor to the timed injector, which was itself the
+//! successor to the OCR pipeline. GGG's developer documentation requires any
+//! synthesized input that affects the game to be invoked manually and names
+//! timers as a disallowed trigger — which is exactly what the injector was. So
+//! monitoring no longer sends anything at all: the user presses `Ctrl+C`
+//! themselves (the game's own copy feature), and this source only watches the
+//! clipboard sequence number, reads the payload when it moves, and hands the
+//! parsed item to the rules.
+//!
+//! The one synthesized input left anywhere in the app is the manual check
+//! hotkey, which sends a single chord per press — one manual invocation, one
+//! fixed function, one action, per those same rules.
 
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -15,59 +21,21 @@ use poe_alarm_monitoring::{
     AffixSource, CancellationToken, MonitorPlan, ReadFailure, RecognitionResult,
     StructuredOcrSupport,
 };
-use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us,
-};
+use poe_alarm_platform_win::{ClipboardError, game_is_foreground, read_text, sequence_number};
 
-/// How long to wait for the client to answer one Ctrl+C.
+/// How many times to re-try opening the clipboard before reporting it busy.
 ///
-/// A healthy round trip measures ~3ms with a p99 under 10ms, so anything
-/// longer is the client declining to answer rather than answering slowly — and
-/// it declines for the whole time a craft is in flight. Waiting it out blinds
-/// the source for exactly the window the new roll appears in, which is why
-/// this is short: measured detection lag tracked this deadline almost
-/// one-for-one (600ms deadline gave a 632ms median, 25ms gave 27ms). The
-/// mechanism behind that ratio is the attempt that straddles the moment the
-/// client resumes: it burns its whole deadline before the next attempt can
-/// succeed instantly, so every spare millisecond here is a millisecond of
-/// detection lag. 12ms still clears the p99 of a healthy answer.
-const COPY_DEADLINE: Duration = Duration::from_millis(12);
-
-/// How many unanswered copies in a row mean something is structurally wrong.
-///
-/// A craft blocks the client for a fraction of a second — a handful of polls at
-/// most. Windows refusing to deliver the keystroke at all looks identical from
-/// here, except that it never stops. This is the line between the two, set far
-/// enough out that no craft can reach it and near enough that a user notices
-/// within seconds rather than after a league of empty scans.
-///
-/// Crossing it proves nothing by itself: a cursor resting over empty ground
-/// produces exactly this silence, because the client only answers while an
-/// item is hovered. The streak earns a report only when the integrity
-/// comparison confirms the game outranks this process.
-const SILENT_FAILURE_STREAK: u32 = 60;
-
-/// How far the cursor may drift between polls and still count as resting.
-///
-/// A hand trembles by a pixel or two while spam-clicking one spot; travelling
-/// to an item covers tens of pixels per poll. Nothing meaningful lives between.
-const CURSOR_REST_TOLERANCE: i32 = 3;
+/// The copy that moved the sequence number may still hold the clipboard open
+/// for a moment; each attempt waits a millisecond. Sixty is far beyond any
+/// healthy handoff and short enough that a genuinely wedged clipboard turns
+/// into a visible error rather than a silent stall.
+const CLIPBOARD_OPEN_ATTEMPTS: u32 = 60;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
 pub enum SourceError {
-    /// The client refused or ignored the request.
+    /// The clipboard could not be read.
     Clipboard(ClipboardError),
-    /// The client never answered while the game outranks this process.
-    ///
-    /// Only produced when the integrity comparison agrees, because unanswered
-    /// alone is the ordinary state of a cursor resting over nothing. The
-    /// comparison errs toward reporting — every failure to read a token counts
-    /// as outranked — so the silent-forever failure this once had cannot come
-    /// back through it; only a confident same-level-or-lower answer suppresses
-    /// the report, and elevating genuinely cannot help then.
-    Unanswered { attempts: u32 },
     /// A source that is not the clipboard failed.
     Other(String),
 }
@@ -75,13 +43,7 @@ pub enum SourceError {
 impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
-            Self::Unanswered { attempts } => write!(
-                formatter,
-                "the game did not answer {attempts} copy requests in a row. It is running with \
-                 higher privileges than POE Alarm, so Windows is discarding them. Restart POE \
-                 Alarm as administrator: Settings -> Privileges."
-            ),
+            Self::Clipboard(error) => write!(formatter, "clipboard read failed: {error}"),
             Self::Other(detail) => formatter.write_str(detail),
         }
     }
@@ -89,25 +51,24 @@ impl fmt::Display for SourceError {
 
 impl ReadFailure for SourceError {
     fn is_actionable(&self) -> bool {
-        // Sixty unanswered copies is never a hiccup, and the fix is always
-        // something only the user can do. Deliberately not conditioned on the
-        // privilege check: that is a guess about the cause, and the whole
-        // reason this exists is that a wrong guess left the failure silent.
-        matches!(self, Self::Unanswered { .. })
+        // The injector had one actionable failure: Windows discarding its
+        // keystrokes when the game ran elevated. Nothing is injected any more,
+        // so elevation is irrelevant to monitoring and no failure here is
+        // something a privilege change could fix.
+        false
     }
 }
 
-/// Affix source backed by the client's own item text.
+/// Affix source backed by copies the user makes in the game client.
 pub struct ClipboardSource {
-    key_method: KeyMethod,
+    /// The clipboard sequence number at the last poll. `None` until the first
+    /// poll, so whatever the clipboard held before the session becomes the
+    /// baseline rather than a detection.
+    last_sequence: Option<u32>,
     /// The last payload judged, used to answer "has this item moved".
     last_payload: Option<String>,
     /// The last item judged, used to notice the cursor moving to another item.
     last_item: Option<ParsedItem>,
-    /// Consecutive unanswered copies while the game held focus.
-    unanswered: u32,
-    /// Where the cursor was at the previous poll, for the travel gate.
-    last_cursor: Option<PointI>,
 }
 
 impl Default for ClipboardSource {
@@ -120,11 +81,9 @@ impl ClipboardSource {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            key_method: KeyMethod::default(),
+            last_sequence: None,
             last_payload: None,
             last_item: None,
-            unanswered: 0,
-            last_cursor: None,
         }
     }
 
@@ -154,99 +113,72 @@ impl AffixSource for ClipboardSource {
     ) -> Result<RecognitionResult, Self::Error> {
         let started = Instant::now();
 
-        // Injected input only reaches a focused window, and copying while the
-        // user is elsewhere would clobber their clipboard for nothing.
+        // The foreground gate is a privacy boundary now, not an injection
+        // guard: while the game is not the foreground window, the clipboard
+        // belongs to whatever else the user is doing, and this source must
+        // not read it — not even to compare. The sequence number is a global
+        // counter, not content, so sampling it here is fine and keeps a copy
+        // made while tabbed out from being misread as a roll later.
         if !game_is_foreground() {
+            self.last_sequence = Some(sequence_number());
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // Nothing is injected while the cursor is travelling: a travelling
-        // cursor is never over the item the user means, so the client would
-        // not answer. There is deliberately no mid-click gate any more. It
-        // existed to keep the Shift lift away from the user's presses; with
-        // the lift gone the chord touches nothing of theirs, and pausing for
-        // the whole of a macro's hold time was costing the probe exactly the
-        // window it needed — at an 80ms cadence with a 40ms hold, half of
-        // every cycle went dark.
-        let resting = match cursor_position() {
-            Some(position) => {
-                let moved = self.last_cursor.is_some_and(|last| {
-                    (position.x - last.x).abs() > CURSOR_REST_TOLERANCE
-                        || (position.y - last.y).abs() > CURSOR_REST_TOLERANCE
-                });
-                self.last_cursor = Some(position);
-                !moved
+        // A pure counter read. Nothing is sent, nothing is opened; until the
+        // user actually copies something, every poll ends here.
+        let sequence = sequence_number();
+        if self.last_sequence == Some(sequence) {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
+
+        let text = match read_text(CLIPBOARD_OPEN_ATTEMPTS) {
+            Ok((text, _attempts)) => text,
+            // The copier may still hold the clipboard open. The sequence
+            // number is deliberately NOT recorded, so the change is retried
+            // on the next poll instead of being swallowed.
+            Err(ClipboardError::Busy { .. }) => {
+                return Ok(Self::unchanged(started.elapsed()));
             }
-            None => true,
-        };
-        if !resting {
-            return Ok(Self::unchanged(started.elapsed()));
-        }
-
-        // No pacing beyond the monitor's own. The injected chord leaves the
-        // user's modifiers alone, so a copy has no visible effect and there is
-        // nothing to ration. Three generations of click-gating, chase windows
-        // and keepalives existed to ration a Shift flicker that a misdiagnosis
-        // had made necessary; with the lift gone, free running is both the
-        // simplest and the fastest this has ever been.
-
-        let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
-            Ok(outcome) => outcome,
-            // The client goes quiet for the duration of a craft, so a missing
-            // payload means it had nothing to give yet. Treating that as a
-            // fault would end the session every time the user crafted.
-            Err(error) if error.is_transient() => {
-                self.unanswered = self.unanswered.saturating_add(1);
-                // Silence that never ends is not a craft — but it is also the
-                // ordinary state of a cursor resting over empty ground, so the
-                // streak alone must not interrupt anyone. The integrity
-                // comparison decides, and it errs toward reporting: only a
-                // confident answer that the game does not outrank us quietly
-                // forgives the streak, and elevating could not have helped
-                // then anyway.
-                if self.unanswered >= SILENT_FAILURE_STREAK {
-                    if game_process_outranks_us() {
-                        return Err(SourceError::Unanswered {
-                            attempts: self.unanswered,
-                        });
-                    }
-                    self.unanswered = 0;
-                }
+            // Not text (or empty): the user copied something that is not an
+            // item. Recorded as seen — waiting will not turn a bitmap into
+            // item text.
+            Err(ClipboardError::NoTextFormat { .. } | ClipboardError::EmptyText) => {
+                self.last_sequence = Some(sequence);
                 return Ok(Self::unchanged(started.elapsed()));
             }
             Err(error) => return Err(SourceError::Clipboard(error)),
         };
-        self.unanswered = 0;
+        self.last_sequence = Some(sequence);
 
         if self
             .last_payload
             .as_deref()
-            .is_some_and(|previous| previous == outcome.text)
+            .is_some_and(|previous| previous == text)
         {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        let Ok(item) = parse(&outcome.text) else {
-            // Readable clipboard, unreadable item — the cursor is over
-            // something that is not an item. Leave the baseline alone so the
-            // roll being waited on is still pending.
+        let Ok(item) = parse(&text) else {
+            // Readable clipboard, unreadable item — the user copied something
+            // that is not an item. Leave the baseline alone so the roll being
+            // waited on is still pending.
             return Ok(Self::unchanged(started.elapsed()));
         };
 
-        // Text changing is not proof the *same* item was rerolled: a drifting
-        // cursor changes it too. Judging that would report the wrong affixes
-        // and, worse, adopt them as the baseline, after which the roll the user
-        // is waiting on never gets compared again.
+        // Text changing is not proof the *same* item was rerolled: copying a
+        // different item changes it too. Judging that would report the wrong
+        // affixes and, worse, adopt them as the baseline, after which the roll
+        // the user is waiting on never gets compared again.
         if let Some(previous) = &self.last_item
             && !previous.is_same_item_as(&item)
         {
-            self.last_payload = Some(outcome.text);
+            self.last_payload = Some(text);
             self.last_item = Some(item);
             return Ok(Self::unchanged(started.elapsed()));
         }
 
         let first_reading = self.last_payload.is_none();
-        self.last_payload = Some(outcome.text);
+        self.last_payload = Some(text);
         let (lines, physical_line_identities) = item.render();
         self.last_item = Some(item);
 
@@ -266,29 +198,31 @@ impl AffixSource for ClipboardSource {
 mod tests {
     use super::*;
     use poe_alarm_platform_win::ClipboardError;
-    use std::time::Duration;
 
+    /// The branch's core promise, enforced at the source level: monitoring
+    /// never injects. The manual check hotkey is the only caller allowed to
+    /// copy, and it lives in the app crate, not here.
     #[test]
-    fn an_unanswered_streak_is_actionable() {
-        // By the time this error exists, the integrity comparison has already
-        // confirmed the mismatch — the read path cannot construct the variant
-        // any other way — so it is always the user's to fix.
-        assert!(
-            SourceError::Unanswered {
-                attempts: SILENT_FAILURE_STREAK,
-            }
-            .is_actionable()
-        );
+    fn the_monitoring_source_never_injects() {
+        let source = include_str!("clipboard_source.rs");
+        for needle in [
+            concat!("copy_hovered", "_item"),
+            concat!("send_", "ctrl_c"),
+            concat!("Send", "Input"),
+        ] {
+            assert!(
+                !source.contains(needle),
+                "monitoring must stay injection-free, but the source mentions {needle}"
+            );
+        }
     }
 
     #[test]
-    fn an_ordinary_clipboard_hiccup_is_not_actionable() {
-        // A craft in flight looks exactly like this and needs no dialog.
-        assert!(
-            !SourceError::Clipboard(ClipboardError::Timeout {
-                waited: Duration::from_millis(25)
-            })
-            .is_actionable()
-        );
+    fn no_passive_failure_asks_the_user_to_elevate() {
+        // The injector's actionable failure was Windows discarding keystrokes
+        // sent at an elevated game. Nothing is sent any more, so nothing may
+        // route the user to the elevation dialog.
+        assert!(!SourceError::Clipboard(ClipboardError::Busy { attempts: 60 }).is_actionable());
+        assert!(!SourceError::Other("anything".to_owned()).is_actionable());
     }
 }
