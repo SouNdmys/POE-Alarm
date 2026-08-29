@@ -1,11 +1,10 @@
 use std::fmt;
 
 use poe_alarm_core::{
-    CompiledRuleSet, FullLineAffixMatcher,
-    matching::{DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN, MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN},
+    CompiledRuleSet, FullLineAffixMatcher, matching::MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
 };
 use poe_alarm_monitoring::MonitorPlan;
-use poe_alarm_settings::{AppSettings, CURRENT_SCHEMA_VERSION, GameProfile, RuleEditorMode};
+use poe_alarm_settings::{AppSettings, CURRENT_SCHEMA_VERSION, RuleEditorMode};
 
 use crate::{AlertCopy, CompiledUiBindings};
 
@@ -81,12 +80,19 @@ pub fn compile_settings(
         ));
     }
 
-    // How many physical lines one modifier may span. Not a recognition
-    // concern — POE2 simply renders wider modifiers than POE1 does.
-    let maximum_line_span = match settings.selected_game_profile {
-        GameProfile::Poe1 => DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN,
-        GameProfile::Poe2 => MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
-    };
+    // How many physical lines one modifier may span: the supported maximum,
+    // for both games. This used to fork per game (4 for POE1, 8 for POE2) on
+    // the claim that "POE2 renders wider modifiers" — but that described
+    // tooltip pixel wrapping, an OCR-era phenomenon. In clipboard text one
+    // stat is always one line, both games share one layout engine, and the
+    // corpus agrees: no modifier in either game comes near either number.
+    //
+    // The limit's only effect is capping how many lines one template may
+    // span; blank-line barriers between groups already prevent joining two
+    // modifiers regardless of this value. So a large value costs nothing,
+    // while a small one fails silently — a template wider than the limit is
+    // not a compile error, it just never matches. Maximum, one code path.
+    let maximum_line_span = MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN;
 
     let plan = match selected_rules.rule_editor_mode {
         RuleEditorMode::Quick => MonitorPlan::Quick(
@@ -124,6 +130,7 @@ pub fn compile_settings(
 mod tests {
     use super::*;
     use poe_alarm_core::{AcceptableResultGroup, AffixCondition, RuleSetDefinition};
+    use poe_alarm_settings::GameProfile;
 
     fn valid_settings() -> AppSettings {
         let mut settings = AppSettings::default();
@@ -156,6 +163,28 @@ mod tests {
         settings.selected_game_profile = GameProfile::Poe2;
         settings.profiles.poe2 = settings.profiles.poe1.clone();
         assert!(!compile_settings(&settings).unwrap().input_guard_enabled);
+    }
+
+    /// One layout engine, one span. The per-game fork this replaces encoded
+    /// an OCR-era wrapping observation, and its failure mode was the silent
+    /// kind: a POE1 template wider than 4 lines would simply never match.
+    #[test]
+    fn both_games_allow_the_full_eight_line_span() {
+        for game in [GameProfile::Poe1, GameProfile::Poe2] {
+            let mut settings = valid_settings();
+            settings.selected_game_profile = game;
+            settings.profiles.poe2 = settings.profiles.poe1.clone();
+
+            let quick = compile_settings(&settings).unwrap();
+            let MonitorPlan::Quick(matcher) = quick.plan else {
+                panic!("expected quick plan");
+            };
+            assert_eq!(
+                matcher.maximum_line_span(),
+                MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN,
+                "{game:?} must compile quick rules at the shared span"
+            );
+        }
     }
 
     #[test]

@@ -30,7 +30,7 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.0.6**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.0.7**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 It does synthesize input: a `Ctrl+C` chord, sent on a timer about twenty times a second for as long as monitoring runs, because asking the client is the only way to learn what the item now says. `Ctrl+C` is the only key it ever sends, but it is not sent once and it is not tied to your clicks — see [Safety boundaries](#safety-boundaries) for the exact rate.
 

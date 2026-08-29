@@ -4120,7 +4120,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-app"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "anyhow",
  "gpui",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-clip-only"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "poe-alarm-clipboard",
  "poe-alarm-core",
@@ -4148,14 +4148,14 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-clipboard"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "poe-alarm-core",
 ]
 
 [[package]]
 name = "poe-alarm-core"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -4163,7 +4163,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-monitoring"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "poe-alarm-core",
 ]
@@ -4178,7 +4178,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-runtime"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "poe-alarm-alert-win",
  "poe-alarm-clipboard",
@@ -4190,7 +4190,7 @@ dependencies = [
 
 [[package]]
 name = "poe-alarm-settings"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "poe-alarm-core",
  "serde",
