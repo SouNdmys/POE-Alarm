@@ -2,21 +2,14 @@
 
 *This product isn’t affiliated with or endorsed by Grinding Gear Games in any way.*
 
-> ## Since 1.1.0: click-invoked copies, no timer
+> ## 1.1.0 was rebuilt to comply with GGG's third-party rules
 >
-> GGG's [developer documentation](https://www.pathofexile.com/developer/docs/index) requires
-> any synthesized input that affects the game to be invoked manually, naming timers among the
-> disallowed triggers — which is what the timed monitoring in releases up to 1.0.6 was.
-> Since 1.1.0 **every copy is invoked by a press of yours**: a pass-through hook counts your
-> clicks (it suppresses and synthesizes nothing), and each click is followed by one `Ctrl+C`
-> after a delay for the server round trip — at most three chords per click when the client
-> answers late, never on a timer, never while you are idle. A manual `Ctrl+C` works too.
->
-> Stated rather than argued: the invoking press is the crafting click itself, doing double
-> duty. Whether that satisfies "invoked manually" is GGG's call — but a timer it is not,
-> and zero input of any kind is synthesized unless you act. In shape this is what price
-> checkers have done for years — a press of yours, one copy, a window of ours — applied
-> per roll instead of per lookup.
+> Releases up to 1.0.6 sent `Ctrl+C` on a timer. GGG's developer documentation names timers
+> among the triggers its macro rules do not allow, so that design is gone — removed, not
+> argued with. Since 1.1.0 nothing is ever synthesized unless you act. **Do not use the old
+> releases**; how every rule maps to what the app now does is spelled out in
+> [Compliance](#why-110-exists-compliance-with-gggs-developer-rules) below, and all of it is
+> checkable in this repository's source.
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
@@ -33,6 +26,49 @@ Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` fo
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 
 > This repository previously hosted a .NET (WPF) implementation of 1.0. It has been retired and fully replaced by this Rust build; the history remains in git.
+
+## Why 1.1.0 exists: compliance with GGG's developer rules
+
+When asked directly, GGG pointed to their
+[developer documentation](https://www.pathofexile.com/developer/docs/index). Its macro rules
+exclude the timed monitoring every release up to 1.0.6 used, so 1.1.0 replaced that design
+outright. This section maps each rule to what the app actually does — not to argue the tool is
+blessed, but so nobody has to take anyone's word for anything.
+
+| GGG's rule (quoted) | How this app meets it |
+| --- | --- |
+| *"Macros must be invoked manually by the user (automated invocations such as but not limited to: timers, reacting to file changes, or from reading the screen are not allowed)"* | Every synthesized input answers a press of yours. Monitoring copies follow **your clicks**; the baseline copy follows **your start press**; the item check follows **its hotkey**. No timer, no file watching, no screen reading exist anywhere — idle monitoring sends nothing, ever. |
+| *"Each macro invocation must have one set function (it cannot cycle between actions)"* | The function is fixed and single: copy the hovered item to the clipboard. Nothing cycles, nothing conditionally selects between actions. |
+| *"The resulting function must only perform one action that interacts with the game"* | One click ordinarily produces one `Ctrl+C`. When the client answers with stale text or not at all, at most two retries of the *same* copy follow — a hard ceiling of three chords per click, pinned by a test. The reading that retries of one copy are one attempted action is stated as a reading, below. |
+
+**The complete injection inventory.** The shipped code contains exactly one `SendInput` call
+site — `send_ctrl_c` in `rust/crates/poe-alarm-platform-win/src/win32/clipboard.rs` — reached
+by exactly three paths, each invoked by a press of yours:
+
+1. one copy after each of your clicks while monitoring (up to three chords when retrying),
+2. one bounded baseline copy when you start monitoring,
+3. one copy per press of the manual item check (`Ctrl+Shift+F11`).
+
+`grep -rn SendInput rust/crates` verifies the census in one command. The click observer that
+feeds path 1 is pass-through: its entire callback is a counter increment, it suppresses
+nothing, and it synthesizes nothing.
+
+**What this app never does** — the [ToS 7b/7c/7i](https://www.pathofexile.com/legal/terms-of-use-and-privacy-policy)
+category that GGG terminates accounts for on sight: no memory reads or writes, no DLL
+injection, no packet inspection, no reverse-engineered endpoints, and beyond that no network
+traffic of any kind, no screen reading, no GGG APIs, no GGG assets.
+
+**Stated openly, not argued.** Two readings of the rules are GGG's to make, and this README
+takes neither for granted: the press that invokes a monitoring copy is the crafting click
+itself, doing double duty; and a retried copy is up to three chords, which we read as one
+action attempted three times — the rules' own example counts an entire chat message as one
+action. If GGG rules against either reading, this design changes.
+
+**What we ask of you.** Click by hand — **do not use auto-clicker macros**; timed triggering
+is exactly what the rules prohibit, and this tool neither needs nor launders one. Stop
+monitoring when you are not crafting. If the game runs as administrator, let the app relaunch
+elevated when it asks. And this product isn't affiliated with or endorsed by Grinding Gear
+Games in any way.
 
 ## Download & run
 
