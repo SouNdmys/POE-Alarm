@@ -1,11 +1,19 @@
-//! Reads affix lines by asking the client for the item under the cursor.
+//! Reads affix lines via one copy per user click, plus copies the user makes.
 //!
-//! This is what replaced the OCR pipeline. Where that captured a frame, masked
-//! it for blue text, split it into bands and recognised each one, this presses
-//! Ctrl+C and parses the reply. The client hands over the item exactly, so
-//! there is no recognition step left to be wrong about — and no capture region
-//! to select, no model to ship, and nothing to recalibrate when the scene
-//! behind the tooltip changes.
+//! GGG's developer documentation requires synthesized input that affects the
+//! game to be invoked manually by the user, and names timers among the
+//! disallowed triggers. The old monitoring was a free-running timer sending
+//! `Ctrl+C` twenty times a second; this source replaces it with a copy that is
+//! *invoked by the user's own click*: a pass-through hook counts left clicks
+//! (suppressing and synthesizing nothing), and after each click — once the
+//! server has had time to answer — exactly one `Ctrl+C` chord is sent to read
+//! the result. One manual invocation, one fixed function, one action. Copies
+//! the user makes by hand are honored too, through the clipboard sequence
+//! number, so pressing `Ctrl+C` yourself always works.
+//!
+//! What remains grey and is stated rather than argued: the invoking press is
+//! the crafting click itself, doing double duty. Whether that satisfies
+//! "invoked manually" is GGG's call; a timer it is not.
 
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -16,58 +24,62 @@ use poe_alarm_monitoring::{
     StructuredOcrSupport,
 };
 use poe_alarm_platform_win::{
-    ClipboardError, KeyMethod, PointI, copy_hovered_item, cursor_position, game_is_foreground,
-    game_process_outranks_us,
+    ClickObserver, ClipboardError, KeyMethod, TimerResolutionGuard, copy_hovered_item,
+    game_is_foreground, game_process_outranks_us, observed_clicks, read_text,
+    request_fine_timer_resolution, sequence_number, start_click_observer,
 };
 
 /// How long to wait for the client to answer one Ctrl+C.
 ///
-/// A healthy round trip measures ~3ms with a p99 under 10ms, so anything
-/// longer is the client declining to answer rather than answering slowly — and
-/// it declines for the whole time a craft is in flight. Waiting it out blinds
-/// the source for exactly the window the new roll appears in, which is why
-/// this is short: measured detection lag tracked this deadline almost
-/// one-for-one (600ms deadline gave a 632ms median, 25ms gave 27ms). The
-/// mechanism behind that ratio is the attempt that straddles the moment the
-/// client resumes: it burns its whole deadline before the next attempt can
-/// succeed instantly, so every spare millisecond here is a millisecond of
-/// detection lag. 12ms still clears the p99 of a healthy answer.
+/// A healthy round trip measures ~3ms with a p99 under 10ms; longer means the
+/// client is declining to answer (a craft in flight does that), and waiting it
+/// out only delays the retry.
 const COPY_DEADLINE: Duration = Duration::from_millis(12);
 
-/// How many unanswered copies in a row mean something is structurally wrong.
+/// Where the click-to-copy delay starts before adaptation takes over.
 ///
-/// A craft blocks the client for a fraction of a second — a handful of polls at
-/// most. Windows refusing to deliver the keystroke at all looks identical from
-/// here, except that it never stops. This is the line between the two, set far
-/// enough out that no craft can reach it and near enough that a user notices
-/// within seconds rather than after a league of empty scans.
-///
-/// Crossing it proves nothing by itself: a cursor resting over empty ground
-/// produces exactly this silence, because the client only answers while an
-/// item is hovered. The streak earns a report only when the integrity
-/// comparison confirms the game outranks this process.
-const SILENT_FAILURE_STREAK: u32 = 60;
+/// The new affixes exist only after a server round trip, so a copy fired too
+/// early reads the old item — and one fired late gives the roll away to the
+/// next click. The right value is a property of the connection and the hour,
+/// so it is *learned*: every click teaches whether the first copy was early
+/// (a retry was needed: raise) or comfortably late (it answered fresh:
+/// probe lower). `POE_ALARM_COPY_DELAY_MS` pins it and disables adaptation.
+const DEFAULT_COPY_DELAY: Duration = Duration::from_millis(80);
 
-/// How far the cursor may drift between polls and still count as resting.
+/// Adaptation bounds and steps: additive-increase, gentle-decrease.
+const MIN_COPY_DELAY: Duration = Duration::from_millis(40);
+const MAX_COPY_DELAY: Duration = Duration::from_millis(150);
+const DELAY_RAISE: Duration = Duration::from_millis(15);
+const DELAY_PROBE: Duration = Duration::from_millis(5);
+
+/// Environment variable overriding the click-to-copy delay, in milliseconds.
+pub const COPY_DELAY_OVERRIDE: &str = "POE_ALARM_COPY_DELAY_MS";
+
+/// Gap between re-copies when the first copy still shows the old text.
+const RECOPY_GAP: Duration = Duration::from_millis(30);
+
+/// Most chords one click may cost, counting the first copy and re-copies.
 ///
-/// A hand trembles by a pixel or two while spam-clicking one spot; travelling
-/// to an item covers tens of pixels per poll. Nothing meaningful lives between.
-const CURSOR_REST_TOLERANCE: i32 = 3;
+/// Bounded and small on purpose: this is the entire injection budget of one
+/// click, and it is spent only when the client answers with stale text or not
+/// at all. Three attempts spaced by `RECOPY_GAP` cover a round trip of ~180ms.
+const MAX_COPIES_PER_CLICK: u32 = 3;
+
+/// How many times to re-try opening the clipboard for a user-made copy.
+const CLIPBOARD_OPEN_ATTEMPTS: u32 = 60;
 
 /// Why a reading could not be taken.
 #[derive(Debug)]
 pub enum SourceError {
-    /// The client refused or ignored the request.
+    /// The clipboard could not be read.
     Clipboard(ClipboardError),
-    /// The client never answered while the game outranks this process.
+    /// The game runs with higher privileges than this process.
     ///
-    /// Only produced when the integrity comparison agrees, because unanswered
-    /// alone is the ordinary state of a cursor resting over nothing. The
-    /// comparison errs toward reporting — every failure to read a token counts
-    /// as outranked — so the silent-forever failure this once had cannot come
-    /// back through it; only a confident same-level-or-lower answer suppresses
-    /// the report, and elevating genuinely cannot help then.
-    Unanswered { attempts: u32 },
+    /// Both halves of the click-invoked copy die against that wall: Windows
+    /// neither delivers our chord to an elevated window nor lets our
+    /// unelevated hook observe clicks headed to one. Detected up front so the
+    /// user hears about it immediately instead of after a silent session.
+    Outranked,
     /// A source that is not the clipboard failed.
     Other(String),
 }
@@ -75,12 +87,11 @@ pub enum SourceError {
 impl fmt::Display for SourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Clipboard(error) => write!(formatter, "clipboard capture failed: {error}"),
-            Self::Unanswered { attempts } => write!(
-                formatter,
-                "the game did not answer {attempts} copy requests in a row. It is running with \
-                 higher privileges than POE Alarm, so Windows is discarding them. Restart POE \
-                 Alarm as administrator: Settings -> Privileges."
+            Self::Clipboard(error) => write!(formatter, "clipboard read failed: {error}"),
+            Self::Outranked => formatter.write_str(
+                "the game is running with higher privileges than POE Alarm, so Windows hides \
+                 your clicks from it and discards its copies. Restart POE Alarm as \
+                 administrator: Settings -> Privileges.",
             ),
             Self::Other(detail) => formatter.write_str(detail),
         }
@@ -89,25 +100,122 @@ impl fmt::Display for SourceError {
 
 impl ReadFailure for SourceError {
     fn is_actionable(&self) -> bool {
-        // Sixty unanswered copies is never a hiccup, and the fix is always
-        // something only the user can do. Deliberately not conditioned on the
-        // privilege check: that is a guess about the cause, and the whole
-        // reason this exists is that a wrong guess left the failure silent.
-        matches!(self, Self::Unanswered { .. })
+        // Outranked is the one failure the user can fix, and the fix is
+        // exactly the elevation flow the UI already offers.
+        matches!(self, Self::Outranked)
     }
 }
 
-/// Affix source backed by the client's own item text.
+/// Reads the copy-delay override once, ignoring anything unparseable.
+fn copy_delay_override(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
+    let raw = value?.to_str()?;
+    let millis: u64 = raw.trim().parse().ok()?;
+    (1..=1000)
+        .contains(&millis)
+        .then(|| Duration::from_millis(millis))
+}
+
+/// The next copy's due time when a fresh click arrives.
+///
+/// A pending copy that is already due sooner survives: cancelling it on every
+/// faster click starves the pipeline outright — below the cadence floor not a
+/// single copy ever fires, and the session goes blind instead of alarming
+/// late. Firing the earlier copy keeps evidence flowing at any cadence; the
+/// per-click budget still resets, so the ceiling stays three chords per click.
+fn next_due(existing: Option<Instant>, fresh: Instant) -> Instant {
+    existing.filter(|due| *due < fresh).unwrap_or(fresh)
+}
+
+/// One step of the delay controller.
+///
+/// A retry (or a late answer caught passively) means the first copy fired
+/// before the roll arrived: raise decisively, losing a roll costs currency.
+/// A fresh first-copy answer means there is room below: probe down gently,
+/// early copies only cost a bounded retry. Additive both ways, clamped.
+fn adapted_delay(current: Duration, needed_retry: bool) -> Duration {
+    if needed_retry {
+        (current + DELAY_RAISE).min(MAX_COPY_DELAY)
+    } else {
+        current.saturating_sub(DELAY_PROBE).max(MIN_COPY_DELAY)
+    }
+}
+
+/// Where the start-invoked baseline copy stands.
+///
+/// The first reading is never evaluated (an item that already matches must
+/// not lock the screen the moment monitoring starts), so without a baseline
+/// the first roll would be swallowed as one. Instead of asking the user to
+/// copy by hand, the start-monitoring press itself invokes one bounded copy
+/// attempt — the same shape as a price checker's hotkey: one press of yours,
+/// one copy, and the budget is spent whether it succeeds or not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Baseline {
+    /// Not yet attempted; schedule one bounded copy when the gates allow.
+    Pending,
+    /// The attempt is using the shared copy machinery right now.
+    Running,
+    /// Attempted (or superseded); no further unprompted copies, ever.
+    Done,
+}
+
+/// Who asked for the payload being ingested.
+///
+/// A first reading is evaluated or not depending on this. The start-invoked
+/// baseline and a manual copy describe the item *as it stands* — judging that
+/// would lock the screen the moment monitoring starts over an already-matching
+/// item. A click-invoked copy describes the item *after a roll*, and skipping
+/// it would make the session's first roll a blind spot; it is judged.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CopyOrigin {
+    /// The bounded copy the start-monitoring press invoked.
+    StartBaseline,
+    /// A copy answering one of the user's clicks.
+    Click,
+    /// A copy the user made themselves with Ctrl+C.
+    Manual,
+}
+
+/// What one ingested clipboard payload turned out to be.
+enum Ingested {
+    /// New text for the same item: real evidence, evaluate it.
+    Evidence(RecognitionResult),
+    /// Identical to the last payload — the roll has not landed yet.
+    SameText,
+    /// Anything else that ends the attempt: baseline, other item, not an item.
+    Settled(RecognitionResult),
+}
+
+/// Affix source: one copy per user click, plus the user's own copies.
 pub struct ClipboardSource {
     key_method: KeyMethod,
+    /// Pass-through click counter, held for its lifetime: dropping the source
+    /// unhooks it. `None` when the observer failed to start.
+    _observer: Option<ClickObserver>,
+    /// Why the observer is `None`, reported once.
+    observer_failure: Option<String>,
+    copy_delay: Duration,
+    /// `true` when `POE_ALARM_COPY_DELAY_MS` pinned the delay: no adaptation.
+    delay_pinned: bool,
+    /// Holds the scheduler at 1ms so tick jitter stops eating the margin.
+    _timer_resolution: TimerResolutionGuard,
+    /// Clicks already answered with a copy (or given up on).
+    clicks_handled: u64,
+    /// When the newest unanswered click was observed.
+    click_seen_at: Option<Instant>,
+    /// Chords spent on the current click.
+    copies_this_click: u32,
+    /// Earliest instant the next copy may fire.
+    next_copy_at: Option<Instant>,
+    /// The clipboard sequence number at the last poll.
+    last_sequence: Option<u32>,
     /// The last payload judged, used to answer "has this item moved".
     last_payload: Option<String>,
     /// The last item judged, used to notice the cursor moving to another item.
     last_item: Option<ParsedItem>,
-    /// Consecutive unanswered copies while the game held focus.
-    unanswered: u32,
-    /// Where the cursor was at the previous poll, for the travel gate.
-    last_cursor: Option<PointI>,
+    /// Clipboard changes skipped while the game was unfocused.
+    ignored_while_unfocused: u64,
+    /// The start-invoked baseline copy's progress.
+    baseline: Baseline,
 }
 
 impl Default for ClipboardSource {
@@ -119,12 +227,27 @@ impl Default for ClipboardSource {
 impl ClipboardSource {
     #[must_use]
     pub fn new() -> Self {
+        let (observer, observer_failure) = match start_click_observer() {
+            Ok(observer) => (Some(observer), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+        let pinned = copy_delay_override(std::env::var_os(COPY_DELAY_OVERRIDE).as_deref());
         Self {
             key_method: KeyMethod::default(),
+            _observer: observer,
+            observer_failure,
+            delay_pinned: pinned.is_some(),
+            _timer_resolution: request_fine_timer_resolution(),
+            copy_delay: pinned.unwrap_or(DEFAULT_COPY_DELAY),
+            clicks_handled: observed_clicks(),
+            click_seen_at: None,
+            copies_this_click: 0,
+            next_copy_at: None,
+            last_sequence: None,
             last_payload: None,
             last_item: None,
-            unanswered: 0,
-            last_cursor: None,
+            ignored_while_unfocused: 0,
+            baseline: Baseline::Pending,
         }
     }
 
@@ -134,6 +257,86 @@ impl ClipboardSource {
             was_cached: true,
             recognition_elapsed: elapsed,
             ..RecognitionResult::default()
+        }
+    }
+
+    /// An unchanged reading that still says why, so the log can tell "nothing
+    /// happened" apart from "something happened and was digested silently".
+    /// Never echoes clipboard content — only the classification.
+    fn noted(elapsed: Duration, note: String) -> RecognitionResult {
+        RecognitionResult {
+            lines: vec![note],
+            was_cached: true,
+            recognition_elapsed: elapsed,
+            ..RecognitionResult::default()
+        }
+    }
+
+    /// Shared judgement for one clipboard payload, however it arrived.
+    fn ingest(&mut self, text: String, started: Instant, origin: CopyOrigin) -> Ingested {
+        if self
+            .last_payload
+            .as_deref()
+            .is_some_and(|previous| previous == text)
+        {
+            return Ingested::SameText;
+        }
+
+        let Ok(item) = parse(&text) else {
+            // Readable clipboard, unreadable item. The content is deliberately
+            // not echoed: the clipboard may hold anything.
+            return Ingested::Settled(Self::noted(
+                started.elapsed(),
+                "剪贴板内容不是物品文本 (not an item)".to_owned(),
+            ));
+        };
+
+        // Text changing is not proof the *same* item was rerolled: copying a
+        // different item changes it too. Judging that would report the wrong
+        // affixes and adopt them as the baseline.
+        if let Some(previous) = &self.last_item
+            && !previous.is_same_item_as(&item)
+        {
+            self.last_payload = Some(text);
+            self.last_item = Some(item);
+            return Ingested::Settled(Self::noted(
+                started.elapsed(),
+                "换了物品,重新建立基准 (different item; rebaselined)".to_owned(),
+            ));
+        }
+
+        let first_reading = self.last_payload.is_none();
+        self.last_payload = Some(text);
+        let (lines, physical_line_identities) = item.render();
+        self.last_item = Some(item);
+
+        // A first reading counts as evidence only when a click asked for it:
+        // that payload is post-roll, and swallowing it as a baseline would
+        // leave the session's first roll unjudged. Baseline and manual copies
+        // establish state without judging it.
+        let baseline_reading = first_reading && origin != CopyOrigin::Click;
+        let result = RecognitionResult {
+            lines,
+            physical_line_identities,
+            recognition_elapsed: started.elapsed(),
+            was_cached: baseline_reading,
+            ..RecognitionResult::default()
+        };
+        if baseline_reading {
+            Ingested::Settled(result)
+        } else {
+            Ingested::Evidence(result)
+        }
+    }
+
+    /// Finishes the current click, win or lose.
+    fn settle_click(&mut self) {
+        self.clicks_handled = observed_clicks();
+        self.click_seen_at = None;
+        self.copies_this_click = 0;
+        self.next_copy_at = None;
+        if self.baseline == Baseline::Running {
+            self.baseline = Baseline::Done;
         }
     }
 }
@@ -154,111 +357,182 @@ impl AffixSource for ClipboardSource {
     ) -> Result<RecognitionResult, Self::Error> {
         let started = Instant::now();
 
-        // Injected input only reaches a focused window, and copying while the
-        // user is elsewhere would clobber their clipboard for nothing.
+        // Privacy boundary: while the game is not the foreground window the
+        // clipboard belongs to whatever else the user is doing, and this
+        // source must not read it. The sequence number is a global counter,
+        // not content; recording it keeps a copy made while tabbed out from
+        // being misread as a roll later. Clicks made elsewhere are likewise
+        // written off.
         if !game_is_foreground() {
-            return Ok(Self::unchanged(started.elapsed()));
-        }
-
-        // Nothing is injected while the cursor is travelling: a travelling
-        // cursor is never over the item the user means, so the client would
-        // not answer. There is deliberately no mid-click gate any more. It
-        // existed to keep the Shift lift away from the user's presses; with
-        // the lift gone the chord touches nothing of theirs, and pausing for
-        // the whole of a macro's hold time was costing the probe exactly the
-        // window it needed — at an 80ms cadence with a 40ms hold, half of
-        // every cycle went dark.
-        let resting = match cursor_position() {
-            Some(position) => {
-                let moved = self.last_cursor.is_some_and(|last| {
-                    (position.x - last.x).abs() > CURSOR_REST_TOLERANCE
-                        || (position.y - last.y).abs() > CURSOR_REST_TOLERANCE
-                });
-                self.last_cursor = Some(position);
-                !moved
+            let sequence = sequence_number();
+            if self.last_sequence.is_some_and(|last| last != sequence) {
+                self.ignored_while_unfocused = self.ignored_while_unfocused.saturating_add(1);
             }
-            None => true,
-        };
-        if !resting {
+            self.last_sequence = Some(sequence);
+            self.settle_click();
             return Ok(Self::unchanged(started.elapsed()));
         }
 
-        // No pacing beyond the monitor's own. The injected chord leaves the
-        // user's modifiers alone, so a copy has no visible effect and there is
-        // nothing to ration. Three generations of click-gating, chase windows
-        // and keepalives existed to ration a Shift flicker that a misdiagnosis
-        // had made necessary; with the lift gone, free running is both the
-        // simplest and the fastest this has ever been.
+        // Both halves of the click-invoked copy die against an elevated game:
+        // Windows hides clicks from our unelevated hook and discards our
+        // chord. Reported immediately — the old sixty-poll streak took
+        // seconds to notice what this can see at once.
+        if game_process_outranks_us() {
+            return Err(SourceError::Outranked);
+        }
 
+        if let Some(failure) = self.observer_failure.take() {
+            return Err(SourceError::Other(format!(
+                "the click observer could not start, so click-invoked copies are unavailable: \
+                 {failure}"
+            )));
+        }
+
+        if self.ignored_while_unfocused > 0 {
+            let ignored = self.ignored_while_unfocused;
+            self.ignored_while_unfocused = 0;
+            return Ok(Self::noted(
+                started.elapsed(),
+                format!("游戏后台期间剪贴板有 {ignored} 次变化,已忽略 (ignored while unfocused)"),
+            ));
+        }
+
+        // The clipboard as it stood before this session is nobody's business
+        // and no evidence: the very first poll records the sequence number
+        // without reading a byte of content.
+        if self.last_sequence.is_none() {
+            self.last_sequence = Some(sequence_number());
+        }
+
+        // The user's own copies first: a hand-pressed Ctrl+C is always
+        // honored, click or no click.
+        let sequence = sequence_number();
+        if self.last_sequence != Some(sequence) {
+            match read_text(CLIPBOARD_OPEN_ATTEMPTS) {
+                Ok((text, _attempts)) => {
+                    self.last_sequence = Some(sequence);
+                    match self.ingest(text, started, CopyOrigin::Manual) {
+                        Ingested::Evidence(result) | Ingested::Settled(result) => {
+                            // Evidence arriving while a click's copy is still
+                            // pending is a late answer the schedule missed:
+                            // the first copy fired too early. Learn from it.
+                            if !self.delay_pinned && self.click_seen_at.is_some() {
+                                self.copy_delay = adapted_delay(self.copy_delay, true);
+                            }
+                            self.settle_click();
+                            return Ok(result);
+                        }
+                        Ingested::SameText => {
+                            // An old payload re-copied says nothing; fall
+                            // through to the click logic below.
+                        }
+                    }
+                }
+                // The copier may still hold the clipboard open; the sequence
+                // number is deliberately not recorded, so this change is
+                // retried on the next poll instead of being swallowed.
+                Err(ClipboardError::Busy { .. }) => {
+                    return Ok(Self::unchanged(started.elapsed()));
+                }
+                Err(ClipboardError::NoTextFormat { .. } | ClipboardError::EmptyText) => {
+                    self.last_sequence = Some(sequence);
+                    return Ok(Self::noted(
+                        started.elapsed(),
+                        "剪贴板内容不是文本 (not text)".to_owned(),
+                    ));
+                }
+                Err(error) => return Err(SourceError::Clipboard(error)),
+            }
+        }
+
+        // The click-invoked copy. A new click restarts the delay window; a
+        // burst faster than the delay coalesces into one copy after the last
+        // click, which is the only roll that still exists anyway.
+        let clicks = observed_clicks();
+        if clicks != self.clicks_handled {
+            self.clicks_handled = clicks;
+            self.click_seen_at = Some(started);
+            self.copies_this_click = 0;
+            self.next_copy_at = Some(next_due(self.next_copy_at, started + self.copy_delay));
+            // A click racing the pending baseline wins it: the copy that
+            // follows is post-roll and must be judged, not filed as state.
+            if self.baseline != Baseline::Done {
+                self.baseline = Baseline::Done;
+            }
+        }
+
+        // The start-invoked baseline: scheduled exactly once, immediately,
+        // through the same bounded machinery a click uses. A click arriving
+        // first simply takes the slot — its copy doubles as the baseline.
+        if self.baseline == Baseline::Pending && self.next_copy_at.is_none() {
+            self.baseline = Baseline::Running;
+            self.copies_this_click = 0;
+            self.next_copy_at = Some(started);
+        }
+
+        let Some(due) = self.next_copy_at else {
+            return Ok(Self::unchanged(started.elapsed()));
+        };
+        if started < due {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
+
+        self.copies_this_click += 1;
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
-            // The client goes quiet for the duration of a craft, so a missing
-            // payload means it had nothing to give yet. Treating that as a
-            // fault would end the session every time the user crafted.
             Err(error) if error.is_transient() => {
-                self.unanswered = self.unanswered.saturating_add(1);
-                // Silence that never ends is not a craft — but it is also the
-                // ordinary state of a cursor resting over empty ground, so the
-                // streak alone must not interrupt anyone. The integrity
-                // comparison decides, and it errs toward reporting: only a
-                // confident answer that the game does not outrank us quietly
-                // forgives the streak, and elevating could not have helped
-                // then anyway.
-                if self.unanswered >= SILENT_FAILURE_STREAK {
-                    if game_process_outranks_us() {
-                        return Err(SourceError::Unanswered {
-                            attempts: self.unanswered,
-                        });
-                    }
-                    self.unanswered = 0;
+                // The client goes quiet while a craft is in flight. Retry on
+                // the re-copy schedule until the click's budget is spent.
+                if self.copies_this_click >= MAX_COPIES_PER_CLICK {
+                    let baselining = self.baseline == Baseline::Running;
+                    self.settle_click();
+                    let note = if baselining {
+                        "未建立基准(开始时未悬停物品),不影响:首次点击的复制会直接判定 \
+                         (no baseline; the first click's copy is judged directly)"
+                    } else {
+                        "客户端未应答,本轮放弃 (client did not answer; giving up this click)"
+                    };
+                    return Ok(Self::noted(started.elapsed(), note.to_owned()));
                 }
+                self.next_copy_at = Some(started + RECOPY_GAP);
                 return Ok(Self::unchanged(started.elapsed()));
             }
             Err(error) => return Err(SourceError::Clipboard(error)),
         };
-        self.unanswered = 0;
+        self.last_sequence = Some(sequence_number());
 
-        if self
-            .last_payload
-            .as_deref()
-            .is_some_and(|previous| previous == outcome.text)
-        {
-            return Ok(Self::unchanged(started.elapsed()));
-        }
-
-        let Ok(item) = parse(&outcome.text) else {
-            // Readable clipboard, unreadable item — the cursor is over
-            // something that is not an item. Leave the baseline alone so the
-            // roll being waited on is still pending.
-            return Ok(Self::unchanged(started.elapsed()));
+        let origin = if self.baseline == Baseline::Running {
+            CopyOrigin::StartBaseline
+        } else {
+            CopyOrigin::Click
         };
-
-        // Text changing is not proof the *same* item was rerolled: a drifting
-        // cursor changes it too. Judging that would report the wrong affixes
-        // and, worse, adopt them as the baseline, after which the roll the user
-        // is waiting on never gets compared again.
-        if let Some(previous) = &self.last_item
-            && !previous.is_same_item_as(&item)
-        {
-            self.last_payload = Some(outcome.text);
-            self.last_item = Some(item);
-            return Ok(Self::unchanged(started.elapsed()));
+        match self.ingest(outcome.text, started, origin) {
+            Ingested::Evidence(result) | Ingested::Settled(result) => {
+                if !self.delay_pinned && origin == CopyOrigin::Click {
+                    self.copy_delay = adapted_delay(self.copy_delay, self.copies_this_click > 1);
+                }
+                self.settle_click();
+                Ok(result)
+            }
+            Ingested::SameText => {
+                // The copy answered with the pre-click text: the roll has not
+                // arrived yet. Re-copy on a spaced schedule until the budget
+                // for this click is spent.
+                if self.copies_this_click >= MAX_COPIES_PER_CLICK {
+                    self.settle_click();
+                    return Ok(Self::noted(
+                        started.elapsed(),
+                        format!(
+                            "复制 {MAX_COPIES_PER_CLICK} 次仍是旧词缀,本轮放弃 \
+                             (still the old text after {MAX_COPIES_PER_CLICK} copies; \
+                             raise {COPY_DELAY_OVERRIDE})"
+                        ),
+                    ));
+                }
+                self.next_copy_at = Some(started + RECOPY_GAP);
+                Ok(Self::unchanged(started.elapsed()))
+            }
         }
-
-        let first_reading = self.last_payload.is_none();
-        self.last_payload = Some(outcome.text);
-        let (lines, physical_line_identities) = item.render();
-        self.last_item = Some(item);
-
-        Ok(RecognitionResult {
-            lines,
-            physical_line_identities,
-            recognition_elapsed: started.elapsed(),
-            // The first reading establishes what the item looked like before
-            // anything happened; there is nothing to compare it against yet.
-            was_cached: first_reading,
-            ..RecognitionResult::default()
-        })
     }
 }
 
@@ -269,26 +543,68 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn an_unanswered_streak_is_actionable() {
-        // By the time this error exists, the integrity comparison has already
-        // confirmed the mismatch — the read path cannot construct the variant
-        // any other way — so it is always the user's to fix.
-        assert!(
-            SourceError::Unanswered {
-                attempts: SILENT_FAILURE_STREAK,
-            }
-            .is_actionable()
-        );
-    }
-
-    #[test]
-    fn an_ordinary_clipboard_hiccup_is_not_actionable() {
-        // A craft in flight looks exactly like this and needs no dialog.
+    fn outranked_is_the_only_actionable_failure() {
+        // Elevation is the one thing the user can fix, and the UI's offer to
+        // relaunch elevated is exactly that fix.
+        assert!(SourceError::Outranked.is_actionable());
         assert!(
             !SourceError::Clipboard(ClipboardError::Timeout {
-                waited: Duration::from_millis(25)
+                waited: Duration::from_millis(12)
             })
             .is_actionable()
         );
+        assert!(!SourceError::Other("anything".to_owned()).is_actionable());
+    }
+
+    #[test]
+    fn the_copy_delay_override_parses_and_bounds() {
+        assert_eq!(
+            copy_delay_override(Some(std::ffi::OsStr::new("120"))),
+            Some(Duration::from_millis(120))
+        );
+        assert_eq!(copy_delay_override(Some(std::ffi::OsStr::new("0"))), None);
+        assert_eq!(
+            copy_delay_override(Some(std::ffi::OsStr::new("1001"))),
+            None
+        );
+        assert_eq!(
+            copy_delay_override(Some(std::ffi::OsStr::new("fast"))),
+            None
+        );
+        assert_eq!(copy_delay_override(None), None);
+    }
+
+    /// A fresh click must not cancel a copy that is already due sooner —
+    /// that starvation is exactly how a fast cadence went completely blind.
+    #[test]
+    fn a_faster_click_keeps_the_earlier_pending_copy() {
+        let now = Instant::now();
+        let sooner = now + Duration::from_millis(20);
+        let fresh = now + Duration::from_millis(120);
+        assert_eq!(next_due(Some(sooner), fresh), sooner);
+        assert_eq!(
+            next_due(Some(fresh + Duration::from_millis(1)), fresh),
+            fresh
+        );
+        assert_eq!(next_due(None, fresh), fresh);
+    }
+
+    /// The delay controller must be decisive upward (a missed roll costs
+    /// currency) and gentle downward (an early copy only costs a retry), and
+    /// must never leave its bounds.
+    #[test]
+    fn the_delay_controller_raises_hard_probes_gently_and_stays_bounded() {
+        let mid = Duration::from_millis(80);
+        assert_eq!(adapted_delay(mid, true), Duration::from_millis(95));
+        assert_eq!(adapted_delay(mid, false), Duration::from_millis(75));
+        assert_eq!(adapted_delay(MAX_COPY_DELAY, true), MAX_COPY_DELAY);
+        assert_eq!(adapted_delay(MIN_COPY_DELAY, false), MIN_COPY_DELAY);
+    }
+
+    /// The injection budget of one click is bounded by construction; this
+    /// pins the constant so a future edit cannot silently unbound it.
+    #[test]
+    fn one_click_costs_at_most_three_chords() {
+        assert_eq!(MAX_COPIES_PER_CLICK, 3);
     }
 }

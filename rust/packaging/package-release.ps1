@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $Version = '1.0.6',
+    [string] $Version = '1.1.0',
     [string] $ExecutablePath = 'rust/target/release/poe-alarm-app.exe',
     [Parameter(Mandatory = $true)]
     [string] $VcRedistDirectory,
@@ -178,7 +178,7 @@ function Add-DeterministicZip([string] $SourceDirectory, [string] $ZipPath, [str
 $script:RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Push-Location $RepositoryRoot
 try {
-    if ($Version -ne '1.0.6') { throw 'this script is intentionally pinned to 1.0.6' }
+    if ($Version -ne '1.1.0') { throw 'this script is intentionally pinned to 1.1.0' }
     if (-not $SkipBuild) {
         # Rust records file!() for every dependency, so an unremapped release build ships several
         # hundred absolute paths rooted at the builder's home directory. The remaps are computed
