@@ -14,7 +14,9 @@
 >
 > Stated rather than argued: the invoking press is the crafting click itself, doing double
 > duty. Whether that satisfies "invoked manually" is GGG's call — but a timer it is not,
-> and zero input of any kind is synthesized unless you act.
+> and zero input of any kind is synthesized unless you act. In shape this is what price
+> checkers have done for years — a press of yours, one copy, a window of ours — applied
+> per roll instead of per lookup.
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
@@ -24,9 +26,9 @@ Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` fo
 
 **It does make crafting faster, and that is the point.** Without it, every roll costs you a look at the tooltip and a decision about what you are seeing. With it you can click straight through a stack of currency without reading anything, and be interrupted only when the combination you asked for actually appears. Not having to read is the whole gain, and in practice it is a large one.
 
-**The timing that decides a catch is now yours.** The app's own side is fast — once your copy lands on the clipboard, noticing, judging and arming the click block take on the order of twenty milliseconds. What decides whether a winning roll survives is when you copy: the new affixes only exist after a server round trip, so a `Ctrl+C` pressed too soon after the click captures the old item, and that roll is only judged at your next copy. Leave room between the click and the copy, and room after the copy before the next click.
+**The timing that decides a catch is the copy delay.** After each click the app waits ~80ms for the server round trip, then copies and judges — measured field results: click intervals of 100–150ms are caught with high accuracy, below ~80ms overshoots begin. If rolls get past you, raise `POE_ALARM_COPY_DELAY_MS` or slow down; the app's own side adds only milliseconds.
 
-**Suggested use:** start monitoring, copy the item once to set the baseline, then roll in a steady rhythm of click, copy, pause. If rolls start getting past the alarm, widen the gaps — that is the signal to slow down, not a reason to trust it further. When an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log, so a silent failure and bad timing do not look alike.
+**Suggested use:** hover the item, start monitoring (that press sets the baseline automatically), then just click — by hand. Do not use auto-clicker macros: timed triggering is exactly what the rules prohibit, and this tool neither needs nor launders one. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls start getting past the alarm, slow down — and when an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 

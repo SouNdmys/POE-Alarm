@@ -105,6 +105,24 @@ fn copy_delay_override(value: Option<&std::ffi::OsStr>) -> Option<Duration> {
         .then(|| Duration::from_millis(millis))
 }
 
+/// Where the start-invoked baseline copy stands.
+///
+/// The first reading is never evaluated (an item that already matches must
+/// not lock the screen the moment monitoring starts), so without a baseline
+/// the first roll would be swallowed as one. Instead of asking the user to
+/// copy by hand, the start-monitoring press itself invokes one bounded copy
+/// attempt — the same shape as a price checker's hotkey: one press of yours,
+/// one copy, and the budget is spent whether it succeeds or not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Baseline {
+    /// Not yet attempted; schedule one bounded copy when the gates allow.
+    Pending,
+    /// The attempt is using the shared copy machinery right now.
+    Running,
+    /// Attempted (or superseded); no further unprompted copies, ever.
+    Done,
+}
+
 /// What one ingested clipboard payload turned out to be.
 enum Ingested {
     /// New text for the same item: real evidence, evaluate it.
@@ -140,6 +158,8 @@ pub struct ClipboardSource {
     last_item: Option<ParsedItem>,
     /// Clipboard changes skipped while the game was unfocused.
     ignored_while_unfocused: u64,
+    /// The start-invoked baseline copy's progress.
+    baseline: Baseline,
 }
 
 impl Default for ClipboardSource {
@@ -169,6 +189,7 @@ impl ClipboardSource {
             last_payload: None,
             last_item: None,
             ignored_while_unfocused: 0,
+            baseline: Baseline::Pending,
         }
     }
 
@@ -253,6 +274,9 @@ impl ClipboardSource {
         self.click_seen_at = None;
         self.copies_this_click = 0;
         self.next_copy_at = None;
+        if self.baseline == Baseline::Running {
+            self.baseline = Baseline::Done;
+        }
     }
 }
 
@@ -312,6 +336,13 @@ impl AffixSource for ClipboardSource {
             ));
         }
 
+        // The clipboard as it stood before this session is nobody's business
+        // and no evidence: the very first poll records the sequence number
+        // without reading a byte of content.
+        if self.last_sequence.is_none() {
+            self.last_sequence = Some(sequence_number());
+        }
+
         // The user's own copies first: a hand-pressed Ctrl+C is always
         // honored, click or no click.
         let sequence = sequence_number();
@@ -358,6 +389,15 @@ impl AffixSource for ClipboardSource {
             self.next_copy_at = Some(started + self.copy_delay);
         }
 
+        // The start-invoked baseline: scheduled exactly once, immediately,
+        // through the same bounded machinery a click uses. A click arriving
+        // first simply takes the slot — its copy doubles as the baseline.
+        if self.baseline == Baseline::Pending && self.next_copy_at.is_none() {
+            self.baseline = Baseline::Running;
+            self.copies_this_click = 0;
+            self.next_copy_at = Some(started);
+        }
+
         let Some(due) = self.next_copy_at else {
             return Ok(Self::unchanged(started.elapsed()));
         };
@@ -372,12 +412,15 @@ impl AffixSource for ClipboardSource {
                 // The client goes quiet while a craft is in flight. Retry on
                 // the re-copy schedule until the click's budget is spent.
                 if self.copies_this_click >= MAX_COPIES_PER_CLICK {
+                    let baselining = self.baseline == Baseline::Running;
                     self.settle_click();
-                    return Ok(Self::noted(
-                        started.elapsed(),
+                    let note = if baselining {
+                        "未能建立基准(开始监控时请悬停在物品上);首次点击的复制将作为基准 \
+                         (no baseline; the first click's copy will become it)"
+                    } else {
                         "客户端未应答,本轮放弃 (client did not answer; giving up this click)"
-                            .to_owned(),
-                    ));
+                    };
+                    return Ok(Self::noted(started.elapsed(), note.to_owned()));
                 }
                 self.next_copy_at = Some(started + RECOPY_GAP);
                 return Ok(Self::unchanged(started.elapsed()));
