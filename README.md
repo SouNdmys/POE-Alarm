@@ -1,5 +1,33 @@
 # POE Alarm
 
+> ## ⚠️ Read this before using it on an account you care about
+>
+> **This tool may not comply with Path of Exile's rules on automation, and I have not yet
+> received an answer from GGG.**
+>
+> To notice that an item changed, the app sends `Ctrl+C` into the game **on a timer** — about
+> twenty times a second for as long as monitoring runs, whether or not you press anything (see
+> [Safety boundaries](#safety-boundaries)). The rule most often quoted for macros is the
+> opposite of that:
+>
+> > "Each macro must be activated by a button press; automation of any kind is against the
+> > rules. Your macro also cannot conditionally perform actions or select between multiple
+> > actions."
+>
+> A timer is not a button press. Whether that makes this tool disallowed is **GGG's call, not
+> mine**, and I am not going to argue either way here.
+>
+> Two community threads for context — note that **neither is an official GGG ruling**: the
+> first is a player-written guide whose author states outright that he is not a GGG employee,
+> and the second is a player discussion that quotes the policy above, with no GGG staff reply
+> in it.
+>
+> - [\[Guide\] What a macro is allowed to do in Path of Exile](https://www.pathofexile.com/forum/view-thread/2077975/page/1)
+> - [@Lutbot macro set confirmed by Zizaran in his latest video](https://www.pathofexile.com/forum/view-thread/2686839)
+>
+> **Until GGG answers, do not use this on an account you would mind losing.** I have asked;
+> if and when there is a response, it goes here.
+
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
 Current release: **1.0.6**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
