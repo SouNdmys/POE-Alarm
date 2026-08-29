@@ -123,6 +123,23 @@ enum Baseline {
     Done,
 }
 
+/// Who asked for the payload being ingested.
+///
+/// A first reading is evaluated or not depending on this. The start-invoked
+/// baseline and a manual copy describe the item *as it stands* — judging that
+/// would lock the screen the moment monitoring starts over an already-matching
+/// item. A click-invoked copy describes the item *after a roll*, and skipping
+/// it would make the session's first roll a blind spot; it is judged.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CopyOrigin {
+    /// The bounded copy the start-monitoring press invoked.
+    StartBaseline,
+    /// A copy answering one of the user's clicks.
+    Click,
+    /// A copy the user made themselves with Ctrl+C.
+    Manual,
+}
+
 /// What one ingested clipboard payload turned out to be.
 enum Ingested {
     /// New text for the same item: real evidence, evaluate it.
@@ -215,7 +232,7 @@ impl ClipboardSource {
     }
 
     /// Shared judgement for one clipboard payload, however it arrived.
-    fn ingest(&mut self, text: String, started: Instant) -> Ingested {
+    fn ingest(&mut self, text: String, started: Instant, origin: CopyOrigin) -> Ingested {
         if self
             .last_payload
             .as_deref()
@@ -252,16 +269,19 @@ impl ClipboardSource {
         let (lines, physical_line_identities) = item.render();
         self.last_item = Some(item);
 
+        // A first reading counts as evidence only when a click asked for it:
+        // that payload is post-roll, and swallowing it as a baseline would
+        // leave the session's first roll unjudged. Baseline and manual copies
+        // establish state without judging it.
+        let baseline_reading = first_reading && origin != CopyOrigin::Click;
         let result = RecognitionResult {
             lines,
             physical_line_identities,
             recognition_elapsed: started.elapsed(),
-            // The first reading establishes what the item looked like before
-            // anything happened; there is nothing to compare it against yet.
-            was_cached: first_reading,
+            was_cached: baseline_reading,
             ..RecognitionResult::default()
         };
-        if first_reading {
+        if baseline_reading {
             Ingested::Settled(result)
         } else {
             Ingested::Evidence(result)
@@ -350,7 +370,7 @@ impl AffixSource for ClipboardSource {
             match read_text(CLIPBOARD_OPEN_ATTEMPTS) {
                 Ok((text, _attempts)) => {
                     self.last_sequence = Some(sequence);
-                    match self.ingest(text, started) {
+                    match self.ingest(text, started, CopyOrigin::Manual) {
                         Ingested::Evidence(result) | Ingested::Settled(result) => {
                             self.settle_click();
                             return Ok(result);
@@ -387,6 +407,11 @@ impl AffixSource for ClipboardSource {
             self.click_seen_at = Some(started);
             self.copies_this_click = 0;
             self.next_copy_at = Some(started + self.copy_delay);
+            // A click racing the pending baseline wins it: the copy that
+            // follows is post-roll and must be judged, not filed as state.
+            if self.baseline != Baseline::Done {
+                self.baseline = Baseline::Done;
+            }
         }
 
         // The start-invoked baseline: scheduled exactly once, immediately,
@@ -415,8 +440,8 @@ impl AffixSource for ClipboardSource {
                     let baselining = self.baseline == Baseline::Running;
                     self.settle_click();
                     let note = if baselining {
-                        "未能建立基准(开始监控时请悬停在物品上);首次点击的复制将作为基准 \
-                         (no baseline; the first click's copy will become it)"
+                        "未建立基准(开始时未悬停物品),不影响:首次点击的复制会直接判定 \
+                         (no baseline; the first click's copy is judged directly)"
                     } else {
                         "客户端未应答,本轮放弃 (client did not answer; giving up this click)"
                     };
@@ -429,7 +454,12 @@ impl AffixSource for ClipboardSource {
         };
         self.last_sequence = Some(sequence_number());
 
-        match self.ingest(outcome.text, started) {
+        let origin = if self.baseline == Baseline::Running {
+            CopyOrigin::StartBaseline
+        } else {
+            CopyOrigin::Click
+        };
+        match self.ingest(outcome.text, started, origin) {
             Ingested::Evidence(result) | Ingested::Settled(result) => {
                 self.settle_click();
                 Ok(result)

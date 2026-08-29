@@ -28,7 +28,7 @@ Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` fo
 
 **The timing that decides a catch is the copy delay.** After each click the app waits ~80ms for the server round trip, then copies and judges — measured field results: click intervals of 100–150ms are caught with high accuracy, below ~80ms overshoots begin. If rolls get past you, raise `POE_ALARM_COPY_DELAY_MS` or slow down; the app's own side adds only milliseconds.
 
-**Suggested use:** hover the item, start monitoring (that press sets the baseline automatically), then just click — by hand. Do not use auto-clicker macros: timed triggering is exactly what the rules prohibit, and this tool neither needs nor launders one. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls start getting past the alarm, slow down — and when an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log.
+**Suggested use:** start monitoring — button or hotkey, either works — and just click, by hand. Every roll is judged, the first included; starting while hovering the item adds a baseline copy that makes the first judgement steadier. Do not use auto-clicker macros: timed triggering is exactly what the rules prohibit, and this tool neither needs nor launders one. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls start getting past the alarm, slow down — and when an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
 
