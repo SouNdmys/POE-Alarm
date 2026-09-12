@@ -1,0 +1,24 @@
+Item Class: Jewels
+Rarity: Rare
+Bramble Dew
+Sapphire
+--------
+Quality (Minion Modifiers): +20% (augmented)
+--------
+Item Level: 81
+--------
+{ Prefix Modifier "Authoritative" (Tier: 1) — Damage, Minion — 20% Increased }
+Minions deal 14(5-15)% increased Damage
+{ Crafted Prefix Modifier "" }
+60(40-60)% increased Effect of Suffixes — Unscalable Value
+{ Fractured Suffix Modifier "of Marshalling" (Tier: 1) — Minion, Critical — 80% Increased }
+Minions have 20(10-20)% increased Critical Hit Chance
+{ Suffix Modifier "of Gripping" (Tier: 1) — Damage, Minion, Critical — 80% Increased }
+Minions have 25(15-25)% increased Critical Damage Bonus
+{ Desecrated Suffix Modifier "of Orchestration" (Tier: 1) — Attack, Caster, Speed, Minion — 80% Increased }
+Minions have 4(2-4)% increased Attack and Cast Speed
+--------
+Place into an allocated Jewel Socket on the Passive Skill Tree. Right click to remove from the Socket.
+--------
+Fractured Item
+--------

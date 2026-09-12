@@ -17,6 +17,9 @@ const BOW: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
 const SPEAR: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe2-tw-rare-spear-unscalable.txt");
+const JEWEL: &str = include_str!(
+    "../../../../tests/fixtures/clipboard-items/poe2-en-rare-jewel-quality-crafted.txt"
+);
 
 fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
     CompiledRuleSet::compile(RuleSetDefinition {
@@ -195,4 +198,53 @@ fn a_value_annotation_tail_does_not_cost_the_user_the_hit() {
         !exceeded.is_match,
         "the rolled 30 must not pass a floor of 31"
     );
+}
+
+/// The jewel's tooltip shows suffix values scaled by quality and a crafted
+/// "increased Effect of Suffixes" — the client declares the multiplier in the
+/// annotation (`— 80% Increased`) and its crit suffix displays as 36, not 20.
+/// Ctrl+C carries the base roll, and judgement deliberately uses only that:
+/// rolled and displayed values map one-to-one per modifier, so a base-value
+/// threshold loses nothing, while re-deriving the display would gamble on
+/// unverified rounding at exactly the boundaries where money changes hands.
+#[test]
+fn judgement_reads_the_base_roll_not_the_scaled_display() {
+    let item = parse(JEWEL).expect("jewel parses");
+    let (lines, identities) = item.render();
+    let crit = |constraints| {
+        AffixCondition::new(
+            "crit",
+            "Minions have (10—20)% increased Critical Hit Chance",
+            constraints,
+        )
+    };
+
+    let rolled = rules(vec![crit(vec![NumericConstraint::at_least(20.0)])]).evaluate_with_identity(
+        &lines,
+        &[],
+        &identities,
+    );
+    assert!(rolled.is_match, "the rolled 20 meets a floor of 20");
+    let displayed = rules(vec![crit(vec![NumericConstraint::at_least(36.0)])])
+        .evaluate_with_identity(&lines, &[], &identities);
+    assert!(
+        !displayed.is_match,
+        "the tooltip's scaled 36 must not be what judgement compares"
+    );
+}
+
+/// The crafted prefix carries the annotation tail and an empty affix name
+/// (`{ Crafted Prefix Modifier "" }`); both survive parsing and the modifier
+/// stays matchable.
+#[test]
+fn a_crafted_modifier_with_an_annotation_tail_still_matches() {
+    let item = parse(JEWEL).expect("jewel parses");
+    let (lines, identities) = item.render();
+    let result = rules(vec![AffixCondition::new(
+        "suffix-effect",
+        "(40—60)% increased Effect of Suffixes",
+        vec![NumericConstraint::at_least(60.0)],
+    )])
+    .evaluate_with_identity(&lines, &[], &identities);
+    assert!(result.is_match);
 }

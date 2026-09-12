@@ -252,7 +252,7 @@ pub static ZH: Text = Text {
     no_numeric_slots: "模板没有数值占位;粘贴带数值的词缀后此处自动出现对应行",
     range_error: "数值范围的最小值不能大于最大值",
     notice_tag: "注意",
-    numeric_value_help: "催化剂、品质或特殊效果会改变屏幕显示值。数值条件只比较屏幕上实际显示的值,不推算基础值。",
+    numeric_value_help: "品质、催化剂或提升词缀效果的工艺,会让物品面板的显示值与 Ctrl+C 文本里的 roll 值不一致。数值条件只比较 Ctrl+C 的 roll 值(即按住 Alt 看到的数值),写阈值请以它为准;每条词缀的显示换算倍率在 { } 标注行里(如 — 80% Increased)。",
 
     affix_language_row: "词缀语言",
     affix_language_hint: "跟你游戏客户端的语言保持一致。两种语言各自保存一套规则,切换不会丢掉另一套",
@@ -435,7 +435,7 @@ pub static EN: Text = Text {
     no_numeric_slots: "This template has no value slots; rows appear automatically when the affix contains numbers",
     range_error: "The range minimum cannot exceed the maximum",
     notice_tag: "NOTE",
-    numeric_value_help: "Catalysts, quality, and special effects can change the value shown on screen. Numeric conditions compare only the shown value and do not estimate its base value.",
+    numeric_value_help: "Quality, catalysts, and effect-boosting crafts can make the tooltip differ from the roll in the Ctrl+C text. Numeric conditions compare only that roll — the value shown while holding Alt — so write thresholds against it; each modifier's display multiplier is declared in its { } annotation line (e.g. — 80% Increased).",
 
     affix_language_row: "Affix language",
     affix_language_hint: "Match your game client. Each language keeps its own rule set, so switching never loses the other",
