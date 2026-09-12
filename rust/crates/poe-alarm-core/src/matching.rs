@@ -81,7 +81,7 @@ pub fn canonicalize(text: &str) -> CanonicalAffix {
         };
     }
 
-    let normalized = normalize_for_matching(text);
+    let normalized = normalize_for_matching(strip_value_annotation(text));
     let chars: Vec<char> = normalized.chars().collect();
     let mut tokens = Vec::new();
     let mut index = 0;
@@ -295,7 +295,7 @@ impl FullLineAffixMatcher {
                 if !candidate.is_empty() {
                     candidate.push(' ');
                 }
-                candidate.push_str(line);
+                candidate.push_str(strip_value_annotation(line));
                 let canonical = canonicalize(&candidate);
                 if self.is_canonical_match(&canonical) {
                     return Ok(Some(LogicalAffixMatch {
@@ -486,6 +486,51 @@ fn token_text(kind: AffixTokenKind) -> &'static str {
         AffixTokenKind::NegativeNumber => "<NEG_NUM>",
         AffixTokenKind::NegativePercent => "<NEG_PCT>",
     }
+}
+
+/// Cuts the client's value annotation off the end of a line or template.
+///
+/// The client hangs explanatory tails on some modifier lines, introduced by a
+/// whitespace-surrounded dash: `... magnitudes — Unscalable Value`, and in
+/// Traditional Chinese ` — 無法使用的值` (POE1) or ` — 無法變動的值` (POE2) —
+/// two translations of the same tail already, which is why this is a
+/// structural rule and not a word list. Left in place, the tail's words are
+/// surplus tokens and the strict matcher rightly refuses the line, so a rule
+/// tracking the modifier itself can never fire.
+///
+/// Applied to templates and physical lines alike, so a rule written by
+/// copying the whole line — tail included — still matches. Multi-line
+/// candidates are stripped per line *before* joining, where the tail is still
+/// trailing. A tail carrying any numeric content (digits, `#`, `%`) is
+/// modifier text, not an annotation, and is never touched; no annotated line
+/// in the four corpora has one.
+pub(crate) fn strip_value_annotation(text: &str) -> &str {
+    let mut kept = text.trim_end();
+    while let Some(cut) = annotation_cut(kept) {
+        kept = kept[..cut].trim_end();
+    }
+    kept
+}
+
+/// Byte offset where the last annotation tail begins, if one qualifies.
+fn annotation_cut(text: &str) -> Option<usize> {
+    let mut previous_was_whitespace = false;
+    let mut candidate = None;
+    for (offset, character) in text.char_indices() {
+        if matches!(character, '\u{2013}' | '\u{2014}' | '\u{2015}') && previous_was_whitespace {
+            let after = offset + character.len_utf8();
+            if text[after..].chars().next().is_none_or(char::is_whitespace) {
+                candidate = Some((offset, after));
+            }
+        }
+        previous_was_whitespace = character.is_whitespace();
+    }
+    let (cut, after) = candidate?;
+    let tail_is_numberless = !text[after..]
+        .chars()
+        .any(|c| c.is_numeric() || matches!(c, '#' | '%' | '\u{FF03}' | '\u{FF05}'));
+    let head_survives = !text[..cut].trim_end().is_empty();
+    (tail_is_numberless && head_survives).then_some(cut)
 }
 
 fn normalize_for_matching(value: &str) -> String {

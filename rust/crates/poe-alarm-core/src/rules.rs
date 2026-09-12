@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::Decimal;
 use crate::matching::{
     CanonicalAffix, DEFAULT_MAXIMUM_PHYSICAL_LINE_SPAN, FullLineAffixMatcher,
-    MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN, canonicalize, extract_values,
+    MAXIMUM_SUPPORTED_PHYSICAL_LINE_SPAN, canonicalize, extract_values, strip_value_annotation,
 };
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -699,7 +699,7 @@ fn prepare_observations(
             if !combined.is_empty() {
                 combined.push(' ');
             }
-            combined.push_str(line);
+            combined.push_str(strip_value_annotation(line));
             let band_ids = (start..start + span)
                 .filter_map(|line_index| physical_band_by_line.get(&line_index).cloned())
                 .collect();

@@ -128,3 +128,57 @@ fn in_word_hyphen_loss_is_recovered() {
         FullLineAffixMatcher::new("#% reduced Mana Cost of Non-Channelling Skills").unwrap();
     assert!(matcher.is_match("7% reduced Mana Cost of NonChannelling Skills"));
 }
+
+#[test]
+fn a_value_annotation_tail_never_blocks_a_match() {
+    // The client appends ` — Unscalable Value` to some rolled lines. The tail
+    // is not part of the modifier and must not cost the user the hit.
+    let speed =
+        FullLineAffixMatcher::new("(25—30)% increased Explicit Speed Modifier magnitudes").unwrap();
+    assert!(
+        speed
+            .is_match("30(25-30)% increased Explicit Speed Modifier magnitudes — Unscalable Value")
+    );
+
+    let tc = FullLineAffixMatcher::new("增加(25—30)%變動速度詞綴的大小").unwrap();
+    assert!(tc.is_match("增加30(25-30)%變動速度詞綴的大小 — 無法變動的值"));
+
+    // POE1's client ships a different translation of the same tail, which is
+    // why the strip is structural rather than a word list.
+    let socket = FullLineAffixMatcher::new("有 1 個深淵插槽").unwrap();
+    assert!(socket.is_match("有 1 個深淵插槽 — 無法使用的值"));
+}
+
+#[test]
+fn a_template_copied_with_the_tail_still_matches() {
+    // A user who builds the rule by copying the whole line from the item gets
+    // the same behaviour as one who copies the clean PoEDB template.
+    let copied = FullLineAffixMatcher::new(
+        "30(25-30)% increased Explicit Speed Modifier magnitudes — Unscalable Value",
+    )
+    .unwrap();
+    assert!(copied.is_match("28% increased Explicit Speed Modifier magnitudes"));
+}
+
+#[test]
+fn a_dash_tail_carrying_values_is_modifier_text_not_annotation() {
+    let matcher = FullLineAffixMatcher::new("增加 (40—50)% 冰冷傷害").unwrap();
+    // Numeric content after the dash means real modifier text: stripping it
+    // would let this near-neighbour line satisfy the rule.
+    assert!(!matcher.is_match("增加 50% 冰冷傷害 — 增加 10% 攻擊速度"));
+    // And a range dash inside parentheses never opens a tail.
+    assert!(matcher.is_match("增加 50(40-50)% 冰冷傷害"));
+}
+
+#[test]
+fn the_tail_is_stripped_before_lines_join_into_a_span() {
+    // Once lines merge, the tail sits mid-string and is no longer trailing;
+    // the strip has to happen per line, before the join.
+    let hybrid = FullLineAffixMatcher::new("增加 (75—79)% 物理傷害 +(175—200) 命中值").unwrap();
+    let lines = vec![
+        "增加 79(75-79)% 物理傷害 — 無法變動的值".to_string(),
+        "+186(175-200) 命中值".to_string(),
+    ];
+    let found = hybrid.find_match(&lines).expect("hybrid still matches");
+    assert_eq!(found.physical_line_count, 2);
+}

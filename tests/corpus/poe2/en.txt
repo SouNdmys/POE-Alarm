@@ -287,3 +287,37 @@ Map contains an additional Strongbox
 Can be used in a personal Map Device to add modifiers to a Map.
 --------
 Note: ~b/o 1 divine
+Item Class: Spears
+Rarity: Rare
+Torment Edge
+Soaring Spear
+--------
+Physical Damage: 35-65
+Critical Hit Chance: 5.00%
+Attacks per Second: 1.70
+--------
+Requires: Level 70, 33 (augmented) Str, 93 (augmented) Dex
+--------
+Sockets: S S
+--------
+Item Level: 82
+--------
+Can roll Destruction modifiers (rune)
+--------
+Grants Skill: Spear Throw
+--------
+{ Fractured Prefix Modifier "Empowering" (Tier: 4) — Damage, Elemental, Fire, Cold, Lightning }
+54(53-62)% increased Elemental Damage with Attacks
+{ Prefix Modifier "Thrud's" (Tier: 1) — Speed — 30% Increased }
+30(25-30)% increased Explicit Speed Modifier magnitudes — Unscalable Value
+{ Suffix Modifier "of the Worthy" (Tier: 5) }
+15% reduced Attribute Requirements
+{ Suffix Modifier "of the Gladiator" (Tier: 2) }
+Causes 64(61-70)% increased Stun Buildup
+{ Suffix Modifier "of Glory" (Tier: 2) — Life }
+Gain 62(54-68) Life per enemy killed
+{ Prefix Modifier "Veiled" }
+Desecrated Prefix
+--------
+Fractured Item
+--------

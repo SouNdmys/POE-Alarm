@@ -15,6 +15,8 @@ use poe_alarm_core::{
 
 const BOW: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe1-tw-rare-bow-hybrid.txt");
+const SPEAR: &str =
+    include_str!("../../../../tests/fixtures/clipboard-items/poe2-tw-rare-spear-unscalable.txt");
 
 fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
     CompiledRuleSet::compile(RuleSetDefinition {
@@ -163,4 +165,34 @@ fn a_modifier_matches_whatever_the_client_says_produced_it() {
         vec![NumericConstraint::ignored()],
     )]);
     assert!(result.is_match, "an enchantment is still a modifier");
+}
+
+/// The spear's Thrud's prefix ends in ` — 無法變動的值`, the client's value
+/// annotation. The field failure this pins down: the tail's tokens made the
+/// strict matcher refuse the line, so the rule tracking the modifier never
+/// fired on a real item.
+#[test]
+fn a_value_annotation_tail_does_not_cost_the_user_the_hit() {
+    let item = parse(SPEAR).expect("spear parses");
+    let (lines, identities) = item.render();
+    let condition =
+        |constraints| AffixCondition::new("thrud", "增加(25—30)%變動速度詞綴的大小", constraints);
+
+    let result = rules(vec![condition(vec![NumericConstraint::ignored()])]).evaluate_with_identity(
+        &lines,
+        &[],
+        &identities,
+    );
+    assert!(result.is_match, "the tail must not block the match");
+
+    // The rolled value still reads as 30, untouched by the strip.
+    let floored = rules(vec![condition(vec![NumericConstraint::at_least(30.0)])])
+        .evaluate_with_identity(&lines, &[], &identities);
+    assert!(floored.is_match, "the rolled 30 meets a floor of 30");
+    let exceeded = rules(vec![condition(vec![NumericConstraint::at_least(31.0)])])
+        .evaluate_with_identity(&lines, &[], &identities);
+    assert!(
+        !exceeded.is_match,
+        "the rolled 30 must not pass a floor of 31"
+    );
 }
