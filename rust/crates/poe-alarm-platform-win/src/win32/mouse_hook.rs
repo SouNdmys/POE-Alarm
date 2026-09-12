@@ -53,6 +53,16 @@ static TEST_FAIL_OPEN_TIMER_SET: AtomicU64 = AtomicU64::new(0);
 static TEST_FAIL_OPEN_TIMER_FIRED: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 static TEST_LAST_TIMER_MESSAGE: AtomicUsize = AtomicUsize::new(0);
+/// Unit tests simulate every input under test by driving the state machine
+/// directly, so events from the developer's real mouse are interference, not
+/// signal: a genuine button-up during a draining-phase test completes the
+/// drain legitimately and early (a "627ms fail-open" turned out to be a
+/// human's click, not a timer), and a guarding-phase test suppresses the
+/// developer's real clicks for up to 750ms per run. While this is set, the
+/// live hook passes genuine events straight through untouched. Production
+/// builds carry no such gate.
+#[cfg(test)]
+static TEST_IGNORE_REAL_INPUT: AtomicBool = AtomicBool::new(true);
 
 struct HookShared {
     owner: AtomicU64,
@@ -697,6 +707,12 @@ unsafe extern "system" fn low_level_mouse_proc(
         || shared.owner.load(Ordering::Acquire) == 0
         || shared.hook_handle.load(Ordering::Acquire) == 0
     {
+        return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+    }
+    // See TEST_IGNORE_REAL_INPUT: in unit tests the machine's real mouse must
+    // neither feed the state under test nor be suppressed by it.
+    #[cfg(test)]
+    if TEST_IGNORE_REAL_INPUT.load(Ordering::Acquire) {
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     }
 
