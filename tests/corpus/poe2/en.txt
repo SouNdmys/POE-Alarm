@@ -345,3 +345,68 @@ Place into an allocated Jewel Socket on the Passive Skill Tree. Right click to r
 --------
 Fractured Item
 --------
+Item Class: Boots
+Rarity: Rare
+Blight March
+Sekhema Sandals
+--------
+Quality: +28% (augmented)
+Energy Shield: 434 (augmented)
+--------
+Requires: Level 80, 104 (augmented) Int
+--------
+Sockets: S S S
+--------
+Item Level: 80
+--------
+38% increased Armour, Evasion and Energy Shield (rune)
+Can roll Chronomancy modifiers (rune)
+--------
+{ Fractured Prefix Modifier "Blazing" (Tier: 1) — Energy Shield }
++60(48-60) to maximum Energy Shield
+{ Prefix Modifier "Uhtred's" (Tier: 1) — Speed }
+32(30-32)% increased Movement Speed
+21(25-21)% reduced Slowing Potency of Debuffs on You
+{ Desecrated Prefix Modifier "Unassailable" (Tier: 1) — Energy Shield }
+99(92-100)% increased Energy Shield
+{ Suffix Modifier "of Chronomancy" (Tier: 1) }
+Debuffs on you expire 80(70-89)% faster
+{ Suffix Modifier "of Chronomancy" (Tier: 1) }
+Skills have 14(11-15)% chance to not remove Charges but still count as consuming them
+{ Suffix Modifier "of the Ice" (Tier: 2) — Elemental, Cold, Resistance }
++38(36-40)% to Cold Resistance
+--------
+Corrupted
+--------
+Fractured Item
+--------
+Item Class: Boots
+Rarity: Rare
+Carrion Pace
+Drakeskin Boots
+--------
+Evasion Rating: 485 (augmented)
+--------
+Requires: Level 80, 67 (augmented) Dex
+--------
+Sockets: S S
+--------
+Item Level: 80
+--------
+18% increased Armour, Evasion and Energy Shield (rune)
+Can roll Chronomancy modifiers (rune)
+--------
+{ Prefix Modifier "Uhtred's" (Tier: 1) — Speed }
+32(30-32)% increased Movement Speed
+23(25-21)% reduced Slowing Potency of Debuffs on You
+{ Prefix Modifier "Vaporous" (Tier: 1) — Evasion }
++156(147-176) to Evasion Rating
+{ Prefix Modifier "Gentian" (Tier: 2) — Mana }
++92(90-104) to maximum Mana
+{ Suffix Modifier "of the Phantom" (Tier: 1) — Attribute }
++32(31-33) to Dexterity
+{ Desecrated Suffix Modifier "of Amanamu" (Tier: 1) — Elemental, Fire, Chaos, Resistance }
++13(13-17)% to Fire and Chaos Resistances
+{ Suffix Modifier "of the Proficient" (Tier: 1) }
+35% reduced Attribute Requirements
+--------

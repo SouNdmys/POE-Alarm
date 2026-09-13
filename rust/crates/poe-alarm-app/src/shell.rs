@@ -92,8 +92,14 @@ impl AppShell {
 
         let text = Self::text_for(backend.as_ref());
         let name_input = cx.new(|cx| InputState::new(window, cx));
-        let template_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(text.template_placeholder));
+        // Two rows, so a hybrid pasted as two lines is seen as two lines; the
+        // rules receive it whitespace-collapsed — see `template_value`.
+        let template_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(2)
+                .placeholder(text.template_placeholder)
+        });
         let item_text_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
@@ -488,7 +494,7 @@ impl AppShell {
         if let NodeRef::Condition(..) = self.selected_node() {
             let text = self.t();
             let name = self.s.name_input.read(cx).value().trim().to_string();
-            let template = self.s.template_input.read(cx).value().trim().to_string();
+            let template = self.template_value(cx);
             let missing = template.is_empty();
             let label = if !name.is_empty() {
                 name
@@ -517,7 +523,7 @@ impl AppShell {
             }
         }
         if changed {
-            let target = self.s.template_input.read(cx).value().trim().to_string();
+            let target = self.template_value(cx);
             if let Some(backend) = &self.backend {
                 backend.hud_update(
                     self.s.run == RunPhase::Monitoring,
@@ -678,6 +684,19 @@ impl AppShell {
         poe_alarm_core::extract_values(trimmed).len()
     }
 
+    /// The template as the rules store it: whitespace runs, newlines included,
+    /// collapsed to one space. A hybrid pasted as two lines is one condition
+    /// with one value slot per line, and the tree label stays one line.
+    fn template_value(&self, cx: &Context<Self>) -> String {
+        self.s
+            .template_input
+            .read(cx)
+            .value()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// 数值行与模板占位数对齐(渲染前调用;保留已有行的模式与输入)。
     pub fn ensure_value_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let want = Self::slot_count(&self.s.template_input.read(cx).value());
@@ -774,7 +793,7 @@ impl AppShell {
             return false;
         };
         let name = self.s.name_input.read(cx).value().trim().to_string();
-        let template = self.s.template_input.read(cx).value().trim().to_string();
+        let template = self.template_value(cx);
         let slots = Self::slot_count(&template);
         let parse = |entity: &gpui::Entity<InputState>| {
             entity
@@ -1146,6 +1165,27 @@ impl AppShell {
     fn run_item_check(&mut self, item_text: String, origin: &'static str, cx: &mut Context<Self>) {
         let text = self.t();
         if let Some(backend) = &mut self.backend {
+            // A condition without a template cannot compile, and the compiler's
+            // wording ("condition 1 has an empty template") points at the wrong
+            // place. Name the fix instead.
+            let template_pending = backend
+                .settings
+                .selected_rules()
+                .structured_rule_set
+                .as_ref()
+                .is_some_and(|set| {
+                    set.groups.iter().any(|group| {
+                        group
+                            .conditions
+                            .iter()
+                            .any(|condition| condition.template.trim().is_empty())
+                    })
+                });
+            if template_pending {
+                self.notice = Some((StatusKind::Warning, text.notice_template_pending.into()));
+                cx.notify();
+                return;
+            }
             match backend.check_item(item_text) {
                 Ok(()) => self.push_log(LogKind::Meta, origin.to_owned()),
                 Err(e) => {

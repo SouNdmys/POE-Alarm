@@ -114,6 +114,7 @@ pub struct Text {
     pub check_item_button: &'static str,
     pub item_text_placeholder: &'static str,
     pub notice_item_text_empty: &'static str,
+    pub notice_template_pending: &'static str,
 
     // -- 状态栏 --
     pub bar_ocr_prefix: &'static str,
@@ -296,6 +297,7 @@ pub static ZH: Text = Text {
     check_item_button: "测试规则",
     item_text_placeholder: "在游戏里把鼠标移到装备上按 Ctrl+C,粘贴到这里,看看你写的规则会不会命中",
     notice_item_text_empty: "先粘贴一段物品文本",
+    notice_template_pending: "还有词缀条件没填模板(树里标着\"待补\"):填上或删掉它,再测试",
 
     bar_ocr_prefix: "判定",
     bar_scan_prefix: "扫描",
@@ -343,7 +345,7 @@ pub static ZH: Text = Text {
     help_quick_start: "快速上手",
     help_steps: [
         "1 · 在标题栏选择游戏(POE 1 / POE 2)和与客户端一致的词缀语言。",
-        "2 · 从游戏或 PoEDB / PoE2DB 复制完整词缀,粘贴到\"完整词缀模板\";数值会自动识别为占位。",
+        "2 · 从游戏或 PoEDB / PoE2DB 复制完整词缀,粘贴到\"完整词缀模板\";数值会自动识别为占位。复合词缀(一条词缀两行说明,如移速+减速削弱)把两行一起粘成**一个**条件,会出现两个数值占位各对应一行;不要拆成两个条件——一条物理词缀最多满足一个条件,拆开永远凑不满。",
         "3 · 需要多个可接受结果时用左下\"+方案\"(方案之间是或者),同方案内\"+词缀\"配合\"什么时候提醒\"(任意/全部/指定条数)。",
         "4 · 数值条件默认不限制;只在需要卡数值时把比较方式改成范围/≥/≤/=。改动即时自动保存。",
         "5 · 先验规则:在游戏里把鼠标停在一件现成装备上按 Ctrl⇧F11,结果直接出来。也可以自己按 Ctrl+C 粘进右下的框里再点\"测试规则\"。",
@@ -479,6 +481,7 @@ pub static EN: Text = Text {
     check_item_button: "Test rules",
     item_text_placeholder: "In game, hover an item and press Ctrl+C, then paste it here to see whether your rules match",
     notice_item_text_empty: "Paste some item text first",
+    notice_template_pending: "A condition still has no template (marked \"pending\" in the tree): fill it in or delete it, then test.",
 
     bar_ocr_prefix: "check",
     bar_scan_prefix: "scans",
@@ -525,7 +528,7 @@ Restart POE Alarm as administrator now?",
     help_quick_start: "QUICK START",
     help_steps: [
         "1 · Pick the game (POE 1 / POE 2) and the affix language matching your client in the title bar.",
-        "2 · Copy a complete affix from the game or PoEDB / PoE2DB and paste it into \"Complete affix template\"; numbers become value slots automatically.",
+        "2 · Copy a complete affix from the game or PoEDB / PoE2DB and paste it into \"Complete affix template\"; numbers become value slots automatically. A hybrid (one modifier described on two lines, e.g. movement speed + slowing potency) goes in as **one** condition with both lines pasted together — one value slot per line. Do not split it into two conditions: one physical modifier satisfies at most one condition, so a split pair can never both match.",
         "3 · Use \"+Option\" (options are alternatives) for multiple acceptable results, \"+Affix\" within an option, and \"Alert when\" (any / all / chosen count).",
         "4 · Numeric rules are unlimited by default; switch a row to Range/≥/≤/= only when the value matters. Edits save automatically.",
         "5 · Check your rules first: rest the cursor on an item you already own and press Ctrl⇧F11 — the verdict comes straight back. Or press Ctrl+C yourself, paste into the box at the bottom right, and click \"Test rules\".",

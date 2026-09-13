@@ -1095,14 +1095,15 @@ impl AppShell {
                     .border_color(c(HAIRLINE_SOFT))
                     .child(micro_title_sm(t.item_check_title))
                     .child(
-                        div()
-                            .id("wb-check-item")
-                            .ml_auto()
-                            .text_size(fs(FS_11_5))
-                            .text_color(c(ACCENT))
-                            .hover(|s| s.bg(c(HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| this.check_item(cx)))
-                            .child(t.check_item_button),
+                        div().ml_auto().child(
+                            button(
+                                "wb-check-item",
+                                LedgerButton::Secondary,
+                                t.check_item_button,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.check_item(cx))),
+                        ),
                     )
                     .child(hotkey_chips(&["Ctrl", "\u{21e7}", "F11"])),
             )

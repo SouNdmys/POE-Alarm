@@ -20,6 +20,8 @@ const SPEAR: &str =
 const JEWEL: &str = include_str!(
     "../../../../tests/fixtures/clipboard-items/poe2-en-rare-jewel-quality-crafted.txt"
 );
+const BOOTS: &str =
+    include_str!("../../../../tests/fixtures/clipboard-items/poe2-en-rare-boots-hybrid-speed.txt");
 
 fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
     CompiledRuleSet::compile(RuleSetDefinition {
@@ -247,4 +249,74 @@ fn a_crafted_modifier_with_an_annotation_tail_still_matches() {
     )])
     .evaluate_with_identity(&lines, &[], &identities);
     assert!(result.is_match);
+}
+
+fn boots_match(conditions: Vec<AffixCondition>) -> RuleEvaluationResult {
+    let item = parse(BOOTS).expect("boots parse");
+    let (lines, identities) = item.render();
+    rules(conditions).evaluate_with_identity(&lines, &[], &identities)
+}
+
+const SPEED_HALF: &str = "(30—32)% increased Movement Speed";
+const SLOW_HALF: &str = "(21—25)% reduced Slowing Potency of Debuffs on You";
+
+/// Uhtred's is one modifier described on two lines. Written as one condition
+/// with both lines — pasted with the newline PoE2DB puts between them — each
+/// line's value is its own slot. The client writes the second line's range
+/// high to low, `21(25-21)`, and it still reads as the rolled 21.
+#[test]
+fn a_hybrid_is_one_condition_with_one_slot_per_line() {
+    let joined = format!("{SPEED_HALF}\n{SLOW_HALF}");
+    let hit = boots_match(vec![AffixCondition::new(
+        "uhtred",
+        &joined,
+        vec![
+            NumericConstraint::at_least(31.0),
+            NumericConstraint::at_least(21.0),
+        ],
+    )]);
+    assert!(hit.is_match);
+    let miss = boots_match(vec![AffixCondition::new(
+        "uhtred",
+        &joined,
+        vec![
+            NumericConstraint::at_least(31.0),
+            NumericConstraint::at_least(22.0),
+        ],
+    )]);
+    assert!(!miss.is_match, "the second slot reads the rolled 21");
+}
+
+/// Either line of a hybrid can be tracked on its own as a one-line template.
+#[test]
+fn each_half_of_a_hybrid_can_be_tracked_alone() {
+    let speed = boots_match(vec![AffixCondition::new(
+        "speed",
+        SPEED_HALF,
+        vec![NumericConstraint::at_least(32.0)],
+    )]);
+    assert!(speed.is_match);
+    let slow = boots_match(vec![AffixCondition::new(
+        "slow",
+        SLOW_HALF,
+        vec![NumericConstraint::at_least(21.0)],
+    )]);
+    assert!(
+        slow.is_match,
+        "an inverted tier range still yields the rolled value"
+    );
+}
+
+/// Split into two conditions, a hybrid can never satisfy both: one physical
+/// modifier satisfies at most one condition, by design — the same rule that
+/// stops one line from being counted twice toward an "any N" group. The help
+/// text steers users to the one-condition form above; this pins the reason.
+#[test]
+fn a_hybrid_split_into_two_conditions_cannot_satisfy_both() {
+    let both = boots_match(vec![
+        AffixCondition::new("speed", SPEED_HALF, vec![NumericConstraint::at_least(31.0)]),
+        AffixCondition::new("slow", SLOW_HALF, vec![NumericConstraint::at_least(21.0)]),
+    ]);
+    assert!(!both.is_match);
+    assert_eq!(both.groups[0].matched_count, 1);
 }
