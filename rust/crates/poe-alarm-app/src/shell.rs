@@ -91,13 +91,14 @@ impl AppShell {
         }
 
         let text = Self::text_for(backend.as_ref());
-        let name_input = cx.new(|cx| InputState::new(window, cx));
-        // Two rows, so a hybrid pasted as two lines is seen as two lines; the
-        // rules receive it whitespace-collapsed — see `template_value`.
+        let name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(text.condition_name_placeholder));
+        // Sized by content between two and four rows, so a hybrid pasted as
+        // two lines is seen whole; the rules receive it whitespace-collapsed —
+        // see `template_value`.
         let template_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .multi_line(true)
-                .rows(2)
+                .auto_grow(2, 4)
                 .placeholder(text.template_placeholder)
         });
         let item_text_input = cx.new(|cx| {
@@ -106,6 +107,18 @@ impl AppShell {
                 .rows(10)
                 .placeholder(text.item_text_placeholder)
         });
+        // A template change re-derives the condition name while the name is
+        // still the derived one; a name the user typed is never touched.
+        cx.subscribe_in(
+            &template_input,
+            window,
+            |this, _, event: &gpui_component::input::InputEvent, window, cx| {
+                if matches!(event, gpui_component::input::InputEvent::Change) {
+                    this.autofill_condition_name(window, cx);
+                }
+            },
+        )
+        .detach();
 
         let tree = Self::tree_from_settings(backend.as_ref());
         let selected = tree
@@ -141,6 +154,7 @@ impl AppShell {
                 tree,
                 selected,
                 name_input,
+                auto_name: None,
                 template_input,
                 item_text_input,
                 value_rows: Vec::new(),
@@ -684,6 +698,25 @@ impl AppShell {
         poe_alarm_core::extract_values(trimmed).len()
     }
 
+    /// Keeps the condition name following the template while the name is
+    /// derived — empty, or exactly what a previous derivation wrote. A name the
+    /// user typed is left alone; clearing it hands control back.
+    fn autofill_condition_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self.s.name_input.read(cx).value().trim().to_string();
+        let following = current.is_empty() || Some(&current) == self.s.auto_name.as_ref();
+        if !following {
+            return;
+        }
+        let derived = derive_condition_name(&self.template_value(cx));
+        if derived.is_empty() || derived == current {
+            return;
+        }
+        self.s.name_input.update(cx, |input, cx| {
+            input.set_value(derived.clone(), window, cx);
+        });
+        self.s.auto_name = Some(derived);
+    }
+
     /// The template as the rules store it: whitespace runs, newlines included,
     /// collapsed to one space. A hybrid pasted as two lines is one condition
     /// with one value slot per line, and the tree label stays one line.
@@ -737,6 +770,11 @@ impl AppShell {
         };
         let name = cond.name.clone();
         let template = cond.template.clone();
+        // A stored name equal to its derivation is still following the
+        // template; anything else was typed and stays.
+        self.s.auto_name = (!name.trim().is_empty()
+            && name.trim() == derive_condition_name(&template))
+        .then(|| name.trim().to_string());
         let slots = Self::slot_count(&template).max(cond.numeric_constraints.len());
         let rows: Vec<(NumericConstraintMode, String, String)> = (0..slots)
             .map(|ix| {
@@ -1593,5 +1631,82 @@ impl Render for AppShell {
             .font_family(FONT_UI)
             .text_size(fs(FS_12))
             .child(body)
+    }
+}
+
+/// A readable name for a condition that was given none: the template with its
+/// numbers, ranges and placeholders stripped, whitespace collapsed, cut to
+/// forty characters. `(30—32)% increased Movement Speed (21—25)% reduced
+/// Slowing Potency of Debuffs on You` becomes `increased Movement Speed
+/// reduced Slowing Potency of Debuffs…`.
+fn derive_condition_name(template: &str) -> String {
+    const LIMIT: usize = 40;
+    let stripped: String = template
+        .chars()
+        .map(|character| {
+            if character.is_ascii_digit()
+                || matches!(
+                    character,
+                    '(' | ')'
+                        | '\u{FF08}'
+                        | '\u{FF09}'
+                        | '#'
+                        | '%'
+                        | '\u{FF03}'
+                        | '\u{FF05}'
+                        | '+'
+                        | '-'
+                        | '\u{2013}'
+                        | '\u{2014}'
+                        | '.'
+                        | ','
+                )
+            {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    let joined = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut name: String = joined.chars().take(LIMIT).collect();
+    if joined.chars().count() > LIMIT {
+        name.push('\u{2026}');
+    }
+    name
+}
+
+#[cfg(test)]
+mod tests {
+    use super::derive_condition_name;
+
+    #[test]
+    fn a_derived_name_keeps_the_words_and_drops_the_numbers() {
+        assert_eq!(
+            derive_condition_name("(30—32)% increased Movement Speed"),
+            "increased Movement Speed"
+        );
+        assert_eq!(
+            derive_condition_name("增加 (170—179)% 物理傷害"),
+            "增加 物理傷害"
+        );
+        assert_eq!(
+            derive_condition_name("+# to maximum Life"),
+            "to maximum Life"
+        );
+    }
+
+    #[test]
+    fn a_hybrid_derives_from_both_lines_and_is_cut_at_forty() {
+        let name = derive_condition_name(
+            "(30—32)% increased Movement Speed\n(21—25)% reduced Slowing Potency of Debuffs on You",
+        );
+        assert_eq!(name, "increased Movement Speed reduced Slowing…");
+        assert_eq!(name.chars().count(), 41);
+    }
+
+    #[test]
+    fn an_all_numeric_template_derives_nothing() {
+        assert_eq!(derive_condition_name("(1-2) 3%"), "");
     }
 }

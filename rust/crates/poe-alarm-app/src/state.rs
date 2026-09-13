@@ -75,6 +75,9 @@ pub struct ViewState {
 
     /// 编辑区输入(实体常驻,刷新不丢输入)
     pub name_input: Entity<InputState>,
+    /// The condition name the app last derived from the template, while the
+    /// name is still that derived value. `None` once the user has typed one.
+    pub auto_name: Option<String>,
     pub template_input: Entity<InputState>,
     /// 粘贴物品文本的多行输入框。
     pub item_text_input: Entity<InputState>,

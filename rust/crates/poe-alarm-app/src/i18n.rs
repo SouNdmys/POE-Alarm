@@ -43,6 +43,7 @@ pub struct Text {
 
     // -- 词缀条件页 --
     pub condition_name: &'static str,
+    pub condition_name_placeholder: &'static str,
     pub group_rule: &'static str,
     pub group_any: &'static str,
     pub group_all: &'static str,
@@ -229,6 +230,7 @@ pub static ZH: Text = Text {
     unchanged: "未改动",
 
     condition_name: "条件名称",
+    condition_name_placeholder: "留空则按模板自动命名,随时可改",
     group_rule: "什么时候提醒",
     group_any: "任意",
     group_all: "全部",
@@ -413,6 +415,7 @@ pub static EN: Text = Text {
     unchanged: "unchanged",
 
     condition_name: "Condition name",
+    condition_name_placeholder: "Named from the template when left empty; edit freely",
     group_rule: "Alert when",
     group_any: "Any",
     group_all: "All",
