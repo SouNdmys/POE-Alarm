@@ -157,6 +157,12 @@ fn existing_rule_json_schema_deserializes_without_translation() {
       }]
     }"##;
     let definition: RuleSetDefinition = serde_json::from_str(json).unwrap();
+    assert!(
+        definition.groups[0]
+            .conditions
+            .iter()
+            .all(|condition| condition.enabled)
+    );
     assert_eq!(definition.groups[0].mode, ResultGroupMode::AtLeast);
     assert_eq!(
         definition.groups[0].conditions[0].numeric_constraints[0].mode,
@@ -204,6 +210,168 @@ fn invalid_thresholds_and_duplicate_names_are_rejected() {
             .iter()
             .any(|item| item.contains("duplicate condition"))
     );
+}
+
+#[test]
+fn unchecked_affixes_are_saved_but_excluded_from_every_match_mode() {
+    let mut speed = AffixCondition::new("speed", "#% increased Attack Speed", vec![]);
+    speed.enabled = false;
+    for mode in [
+        ResultGroupMode::Any,
+        ResultGroupMode::All,
+        ResultGroupMode::AtLeast,
+    ] {
+        let definition = RuleSetDefinition {
+            groups: vec![AcceptableResultGroup {
+                mode,
+                required_count: 2,
+                conditions: vec![
+                    speed.clone(),
+                    AffixCondition::new(
+                        "life",
+                        "+# to maximum Life",
+                        vec![NumericConstraint::at_least(70)],
+                    ),
+                    AffixCondition::new("mana", "+# to maximum Mana", vec![]),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let rules = CompiledRuleSet::compile(definition.clone()).unwrap();
+        assert_eq!(rules.definition(), &definition);
+        assert_eq!(rules.targets().len(), 2);
+        assert!(
+            !rules
+                .evaluate(&["30% increased Attack Speed".into()])
+                .is_match
+        );
+        assert_eq!(
+            rules.evaluate(&["+70 to maximum Life".into()]).is_match,
+            mode == ResultGroupMode::Any
+        );
+        let result = rules.evaluate(&["+70 to maximum Life".into(), "+40 to maximum Mana".into()]);
+        assert!(result.is_match);
+        assert_eq!(result.groups[0].matched_count, 2);
+        assert_eq!(
+            result.groups[0]
+                .conditions
+                .iter()
+                .map(|condition| condition.condition_index)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        // Rechecking restores the condition, including its effect on All.
+        let mut restored = definition;
+        restored.groups[0].conditions[0].enabled = true;
+        let restored = CompiledRuleSet::compile(restored).unwrap();
+        assert_eq!(restored.targets().len(), 3);
+        assert_eq!(
+            restored
+                .evaluate(&["+70 to maximum Life".into(), "+40 to maximum Mana".into()])
+                .is_match,
+            mode != ResultGroupMode::All
+        );
+    }
+}
+
+#[test]
+fn fully_unchecked_groups_never_match_and_preserve_result_indices() {
+    for mode in [
+        ResultGroupMode::Any,
+        ResultGroupMode::All,
+        ResultGroupMode::AtLeast,
+    ] {
+        let rules = CompiledRuleSet::compile(RuleSetDefinition {
+            groups: vec![
+                AcceptableResultGroup {
+                    mode,
+                    // An inactive group's threshold and incomplete template are ignored.
+                    required_count: 0,
+                    conditions: vec![AffixCondition {
+                        enabled: false,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                AcceptableResultGroup {
+                    conditions: vec![AffixCondition::new("life", "+# to maximum Life", vec![])],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(!rules.evaluate(&[]).is_match);
+        let result = rules.evaluate(&["+70 to maximum Life".into()]);
+        assert!(!result.groups[0].is_match);
+        assert!(result.groups[0].conditions.is_empty());
+        assert_eq!(result.matched_group_index, Some(1));
+        assert_eq!(result.matched_group().unwrap().group_index, 1);
+    }
+}
+
+#[test]
+fn unchecking_cannot_silently_reduce_a_required_count_or_enable_empty_monitoring() {
+    let mut definition = RuleSetDefinition {
+        groups: vec![AcceptableResultGroup {
+            mode: ResultGroupMode::AtLeast,
+            required_count: 2,
+            conditions: vec![
+                AffixCondition::new("life", "+# to maximum Life", vec![]),
+                AffixCondition::new("mana", "+# to maximum Mana", vec![]),
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    assert!(CompiledRuleSet::compile(definition.clone()).is_ok());
+    definition.groups[0].conditions[0].enabled = false;
+    assert!(
+        CompiledRuleSet::compile(definition.clone())
+            .unwrap_err()
+            .to_string()
+            .contains("requires between 1 and 1 enabled conditions")
+    );
+    definition.groups[0].conditions[1].enabled = false;
+    assert!(
+        CompiledRuleSet::compile(definition)
+            .unwrap_err()
+            .to_string()
+            .contains("at least one enabled condition")
+    );
+}
+
+#[test]
+fn unchecked_invalid_constraints_do_not_block_monitoring_and_are_restored_when_rechecked() {
+    let mut definition = RuleSetDefinition {
+        groups: vec![AcceptableResultGroup {
+            conditions: vec![
+                AffixCondition::new("life", "+# to maximum Life", vec![]),
+                AffixCondition {
+                    enabled: false,
+                    // Duplicated name and invalid range can be saved for later.
+                    name: "life".into(),
+                    template: "#% increased Attack Speed".into(),
+                    numeric_constraints: vec![NumericConstraint::range(30, 20)],
+                },
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let serialized = serde_json::to_string(&definition).unwrap();
+    let reloaded: RuleSetDefinition = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(reloaded, definition);
+    assert!(
+        CompiledRuleSet::compile(reloaded)
+            .unwrap()
+            .evaluate(&["+70 to maximum Life".into()])
+            .is_match
+    );
+    definition.groups[0].conditions[1].enabled = true;
+    assert!(CompiledRuleSet::compile(definition).is_err());
+    assert!(AffixCondition::default().enabled);
 }
 
 #[test]

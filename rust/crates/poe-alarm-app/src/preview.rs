@@ -380,7 +380,8 @@ impl Render for Gallery {
 }
 
 fn main() {
-    Application::new().run(move |cx: &mut App| {
+    let app = Application::new().with_assets(ui::UiAssets);
+    app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         theme::apply_ledger_theme(cx);
         let bounds = Bounds::centered(None, size(px(1180.), px(840.)), cx);

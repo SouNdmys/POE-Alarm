@@ -13,7 +13,7 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.1.3**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.1.4**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` follows each click you make (with a bounded retry when the client answers late), and a manual `Ctrl+C` is honored as well. Nothing is sent on a timer and nothing is sent while you are idle — see [Safety boundaries](#safety-boundaries).
 
@@ -85,7 +85,7 @@ The binary lands in `rust\target\release\poe-alarm-app.exe`.
 
 1. In the title bar, pick the game (POE 1 / POE 2) and the affix language matching your client (Traditional Chinese / English). Rules are stored per game *and* per language, so switching never loses the other set.
 2. Copy a complete affix from the game or PoEDB / PoE2DB and paste it into **Complete affix template**. Numbers become value slots automatically; numeric rules default to **unlimited** — switch a row to Range / ≥ / ≤ / = only when the value matters.
-3. Need multiple acceptable outcomes? Use **+Option** (options are alternatives — any one of them triggers the alert), add affixes within an option with **+Affix**, and choose **Alert when**: any / all / a chosen count. Every edit saves automatically.
+3. Need multiple acceptable outcomes? Use **+Option** (options are alternatives — any one of them triggers the alert), add affixes within an option with **+Affix**, and choose **Alert when**: any / all / a chosen count. Use the checkbox beside each affix to include it in monitoring; uncheck it to keep its template and numeric constraints for later. Only checked affixes count, and fully unchecked options are skipped. Check at least one affix before starting; a chosen count cannot exceed the number checked. Selections save automatically and can be changed while idle. Existing and newly added affixes start checked.
 4. Check the rule before you trust it: in game, rest the cursor on an item you already own and press `Ctrl+Shift+F11`. The verdict comes straight back, along with every modifier the rules were shown. (You can also press `Ctrl+C` yourself and paste into the box at the bottom right.)
 5. Press `Ctrl+Shift+F10` (configurable in Settings) and craft normally. Until a match is confirmed your mouse stays fully passed-through — no clicks are delayed or eaten.
 6. On a match, the red lock screen takes over the mouse: everything outside the center card is transparent but still intercepts clicks. Check the item, then click **Confirm** (or press `Ctrl+Shift+F12` while the card is up). Clicks within ~300 ms after confirming are absorbed too. Press F10 again for the next round.

@@ -15,6 +15,28 @@ use gpui_component::{
 
 use crate::theme::*;
 
+/// Keep the checkbox check mark available in the standalone executable.
+pub struct UiAssets;
+
+impl gpui::AssetSource for UiAssets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        Ok(match path {
+            "icons/check.svg" => Some(std::borrow::Cow::Borrowed(include_bytes!(
+                "../assets/check.svg"
+            ))),
+            _ => None,
+        })
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        Ok(if "icons/check.svg".starts_with(path) {
+            vec!["icons/check.svg".into()]
+        } else {
+            Vec::new()
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
@@ -179,7 +201,11 @@ pub fn status_line(kind: StatusKind, label: &str, elapsed: &str) -> Div {
 /// 琥珀注意条:2px 左边框 + wash 底,就地显示,不弹窗。
 pub fn warning_band(tag: &str, text: &str) -> Div {
     div()
+        .w_full()
+        .min_w_0()
+        .flex_none()
         .h_flex()
+        .items_start()
         .gap(px(9.))
         .px(px(11.))
         .py_2()
@@ -188,6 +214,8 @@ pub fn warning_band(tag: &str, text: &str) -> Div {
         .border_color(c(WARN_BAR))
         .child(
             div()
+                .flex_none()
+                .whitespace_nowrap()
                 .font_family(FONT_MONO)
                 .text_size(fs(FS_10))
                 .text_color(c(WARN))
@@ -195,6 +223,9 @@ pub fn warning_band(tag: &str, text: &str) -> Div {
         )
         .child(
             div()
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
                 .text_size(fs(FS_11_5))
                 .line_height(px(FS_11_5 * 1.55))
                 .text_color(c(WARN_TEXT))
@@ -414,6 +445,11 @@ pub struct TreeRowSpec<'a> {
 
 /// 树行:行高 26,右侧计数等宽右对齐。
 pub fn tree_row(spec: TreeRowSpec) -> Div {
+    tree_row_with_leading(spec, None)
+}
+
+/// An interactive leading control may replace the usual dot or expander.
+pub fn tree_row_with_leading(spec: TreeRowSpec, leading: Option<AnyElement>) -> Div {
     let indent = TREE_INDENT[spec.depth.min(2)];
     let mut row = div()
         .h(px(H_INPUT))
@@ -440,21 +476,25 @@ pub fn tree_row(spec: TreeRowSpec) -> Div {
     };
 
     // leading marker
-    row = match spec.expander {
-        Some(expanded) => row.child(
-            div()
-                .text_size(px(8.))
-                .text_color(c(TEXT_META))
-                .child(if expanded { "▾" } else { "▸" }),
-        ),
-        None => {
-            let dot_color = match spec.state {
-                TreeState::Active | TreeState::Selected => ACCENT,
-                TreeState::Warning => WARN,
-                TreeState::Disabled => DISABLED_DOT,
-                _ => NEUTRAL_DOT,
-            };
-            row.child(div().size(px(4.)).flex_none().bg(c(dot_color)))
+    row = if let Some(leading) = leading {
+        row.child(div().w(px(14.)).flex_none().child(leading))
+    } else {
+        match spec.expander {
+            Some(expanded) => row.child(
+                div()
+                    .text_size(px(8.))
+                    .text_color(c(TEXT_META))
+                    .child(if expanded { "▾" } else { "▸" }),
+            ),
+            None => {
+                let dot_color = match spec.state {
+                    TreeState::Active | TreeState::Selected => ACCENT,
+                    TreeState::Warning => WARN,
+                    TreeState::Disabled => DISABLED_DOT,
+                    _ => NEUTRAL_DOT,
+                };
+                row.child(div().size(px(4.)).flex_none().bg(c(dot_color)))
+            }
         }
     };
 

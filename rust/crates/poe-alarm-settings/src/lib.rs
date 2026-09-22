@@ -870,6 +870,7 @@ fn parse_affix_condition(value: &Value) -> Option<AffixCondition> {
         .unwrap_or_default();
 
     Some(AffixCondition {
+        enabled: json_bool(member_ci(object, "Enabled")).unwrap_or(true),
         name: json_string(member_ci(object, "Name")).unwrap_or_default(),
         template: json_string(member_ci(object, "Template")).unwrap_or_default(),
         numeric_constraints,
@@ -943,6 +944,7 @@ impl<'a> From<&'a AcceptableResultGroup> for ResultGroupWire<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct AffixConditionWire<'a> {
+    enabled: bool,
     name: &'a str,
     template: &'a str,
     numeric_constraints: Vec<NumericConstraintWire>,
@@ -951,6 +953,7 @@ struct AffixConditionWire<'a> {
 impl<'a> From<&'a AffixCondition> for AffixConditionWire<'a> {
     fn from(condition: &'a AffixCondition) -> Self {
         Self {
+            enabled: condition.enabled,
             name: &condition.name,
             template: &condition.template,
             numeric_constraints: condition
@@ -1696,6 +1699,21 @@ mod tests {
     }
 
     #[test]
+    fn condition_selection_defaults_to_enabled_and_accepts_case_insensitive_settings() {
+        let legacy = serde_json::json!({ "Name": "life", "Template": "+# to maximum Life" });
+        assert!(parse_affix_condition(&legacy).unwrap().enabled);
+        for field in ["Enabled", "enabled", "ENABLED"] {
+            let mut value = legacy.clone();
+            value[field] = Value::Bool(false);
+            let condition = parse_affix_condition(&value).unwrap();
+            assert!(!condition.enabled);
+            let saved = serde_json::to_value(AffixConditionWire::from(&condition)).unwrap();
+            assert_eq!(saved["Enabled"], false);
+            assert_eq!(parse_affix_condition(&saved).unwrap(), condition);
+        }
+    }
+
+    #[test]
     fn atomic_save_round_trips_game_and_language_profiles_with_pascal_case_rules() {
         let directory = TestDirectory::new();
         let path = directory.settings_path();
@@ -1726,6 +1744,7 @@ mod tests {
                             mode: ResultGroupMode::AtLeast,
                             required_count: 1,
                             conditions: vec![AffixCondition {
+                                enabled: false,
                                 name: "critical chance".to_owned(),
                                 template: "+#% to Critical Hit Chance".to_owned(),
                                 numeric_constraints: vec![NumericConstraint::at_least(
@@ -1797,6 +1816,7 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(rules.groups[0].required_count, 1);
+        assert!(!rules.groups[0].conditions[0].enabled);
         assert_eq!(
             rules.groups[0].conditions[0].numeric_constraints[0].minimum,
             Some("3.1000000000000000000001".parse().unwrap())

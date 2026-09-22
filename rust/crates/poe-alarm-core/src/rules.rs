@@ -79,15 +79,32 @@ impl NumericConstraint {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AffixCondition {
+    #[serde(default = "default_condition_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub template: String,
     #[serde(default)]
     pub numeric_constraints: Vec<NumericConstraint>,
+}
+
+const fn default_condition_enabled() -> bool {
+    true
+}
+
+impl Default for AffixCondition {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            name: String::new(),
+            template: String::new(),
+            numeric_constraints: Vec::new(),
+        }
+    }
 }
 
 impl AffixCondition {
@@ -97,6 +114,7 @@ impl AffixCondition {
         numeric_constraints: Vec<NumericConstraint>,
     ) -> Self {
         Self {
+            enabled: true,
             name: name.into(),
             template: template.into(),
             numeric_constraints,
@@ -128,6 +146,15 @@ pub struct AcceptableResultGroup {
     pub required_count: usize,
     #[serde(default)]
     pub conditions: Vec<AffixCondition>,
+}
+
+impl AcceptableResultGroup {
+    pub fn enabled_condition_count(&self) -> usize {
+        self.conditions
+            .iter()
+            .filter(|condition| condition.enabled)
+            .count()
+    }
 }
 
 impl Default for AcceptableResultGroup {
@@ -411,9 +438,22 @@ fn validate_definition(
             "a rule set may contain at most {MAXIMUM_CONDITIONS} conditions"
         ));
     }
+    if !definition
+        .groups
+        .iter()
+        .any(|group| group.enabled_condition_count() > 0)
+    {
+        errors.push("a rule set must contain at least one enabled condition".to_owned());
+    }
 
     let mut group_names = HashSet::new();
     for (group_index, group) in definition.groups.iter().enumerate() {
+        let enabled_count = group.enabled_condition_count();
+        // A saved group with every condition unchecked is inactive, but a truly
+        // empty group still indicates an unfinished rule as before.
+        if !group.conditions.is_empty() && enabled_count == 0 {
+            continue;
+        }
         let name = group.name.trim();
         if !name.is_empty() && !group_names.insert(name.to_owned()) {
             errors.push(format!("acceptable result name '{name}' is duplicated"));
@@ -425,16 +465,19 @@ fn validate_definition(
             ));
         }
         if group.mode == ResultGroupMode::AtLeast
-            && !(1..=group.conditions.len()).contains(&group.required_count)
+            && !(1..=enabled_count).contains(&group.required_count)
         {
             errors.push(format!(
-                "acceptable result {} requires between 1 and {} conditions",
+                "acceptable result {} requires between 1 and {} enabled conditions",
                 group_index + 1,
-                group.conditions.len()
+                enabled_count
             ));
         }
         let mut condition_names = HashSet::new();
         for (condition_index, condition) in group.conditions.iter().enumerate() {
+            if !condition.enabled {
+                continue;
+            }
             let name = condition.name.trim();
             if !name.is_empty() && !condition_names.insert(name.to_owned()) {
                 errors.push(format!(
@@ -465,13 +508,14 @@ fn compile_group(
 ) -> Result<CompiledGroup, RuleValidationError> {
     let required_count = match group.mode {
         ResultGroupMode::Any => 1,
-        ResultGroupMode::All => group.conditions.len(),
+        ResultGroupMode::All => group.enabled_condition_count(),
         ResultGroupMode::AtLeast => group.required_count,
     };
     let conditions = group
         .conditions
         .iter()
         .enumerate()
+        .filter(|(_, condition)| condition.enabled)
         .map(|(index, condition)| {
             compile_condition(condition, group_index, index, maximum_line_span)
         })
@@ -793,7 +837,7 @@ fn evaluate_group(
             matched_count += 1;
         }
         conditions.push(ConditionEvaluation {
-            condition_index: index,
+            condition_index: compiled.original_index,
             name: if compiled.definition.name.trim().is_empty() {
                 compiled.definition.template.clone()
             } else {
@@ -818,7 +862,7 @@ fn evaluate_group(
         mode: group.definition.mode,
         required_count: group.required_count,
         matched_count,
-        is_match: matched_count >= group.required_count,
+        is_match: !group.conditions.is_empty() && matched_count >= group.required_count,
         conditions,
     }
 }

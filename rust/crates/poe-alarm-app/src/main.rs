@@ -52,7 +52,8 @@ fn main() {
         std::process::exit(run_self_test());
     }
 
-    Application::new().run(move |cx: &mut App| {
+    let app = Application::new().with_assets(ui::UiAssets);
+    app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         theme::apply_ledger_theme(cx);
 

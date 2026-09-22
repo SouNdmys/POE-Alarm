@@ -101,12 +101,18 @@ impl AppShell {
                 .auto_grow(2, 4)
                 .placeholder(text.template_placeholder)
         });
-        let item_text_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
-                .rows(10)
-                .placeholder(text.item_text_placeholder)
-        });
+        let item_text_input = cx.new(|cx| InputState::new(window, cx).multi_line(true).rows(10));
+        // The component's native placeholder only shapes single lines. The
+        // workbench draws a wrapping hint over the empty input instead.
+        cx.subscribe(
+            &item_text_input,
+            |_, _, event: &gpui_component::input::InputEvent, cx| {
+                if matches!(event, gpui_component::input::InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
         // A template change re-derives the condition name while the name is
         // still the derived one; a name the user typed is never touched.
         cx.subscribe_in(
@@ -183,6 +189,7 @@ impl AppShell {
     /// 保证当前配置有结构化规则集(单条目标迁移为一方案一词缀)。
     fn ensure_structured_rules(backend: &mut Backend) {
         let rules = backend.settings.selected_rules_mut();
+        rules.rule_editor_mode = poe_alarm_settings::RuleEditorMode::Structured;
         let empty = rules
             .structured_rule_set
             .as_ref()
@@ -198,6 +205,7 @@ impl AppShell {
                 mode: ResultGroupMode::Any,
                 required_count: 1,
                 conditions: vec![poe_alarm_core::AffixCondition {
+                    enabled: true,
                     name: String::new(),
                     template,
                     numeric_constraints: Vec::new(),
@@ -239,11 +247,12 @@ impl AppShell {
         let rules = settings.selected_rules();
         if let Some(set) = &rules.structured_rule_set {
             for (g_ix, group) in set.groups.iter().enumerate() {
+                let enabled_count = group.enabled_condition_count();
                 let mode = match group.mode {
                     ResultGroupMode::Any => text.tree_any.to_owned(),
                     ResultGroupMode::All => text.tree_all.to_owned(),
                     ResultGroupMode::AtLeast => {
-                        format!("≥{}/{}", group.required_count, group.conditions.len())
+                        format!("≥{}/{}", group.required_count, enabled_count)
                     }
                 };
                 let group_name = if group.name.trim().is_empty() {
@@ -258,13 +267,18 @@ impl AppShell {
                     label: group_name.into(),
                     trailing: if group_empty {
                         text.tree_empty_group.into()
+                    } else if enabled_count == 0 {
+                        text.tree_unchecked.into()
                     } else {
                         mode.into()
                     },
                     expandable: true,
                     expanded: true,
-                    warning: group_empty,
-                    disabled: false,
+                    warning: group_empty
+                        || (group.mode == ResultGroupMode::AtLeast
+                            && group.required_count > enabled_count
+                            && enabled_count > 0),
+                    disabled: !group_empty && enabled_count == 0,
                 });
                 for (c_ix, cond) in group.conditions.iter().enumerate() {
                     let missing = cond.template.trim().is_empty();
@@ -279,11 +293,18 @@ impl AppShell {
                         node: NodeRef::Condition(g_ix, c_ix),
                         depth: 2,
                         label: label.into(),
-                        trailing: if missing { text.tree_pending } else { "" }.into(),
+                        trailing: if !cond.enabled {
+                            text.tree_unchecked
+                        } else if missing {
+                            text.tree_pending
+                        } else {
+                            ""
+                        }
+                        .into(),
                         expandable: false,
                         expanded: false,
-                        warning: missing,
-                        disabled: false,
+                        warning: cond.enabled && missing,
+                        disabled: !cond.enabled,
                     });
                 }
             }
@@ -522,8 +543,15 @@ impl AppShell {
                 && row.label.as_ref() != label
             {
                 row.label = label.into();
-                row.trailing = if missing { text.tree_pending } else { "" }.into();
-                row.warning = missing;
+                row.trailing = if row.disabled {
+                    text.tree_unchecked
+                } else if missing {
+                    text.tree_pending
+                } else {
+                    ""
+                }
+                .into();
+                row.warning = !row.disabled && missing;
                 changed = true;
             }
         }
@@ -625,6 +653,11 @@ impl AppShell {
         // 先把编辑内容写回设置,保证 runtime 拿到的是屏幕上的内容。
         if self.s.run == RunPhase::Idle {
             self.apply_editor_to_selection(cx);
+            if let Some(notice) = self.rule_selection_notice() {
+                self.notice = Some((StatusKind::Warning, notice));
+                cx.notify();
+                return;
+            }
         }
         let text = self.t();
         let Some(backend) = &mut self.backend else {
@@ -653,6 +686,7 @@ impl AppShell {
             RunPhase::Hit => backend.acknowledge_alert(),
         };
         if starting && result.is_ok() {
+            self.apply_runtime_state(BridgeState::Starting);
             self.push_log(LogKind::Meta, text.log_starting.to_owned());
         }
         if let Err(e) = result {
@@ -672,7 +706,7 @@ impl AppShell {
             .unwrap_or(NodeRef::Game)
     }
 
-    /// 当前选中所属组(供分段控件与"共 N 条"展示)。
+    /// 当前选中所属组(供分段控件与已勾选条数展示)。
     pub fn selected_group_summary(&self) -> Option<(ResultGroupMode, usize, usize)> {
         let g = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
@@ -686,7 +720,43 @@ impl AppShell {
             .as_ref()?
             .groups
             .get(g)
-            .map(|group| (group.mode, group.required_count, group.conditions.len()))
+            .map(|group| {
+                (
+                    group.mode,
+                    group.required_count,
+                    group.enabled_condition_count(),
+                )
+            })
+    }
+
+    /// Explain selection errors in the current UI language before compiling.
+    fn rule_selection_notice(&self) -> Option<SharedString> {
+        let set = self
+            .backend
+            .as_ref()?
+            .settings
+            .selected_rules()
+            .structured_rule_set
+            .as_ref()?;
+        let text = self.t();
+        if !set
+            .groups
+            .iter()
+            .any(|group| group.enabled_condition_count() > 0)
+        {
+            return Some(text.notice_no_conditions_checked.into());
+        }
+        set.groups.iter().enumerate().find_map(|(index, group)| {
+            let count = group.enabled_condition_count();
+            (count > 0 && group.mode == ResultGroupMode::AtLeast && group.required_count > count)
+                .then(|| {
+                    text.notice_required_count_fmt
+                        .replacen("{}", &(index + 1).to_string(), 1)
+                        .replacen("{}", &group.required_count.to_string(), 1)
+                        .replacen("{}", &count.to_string(), 1)
+                        .into()
+                })
+        })
     }
 
     /// 模板文本的数值占位数(与归一化预览一致)。
@@ -920,6 +990,46 @@ impl AppShell {
         cx.notify();
     }
 
+    pub fn condition_selection_locked(&self) -> bool {
+        self.s.run != RunPhase::Idle || self.pending_start_at.is_some()
+    }
+
+    /// Save the checkbox independently of the editor selection and its inputs.
+    pub fn set_condition_enabled(
+        &mut self,
+        group_index: usize,
+        condition_index: usize,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.condition_selection_locked() {
+            return;
+        }
+        self.apply_editor_to_selection(cx);
+        let Some(condition) = self
+            .backend
+            .as_mut()
+            .and_then(|backend| {
+                backend
+                    .settings
+                    .selected_rules_mut()
+                    .structured_rule_set
+                    .as_mut()
+            })
+            .and_then(|set| set.groups.get_mut(group_index))
+            .and_then(|group| group.conditions.get_mut(condition_index))
+        else {
+            return;
+        };
+        condition.enabled = enabled;
+        self.notice = self
+            .rule_selection_notice()
+            .map(|notice| (StatusKind::Warning, notice));
+        self.persist();
+        self.refresh_tree_keep_selection(window, cx);
+    }
+
     /// 结构化操作:+方案 / +词缀 / 删除词缀 / 删除方案 / 组模式与条数。
     pub fn add_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_editor_to_selection(cx);
@@ -1054,6 +1164,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.apply_editor_to_selection(cx);
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
             NodeRef::Game => return,
@@ -1068,20 +1179,26 @@ impl AppShell {
         {
             group.mode = mode;
             if mode == ResultGroupMode::AtLeast {
-                group.required_count = group.required_count.clamp(1, group.conditions.len().max(1));
+                group.required_count = group
+                    .required_count
+                    .clamp(1, group.enabled_condition_count().max(1));
             }
         }
+        self.notice = self
+            .rule_selection_notice()
+            .map(|notice| (StatusKind::Warning, notice));
         self.persist();
         self.refresh_tree_keep_selection(window, cx);
     }
 
-    /// "指定条数"步进(±1,夹在 1..=词缀数)。
+    /// "指定条数"步进(±1,夹在 1..=已勾选词缀数)。
     pub fn adjust_required_count(
         &mut self,
         delta: i64,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.apply_editor_to_selection(cx);
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
             NodeRef::Game => return,
@@ -1094,10 +1211,13 @@ impl AppShell {
                 .as_mut()
                 .and_then(|set| set.groups.get_mut(group_ix))
         {
-            let max = group.conditions.len().max(1) as i64;
+            let max = group.enabled_condition_count().max(1) as i64;
             let next = (group.required_count as i64 + delta).clamp(1, max);
             group.required_count = next as usize;
         }
+        self.notice = self
+            .rule_selection_notice()
+            .map(|notice| (StatusKind::Warning, notice));
         self.persist();
         self.refresh_tree_keep_selection(window, cx);
     }
@@ -1201,6 +1321,14 @@ impl AppShell {
     /// `origin` names the source in the log so a hotkey check and a pasted one
     /// stay tellable apart.
     fn run_item_check(&mut self, item_text: String, origin: &'static str, cx: &mut Context<Self>) {
+        if self.apply_editor_to_selection(cx) {
+            self.persist();
+        }
+        if let Some(notice) = self.rule_selection_notice() {
+            self.notice = Some((StatusKind::Warning, notice));
+            cx.notify();
+            return;
+        }
         let text = self.t();
         if let Some(backend) = &mut self.backend {
             // A condition without a template cannot compile, and the compiler's
@@ -1213,10 +1341,9 @@ impl AppShell {
                 .as_ref()
                 .is_some_and(|set| {
                     set.groups.iter().any(|group| {
-                        group
-                            .conditions
-                            .iter()
-                            .any(|condition| condition.template.trim().is_empty())
+                        group.conditions.iter().any(|condition| {
+                            condition.enabled && condition.template.trim().is_empty()
+                        })
                     })
                 });
             if template_pending {

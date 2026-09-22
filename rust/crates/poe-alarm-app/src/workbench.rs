@@ -2,7 +2,7 @@
 //! 标题栏 30 | 左规则树 218 | 中编辑区(tab 30 + 内容) | 右运行栏 318 | 状态栏 24。
 
 use gpui::{Context, Div, SharedString, Window, div, prelude::*, px};
-use gpui_component::{StyledExt, input::Input};
+use gpui_component::{Disableable, Sizable, StyledExt, checkbox::Checkbox, input::Input};
 
 use crate::shell::AppShell;
 use crate::state::*;
@@ -89,32 +89,62 @@ impl AppShell {
     // -- 左规则树 218 -------------------------------------------------------
 
     fn wb_tree(&self, cx: &mut Context<Self>) -> Div {
-        let mut list = div().v_flex().py(px(6.)).flex_1().min_h_0();
+        let mut list = div()
+            .id("rule-tree-list")
+            .v_flex()
+            .py(px(6.))
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll();
         for (ix, node) in self.s.tree.iter().enumerate() {
-            let state = if node.disabled {
-                TreeState::Disabled
-            } else if node.warning {
-                TreeState::Warning
-            } else if ix == self.s.selected {
+            let state = if ix == self.s.selected {
                 if node.depth == 0 {
                     TreeState::Active
                 } else {
                     TreeState::Selected
                 }
+            } else if node.disabled {
+                TreeState::Disabled
+            } else if node.warning {
+                TreeState::Warning
             } else {
                 TreeState::Default
             };
-            let row = tree_row(TreeRowSpec {
-                depth: node.depth,
-                state,
-                expander: node.expandable.then_some(node.expanded),
-                label: node.label.as_ref(),
-                trailing: node.trailing.as_ref(),
-                trailing_color: (node.depth == 0).then_some(ACCENT_TEXT),
-            });
+            let checkbox = match node.node {
+                NodeRef::Condition(group_index, condition_index) => Some(
+                    Checkbox::new(("condition-enabled", ix))
+                        .small()
+                        .checked(!node.disabled)
+                        .disabled(self.condition_selection_locked())
+                        .on_click(cx.listener(move |this, checked, window, cx| {
+                            cx.stop_propagation();
+                            this.set_condition_enabled(
+                                group_index,
+                                condition_index,
+                                *checked,
+                                window,
+                                cx,
+                            );
+                        }))
+                        .into_any_element(),
+                ),
+                _ => None,
+            };
+            let row = tree_row_with_leading(
+                TreeRowSpec {
+                    depth: node.depth,
+                    state,
+                    expander: node.expandable.then_some(node.expanded),
+                    label: node.label.as_ref(),
+                    trailing: node.trailing.as_ref(),
+                    trailing_color: (node.depth == 0).then_some(ACCENT_TEXT),
+                },
+                checkbox,
+            );
             list = list.child(
                 div()
                     .id(("tree-row", ix))
+                    .flex_none()
                     .hover(|s| s.bg(c(HOVER)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_tree_node(ix, window, cx);
@@ -143,6 +173,19 @@ impl AppShell {
                     .child(micro_title_sm(self.t().rules_title)),
             )
             .child(list)
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(11.))
+                    .py(px(6.))
+                    .text_size(fs(FS_10))
+                    .text_color(c(TEXT_META))
+                    .child(if !self.condition_selection_locked() {
+                        self.t().tree_selection_hint
+                    } else {
+                        self.t().tree_selection_locked
+                    }),
+            )
             .child(
                 div()
                     .flex_none()
@@ -1118,7 +1161,36 @@ impl AppShell {
                     .py_2()
                     .border_b_1()
                     .border_color(c(HAIRLINE_SOFT))
-                    .child(Input::new(&self.s.item_text_input).h_full()),
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            .child(Input::new(&self.s.item_text_input).h_full())
+                            .when(self.s.item_text_input.read(cx).value().is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(8.))
+                                        .left(px(12.))
+                                        .right(px(12.))
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .text_size(fs(FS_11_5))
+                                        .line_height(px(FS_11_5 * 1.55))
+                                        .text_color(c(TEXT_META))
+                                        .cursor_text()
+                                        .on_mouse_down(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|this, _, window, cx| {
+                                                this.s.item_text_input.update(cx, |input, cx| {
+                                                    input.focus(window, cx)
+                                                });
+                                            }),
+                                        )
+                                        .child(t.item_text_placeholder),
+                                )
+                            }),
+                    ),
             )
             .child(
                 div().flex_1().min_h_0().child(
