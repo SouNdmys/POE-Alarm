@@ -1,0 +1,2 @@
+# Preserve original CRLF, trailing spaces and blank lines as capture data.
+poe2-en-user-20260923.txt -text -whitespace

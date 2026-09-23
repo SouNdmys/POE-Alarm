@@ -13,7 +13,7 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.2.0**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.2.1**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` follows each click you make (with a bounded retry when the client answers late), and a manual `Ctrl+C` is honored as well. Nothing is sent on a timer and nothing is sent while you are idle — see [Safety boundaries](#safety-boundaries).
 
@@ -24,6 +24,12 @@ Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` fo
 **Suggested use:** start monitoring while hovering the item, then click by hand at a pace your connection can sustain. Starting reads a baseline; subsequent changed item text is evaluated. Delayed or overlapping copies can still miss rolls. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls get past the alarm, slow down. When an alert cannot arm its click guard, the app reports that explicitly in its log.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
+
+## Fixed in 1.2.1
+
+Five user-supplied POE2 items exposed two parsing issues: fixed-value annotations such as **+4(3) to Level of all Attack Skills** now produce one numeric slot with actual value **4**, and the **Sanctified** status is no longer offered as an importable modifier. Copy scheduling and input interception are unchanged. See [the sample test report](docs/poe2-user-samples-20260923.md) for exact combination results and numeric boundaries.
+
+If an older version saved a rule for this fixed-value format with two numeric constraints, reopen it and check the single actual-value field. Excess constraints are rejected rather than silently ignored.
 
 ## New in 1.2.0
 

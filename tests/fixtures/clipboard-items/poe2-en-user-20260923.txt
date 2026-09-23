@@ -1,0 +1,192 @@
+Item Class: Gloves
+Rarity: Rare
+Grim Fingers
+Grim Gloves
+--------
+Quality: +20% (augmented)
+Energy Shield: 54 (augmented)
+--------
+Requires: Level 65, 77 (augmented) Int
+--------
+Sockets: S J 
+--------
+Item Level: 75
+--------
+Destroys all Augment Sockets on the item to create a Jewel Socket (rune)
+--------
+{ Prefix Modifier "Entombing" (Tier: 1) — Damage, Elemental, Cold, Attack }
+Adds 24(21-24) to 35(32-37) Cold damage to Attacks
+{ Prefix Modifier "Tempered" (Tier: 2) — Damage, Physical, Attack }
+Adds 13(10-15) to 26(18-26) Physical Damage to Attacks
+{ Prefix Modifier "Shocking" (Tier: 3) — Damage, Elemental, Lightning, Attack }
+Adds 2(1-2) to 42(41-47) Lightning damage to Attacks
+{ Fractured Suffix Modifier "of Dueling" (Tier: 1) — Attack }
++2 to Level of all Melee Skills
+{ Desecrated Suffix Modifier "of Renown" (Tier: 1) — Attack, Speed }
+15(14-16)% increased Attack Speed
+{ Crafted Suffix Modifier "of Fury" (Tier: 2) — Damage, Critical }
+26(25-29)% increased Critical Damage Bonus
+--------
+Corrupted
+--------
+Fractured Item
+--------
+
+
+
+
+Item Class: Helmets
+Rarity: Rare
+Havoc Visor
+Ancestral Tiara
+--------
+Quality: +23% (augmented)
+Energy Shield: 565 (augmented)
+--------
+Requires: Level 80, 110 (augmented) Int
+--------
+Sockets: S S 
+--------
+Item Level: 80
+--------
+{ Enhancement }
+Allocates Paragon — Unscalable Value
+{ Enhancement }
++2 to Maximum Power Charges
+--------
+20% increased Armour, Evasion and Energy Shield (rune)
+Raven-Touched (rune)
+--------
+{ Prefix Modifier "Dazzling" (Tier: 1) — Energy Shield }
++72(61-73) to maximum Energy Shield
+{ Prefix Modifier "Angel's" (Tier: 1) — Mana, Energy Shield }
+39(39-42)% increased Energy Shield
++37(33-39) to maximum Mana
+{ Desecrated Prefix Modifier "Unassailable" (Tier: 1) — Energy Shield }
+95(92-100)% increased Energy Shield
+{ Suffix Modifier "of the Lightning" (Tier: 2) — Elemental, Lightning, Resistance }
++39(36-40)% to Lightning Resistance
+{ Crafted Suffix Modifier "of Archaeology" (Tier: 1) }
+17(15-18)% increased Rarity of Items found
+--------
+Corrupted
+--------
+
+
+Item Class: Boots
+Rarity: Rare
+Empyrean League
+Daggerfoot Shoes
+--------
+Quality: +26% (augmented)
+Evasion Rating: 513 (augmented)
+Energy Shield: 161 (augmented)
+--------
+Requires: Level 80, 57 (augmented) Dex, 57 (augmented) Int
+--------
+Sockets: S S 
+--------
+Item Level: 84
+--------
+Your speed is unaffected by Slows (rune)
+Can roll Chronomancy modifiers (rune)
+--------
+{ Prefix Modifier "Hellion's" (Tier: 1) — Speed }
+35% increased Movement Speed
+{ Prefix Modifier "Unreal" (Tier: 2) — Evasion, Energy Shield }
+91(80-91)% increased Evasion and Energy Shield
+{ Desecrated Prefix Modifier "Cherub's" (Tier: 1) — Evasion, Energy Shield }
++73(65-78) to Evasion Rating
++24(22-25) to maximum Energy Shield
+{ Fractured Suffix Modifier "of Flexure" (Tier: 1) — Evasion }
+Gain Deflection Rating equal to 23(21-23)% of Evasion Rating
+{ Suffix Modifier "of Chronomancy" (Tier: 1) }
+Skills have 15(11-15)% chance to not remove Charges but still count as consuming them
+{ Suffix Modifier "of Convalescence" (Tier: 2) — Life }
+16.4(13.1-18) Life Regeneration per second
+--------
+Corrupted
+--------
+Fractured Item
+--------
+
+
+
+Item Class: Quarterstaves
+Rarity: Rare
+Ghoul Bane
+Sinister Quarterstaff
+--------
+Quality: +27% (augmented)
+Physical Damage: 656-1,102 (augmented)
+Critical Hit Chance: 16.78% (augmented)
+Attacks per Second: 1.71 (augmented)
+--------
+Requires: Level 67, 100 (augmented) Dex, 39 (augmented) Int
+--------
+Sockets: S S S 
+--------
+Item Level: 82
+--------
+60% increased Physical Damage (rune)
+--------
+{ Prefix Modifier "Flaring" (Tier: 1) — Damage, Physical, Attack }
+Adds 64(37-55) to 109(63-94) Physical Damage
+{ Prefix Modifier "Conqueror's" (Tier: 3) — Damage, Physical, Attack }
+68(55-64)% increased Physical Damage
++156(124-149) to Accuracy Rating
+{ Desecrated Prefix Modifier "Merciless" (Tier: 1) — Damage, Physical, Attack }
+206(170-179)% increased Physical Damage
+{ Fractured Suffix Modifier "of Unmaking" (Tier: 1) — Attack, Critical }
++4.78(4.41-5)% to Critical Hit Chance
+{ Crafted Suffix Modifier "of Infamy" (Tier: 2) — Attack, Speed }
+22(23-25)% increased Attack Speed
+{ Crafted Suffix Modifier "of the Essence" — Attack }
++4(3) to Level of all Attack Skills
+--------
+Sanctified
+--------
+Fractured Item
+--------
+
+
+
+Item Class: Crossbows
+Rarity: Rare
+Wrath Core
+Siege Crossbow
+--------
+Quality: +20% (augmented)
+Physical Damage: 342-818 (augmented)
+Critical Hit Chance: 9.68% (augmented)
+Attacks per Second: 1.92 (augmented)
+Reload Time: 0.65 (augmented)
+--------
+Requires: Level 79, 85 (augmented) Str, 85 (augmented) Dex
+--------
+Sockets: S S 
+--------
+Item Level: 83
+--------
+20% increased Physical Damage (rune)
+Gain 5% of Damage as Extra Damage of all Elements (rune)
+--------
+{ Implicit Modifier }
+Grenade Skills Fire an additional Projectile
+--------
+{ Prefix Modifier "Flaring" (Tier: 1) — Damage, Physical, Attack }
+Adds 55(37-55) to 86(63-94) Physical Damage
+{ Prefix Modifier "Conqueror's" (Tier: 3) — Damage, Physical, Attack }
+57(55-64)% increased Physical Damage
++139(124-149) to Accuracy Rating
+{ Desecrated Prefix Modifier "Tyrannical" (Tier: 2) — Damage, Physical, Attack }
+162(155-169)% increased Physical Damage
+{ Suffix Modifier "of Unmaking" (Tier: 1) — Attack, Critical }
++4.68(4.41-5)% to Critical Hit Chance
+{ Crafted Suffix Modifier "of Renown" (Tier: 2) — Attack, Speed }
+16(14-16)% increased Attack Speed
+{ Crafted Suffix Modifier "of the Essence" — Attack }
++3 to Level of all Attack Skills
+--------
+
+

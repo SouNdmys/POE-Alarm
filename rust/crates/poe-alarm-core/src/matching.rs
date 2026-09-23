@@ -406,11 +406,16 @@ fn parse_numeric(chars: &[char], start: usize) -> Option<ParsedNumeric> {
     let (first, after_first, negative) = parse_signed_number(chars, start)?;
     let cursor = skip_space(chars, after_first);
 
-    // Rolled value followed by its tier range: 179(170-179).
+    // Rolled value followed by its tier range: 179(170-179). A fixed
+    // magnitude can instead be printed as 4(3), as in POE2 sanctified gear.
+    // Only the outer value is evidence; the parenthesis is one-value metadata.
     if cursor < chars.len() && chars[cursor] == '(' {
         let mut range = skip_space(chars, cursor + 1);
         let (_, after_minimum, _) = parse_signed_number(chars, range)?;
         range = skip_space(chars, after_minimum);
+        if cursor == after_first && range < chars.len() && chars[range] == ')' {
+            return Some(finish_numeric(chars, range + 1, negative, Some(first)));
+        }
         if range >= chars.len() || chars[range] != '-' {
             return Some(finish_numeric(chars, after_first, negative, Some(first)));
         }

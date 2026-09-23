@@ -52,6 +52,7 @@ const FLAG_LINES: &[&str] = &[
     "synthesiseditem",
     "fractureditem",
     "desecrated",
+    "sanctified",
     // Influence tags, one line each and often two at a time.
     "shaperitem",
     "elderitem",

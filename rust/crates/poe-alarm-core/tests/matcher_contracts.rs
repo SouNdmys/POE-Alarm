@@ -1,6 +1,54 @@
 use poe_alarm_core::{Decimal, FullLineAffixMatcher, canonicalize, extract_values};
 
 #[test]
+fn a_fixed_value_parenthesis_is_metadata_for_one_observed_slot() {
+    for (template, text, actual) in [
+        (
+            "+# to Level of all Attack Skills",
+            "+4(3) to Level of all Attack Skills",
+            Decimal::from(4),
+        ),
+        (
+            "#% increased Attack Speed",
+            "22(25)% increased Attack Speed",
+            Decimal::from(22),
+        ),
+        (
+            "-#% to Fire Resistance",
+            "-4(3)% to Fire Resistance",
+            Decimal::from(-4),
+        ),
+        (
+            "+#% to Critical Hit Chance",
+            "+4.78(4.5)% to Critical Hit Chance",
+            "4.78".parse().unwrap(),
+        ),
+    ] {
+        let matcher = FullLineAffixMatcher::new(template).unwrap();
+        assert!(matcher.is_match(text), "{text}");
+        assert_eq!(extract_values(text), vec![Some(actual)]);
+        // Pasting a captured line as the template must also yield one slot.
+        assert_eq!(canonicalize(text), canonicalize(template));
+    }
+}
+
+#[test]
+fn fixed_value_metadata_does_not_weaken_units_signs_or_swallow_explanations() {
+    let matcher = FullLineAffixMatcher::new("+# to Level of all Attack Skills").unwrap();
+    for text in [
+        "-4(3) to Level of all Attack Skills",
+        "+4(3)% to Level of all Attack Skills",
+        "+4(3 to Level of all Attack Skills",
+        "+4(3 charges) to Level of all Attack Skills",
+        "+4(3%) to Level of all Attack Skills",
+        "+4 (3) to Level of all Attack Skills",
+        "+4(3) to Level of all Melee Skills",
+    ] {
+        assert!(!matcher.is_match(text), "{text}");
+    }
+}
+
+#[test]
 fn english_full_line_contract_rejects_near_neighbours() {
     let matcher = FullLineAffixMatcher::new("#% increased Attack Speed").unwrap();
     assert!(matcher.is_match("27% increased Attack Speed"));
