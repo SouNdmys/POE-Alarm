@@ -5,15 +5,33 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poe_alarm_alert_win::{
-    AlertEvent, AlertId, AlertServiceConfig, AlertText, AlertTrigger, AlertTriggerStatus,
-    BlockingAlertService,
+    AlertEvent, AlertFailure, AlertFailureKind, AlertId, AlertServiceConfig, AlertText,
+    AlertTrigger, AlertTriggerStatus, BlockingAlertService,
 };
-use poe_alarm_platform_win::{PendingMouseInputGuard, RectI};
+use poe_alarm_platform_win::{PendingMouseInputGuard, RectI, game_window_rect};
 
 use crate::{AlertCopy, RuntimeGeneration};
 
 const ALERT_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(750);
 const ALERT_SHUTDOWN_POLL: Duration = Duration::from_millis(2);
+
+// A runtime reset detaches its retiring alert thread. Briefly allow that
+// thread to relinquish process ownership. Runs on the runtime actor, never
+// on the UI thread or in the match-to-guard path.
+fn start_after_retiring_service<T>(
+    mut start: impl FnMut() -> Result<T, AlertFailure>,
+    mut pause: impl FnMut(Duration),
+) -> Result<T, AlertFailure> {
+    for attempt in 0..=25 {
+        match start() {
+            Err(error) if error.kind == AlertFailureKind::AlreadyInUse && attempt < 25 => {
+                pause(Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the final attempt always returns")
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AlertPresentation {
@@ -21,8 +39,8 @@ pub struct AlertPresentation {
     pub detail: String,
     /// Which monitor should host the alert, expressed as the game window.
     ///
-    /// `None` means the game window could not be found, and the alert lands on
-    /// the primary monitor — the same place it lands for anyone with one screen.
+    /// `None` resolves the current game window after input protection arms,
+    /// falling back to the primary monitor if the game cannot be found.
     pub anchor_region: Option<RectI>,
 }
 
@@ -217,13 +235,15 @@ impl ProtectionBookkeeping {
 /// symptom was the user clicking past a winning roll with no way to tell a
 /// dead hook from a lost timing race. The reason now travels with the status
 /// so the log can say which one it was.
-fn armed_guard_for_latch() -> Result<PendingMouseInputGuard, String> {
+fn armed_guard_for_latch(
+    prepared: Option<PendingMouseInputGuard>,
+) -> Result<PendingMouseInputGuard, String> {
     if let Some(reason) =
         forced_unguarded_reason(std::env::var_os(FORCE_UNGUARDED_OVERRIDE).as_deref())
     {
         return Err(reason);
     }
-    let mut guard = PendingMouseInputGuard::new();
+    let mut guard = prepared.unwrap_or_default();
     if let Err(error) = guard.prepare() {
         return Err(format!("the click-block hook could not prepare: {error}"));
     }
@@ -252,8 +272,11 @@ struct GuardSlot {
 
 impl NativeProtection {
     pub fn start(config: AlertServiceConfig) -> Result<Self, ProtectionError> {
-        let alert = BlockingAlertService::start(config)
-            .map_err(|error| ProtectionError(error.to_string()))?;
+        let alert = start_after_retiring_service(
+            || BlockingAlertService::start(config.clone()),
+            thread::sleep,
+        )
+        .map_err(|error| ProtectionError(error.to_string()))?;
         Ok(Self {
             state: Mutex::new(NativeProtectionState {
                 guard: None,
@@ -283,6 +306,11 @@ impl ProtectionService for NativeProtection {
 
     fn prepare_pending(&self, generation: RuntimeGeneration) -> Result<(), ProtectionError> {
         let mut state = self.state();
+        if !state.bookkeeping.is_active(generation) {
+            return Err(ProtectionError(
+                "cannot prepare a stopped runtime session".to_owned(),
+            ));
+        }
         if state
             .guard
             .as_ref()
@@ -314,6 +342,11 @@ impl ProtectionService for NativeProtection {
 
     fn arm_pending(&self, generation: RuntimeGeneration) -> Result<(), ProtectionError> {
         let mut state = self.state();
+        if !state.bookkeeping.is_active(generation) {
+            return Err(ProtectionError(
+                "cannot arm a stopped runtime session".to_owned(),
+            ));
+        }
         let Some(slot) = state
             .guard
             .as_mut()
@@ -366,26 +399,21 @@ impl ProtectionService for NativeProtection {
         // The guard arms before the text is even validated: the hook arms in
         // microseconds and every step in front of it is part of the race the
         // user's next click is running.
-        let (pending_guard, unguarded) = if state
+        let prepared = if state
             .guard
             .as_ref()
             .is_some_and(|slot| slot.generation == generation)
         {
-            (state.guard.take().map(|slot| slot.guard), None)
+            state.guard.take().map(|slot| slot.guard)
         } else {
-            // Fast mode arms one right here, at the instant of the match. The
-            // shield window takes tens of milliseconds to present and verify,
-            // and a crafting macro clicks faster than that: the winning roll
-            // was being clicked past while the window was still on its way up.
-            // The hook arms in microseconds on this thread, so the very next
-            // click is swallowed however soon it comes. The alert service owns
-            // the rest of the lifecycle it was already built for: transfer to
-            // the overlay once it is verified, or fail open on a bounded
-            // timeout so a stuck presentation can never wedge the mouse.
-            match armed_guard_for_latch() {
-                Ok(guard) => (Some(guard), None),
-                Err(reason) => (None, Some(reason)),
-            }
+            None
+        };
+        // Preparation alone never blocks input. Always arm the prepared guard
+        // at the confirmed match, before validating or presenting the overlay.
+        // If prewarming failed, the same helper retries native installation.
+        let (pending_guard, unguarded) = match armed_guard_for_latch(prepared) {
+            Ok(guard) => (Some(guard), None),
+            Err(reason) => (None, Some(reason)),
         };
         let notice = if unguarded.is_some() {
             presentation.copy.notice_unguarded
@@ -409,7 +437,7 @@ impl ProtectionService for NativeProtection {
             }
         };
         let mut trigger = AlertTrigger::new(text);
-        trigger.anchor_region = presentation.anchor_region;
+        trigger.anchor_region = presentation.anchor_region.or_else(game_window_rect);
         match state.alert.trigger(trigger, pending_guard) {
             Ok(AlertTriggerStatus::Accepted(alert_id)) => {
                 state.bookkeeping.insert_alert(alert_id, generation);
@@ -462,6 +490,53 @@ impl ProtectionService for NativeProtection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restarting_waits_for_retiring_ownership_without_retrying_other_errors() {
+        let mut attempts = 0;
+        let mut waited = Duration::ZERO;
+        let result = start_after_retiring_service(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(AlertFailure {
+                        kind: AlertFailureKind::AlreadyInUse,
+                        detail: "retiring".into(),
+                    })
+                } else {
+                    Ok(42)
+                }
+            },
+            |delay| waited += delay,
+        );
+        assert_eq!(result, Ok(42));
+        assert_eq!(waited, Duration::from_millis(20));
+        let failure = AlertFailure {
+            kind: AlertFailureKind::WindowCreation,
+            detail: "failed".into(),
+        };
+        assert_eq!(
+            start_after_retiring_service::<()>(
+                || Err(failure.clone()),
+                |_| panic!("must not retry")
+            ),
+            Err(failure)
+        );
+    }
+
+    #[test]
+    fn permanent_service_ownership_stays_bounded_and_returns_its_error() {
+        let mut waited = Duration::ZERO;
+        let failure = AlertFailure {
+            kind: AlertFailureKind::AlreadyInUse,
+            detail: "still active".into(),
+        };
+        assert_eq!(
+            start_after_retiring_service::<()>(|| Err(failure.clone()), |delay| waited += delay),
+            Err(failure)
+        );
+        assert_eq!(waited, Duration::from_millis(250));
+    }
 
     #[test]
     fn empty_alert_polls_preserve_the_live_generation_lease() {

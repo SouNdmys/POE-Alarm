@@ -23,6 +23,86 @@ const JEWEL: &str = include_str!(
 const BOOTS: &str =
     include_str!("../../../../tests/fixtures/clipboard-items/poe2-en-rare-boots-hybrid-speed.txt");
 
+#[test]
+fn annotated_colon_modifiers_survive_property_filtering_in_full_items() {
+    // Use captured item headers (including properties, requirements and item
+    // level), then insert the colon modifier already present in our PoE2DB
+    // corpus. This is a synthetic regression variant, not another capture.
+    for (capture, first_annotation, modifier, template, property) in [
+        (
+            BOOTS,
+            "{ Fractured Prefix",
+            "Weapon: 25% increased Fire Damage",
+            "Weapon: #% increased Fire Damage",
+            "Energy Shield: #",
+        ),
+        (
+            BOW,
+            "{ 前綴",
+            "武器：增加25%火焰傷害",
+            "武器: 增加#%火焰傷害",
+            "物理傷害: #",
+        ),
+    ] {
+        let (header, _) = capture.split_once(first_annotation).unwrap();
+        let text = format!(
+            "{header}{{ Prefix Modifier \"Test\" (Tier: 1) }}\n{modifier}\n--------\nMonster Level: 83\n--------\nNote: ~b/o 1 divine\n"
+        );
+        let parsed = parse(&text).unwrap();
+        let (lines, identities) = parsed.render();
+        assert!(lines.iter().any(|line| line == modifier));
+        let matched = rules(vec![AffixCondition::new(
+            "scoped damage",
+            template,
+            vec![NumericConstraint::at_least(25)],
+        )])
+        .evaluate_with_identity(&lines, &[], &identities);
+        assert!(matched.is_match);
+        for property_template in [property, "Monster Level: #"] {
+            assert!(
+                !rules(vec![AffixCondition::new(
+                    "property",
+                    property_template,
+                    vec![]
+                )])
+                .evaluate_with_identity(&lines, &[], &identities)
+                .is_match
+            );
+        }
+    }
+}
+
+#[test]
+fn a_full_item_preserves_cross_zero_rolls_for_threshold_evaluation() {
+    let (header, _) = BOOTS.split_once("{ Fractured Prefix").unwrap();
+    let rules = rules(vec![AffixCondition::new(
+        "pack size",
+        "Breaches in Map have (-10—20)% reduced Pack Size",
+        vec![NumericConstraint::range(-10, 20)],
+    )]);
+    for value in [-11, -10, 0, 20, 21] {
+        for annotated in [false, true] {
+            let annotation = if annotated {
+                "{ Prefix Modifier \"Test\" (Tier: 1) }\n"
+            } else {
+                ""
+            };
+            let text = format!(
+                "{header}{annotation}Breaches in Map have {value}(-10-20)% reduced Pack Size\n--------\nCorrupted\n"
+            );
+            let parsed = parse(&text).unwrap();
+            let (lines, identities) = parsed.render();
+            assert_eq!(
+                rules
+                    .evaluate_with_identity(&lines, &[], &identities)
+                    .is_match,
+                (-10..=20).contains(&value),
+                "value={value}, annotated={annotated}"
+            );
+        }
+    }
+}
+
 fn rules(conditions: Vec<AffixCondition>) -> CompiledRuleSet {
     CompiledRuleSet::compile(RuleSetDefinition {
         schema_version: CURRENT_SCHEMA_VERSION,

@@ -35,6 +35,11 @@ pub enum PlatformEvent {
     /// 注册是全有全无的,所以这条一旦出现就意味着 F10/F11 都不会响应。
     /// 以前它只往 stderr 打一行,而发布版是 GUI 子系统、没有控制台。
     HotKeysUnavailable,
+    StartHotKeyChanged(String),
+    StartHotKeyFailed {
+        requested: String,
+        detail: String,
+    },
     /// 游戏没在前台,热键按早了。
     GameNotFocused,
     /// 复制到了东西,但光标下不是一件物品。
@@ -42,7 +47,7 @@ pub enum PlatformEvent {
     /// 游戏在前台却没有回应复制键,且完整性比较确认它权限更高。
     CopyRefused,
     /// HUD 拖动结束:工作区内的相对坐标(0..=1),供写回设置。
-    HudMoved(f64, f64),
+    HudMoved(poe_alarm_settings::HudPlacement),
 }
 
 /// 运行时状态镜像(非 Windows 平台没有 runtime crate,因此桥接层自带一份)。
@@ -123,9 +128,37 @@ pub struct Backend {
     #[cfg(windows)]
     runtime: Option<poe_alarm_runtime::RuntimeHandle>,
     #[cfg(windows)]
+    runtime_initialization: Option<Receiver<RuntimeInitialization>>,
+    #[cfg(windows)]
+    pending_runtime_work: Option<PendingRuntimeWork>,
+    #[cfg(windows)]
+    local_runtime_events: Vec<BridgeEvent>,
+    #[cfg(windows)]
+    discard_initial_idle: bool,
+    #[cfg(windows)]
     sound_fell_back: bool,
     #[cfg(not(windows))]
     sim: sim::Sim,
+}
+
+#[cfg(windows)]
+type RuntimeInitialization = Result<(poe_alarm_runtime::RuntimeHandle, bool), String>;
+
+#[cfg(windows)]
+enum PendingRuntimeWork {
+    Start(AppSettings),
+    Check(poe_alarm_runtime::ItemCheckRequest),
+}
+
+#[cfg(windows)]
+impl PendingRuntimeWork {
+    fn send(self, runtime: &poe_alarm_runtime::RuntimeHandle) -> Result<(), String> {
+        match self {
+            Self::Start(settings) => runtime.start(settings),
+            Self::Check(request) => runtime.check_item(request),
+        }
+        .map_err(|error| error.to_string())
+    }
 }
 
 impl Backend {
@@ -166,6 +199,14 @@ impl Backend {
             #[cfg(windows)]
             runtime: None,
             #[cfg(windows)]
+            runtime_initialization: None,
+            #[cfg(windows)]
+            pending_runtime_work: None,
+            #[cfg(windows)]
+            local_runtime_events: Vec::new(),
+            #[cfg(windows)]
+            discard_initial_idle: false,
+            #[cfg(windows)]
             sound_fell_back: false,
             #[cfg(not(windows))]
             sim: sim::Sim::default(),
@@ -174,6 +215,10 @@ impl Backend {
 
     pub fn settings_path(&self) -> String {
         self.store.path().display().to_string()
+    }
+
+    pub fn recovery_notice(&self) -> Option<&str> {
+        self.store.recovery_notice()
     }
 
     /// 排空平台事件(热键)。
@@ -338,14 +383,23 @@ impl Backend {
         let Some(option) = StartMonitoringHotKey::OPTIONS.get(index).copied() else {
             return;
         };
-        self.settings.start_monitoring_hot_key = option.setting_value().to_owned();
+        if self.hotkey_thread.is_none() {
+            self.hotkey_thread =
+                spawn_hotkey_thread(self.platform_tx.clone(), option.setting_value().to_owned());
+            return;
+        }
         if let Some(thread) = self.hotkey_thread {
             use windows::Win32::Foundation::{LPARAM, WPARAM};
             use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
             // SAFETY: 向自有热键线程投递重配消息;线程随进程存活。
-            let _ = unsafe {
+            if let Err(error) = unsafe {
                 PostThreadMessageW(thread, WM_APP_SET_START_HOTKEY, WPARAM(index), LPARAM(0))
-            };
+            } {
+                let _ = self.platform_tx.send(PlatformEvent::StartHotKeyFailed {
+                    requested: option.setting_value().to_owned(),
+                    detail: error.to_string(),
+                });
+            }
         }
     }
 
@@ -384,6 +438,10 @@ impl Backend {
     /// 用于清理 BitBlt 超时等一次性系统故障留下的状态。
     #[cfg(windows)]
     pub fn reset_runtime(&mut self) {
+        self.runtime_initialization = None;
+        self.pending_runtime_work = None;
+        self.local_runtime_events.clear();
+        self.discard_initial_idle = false;
         self.runtime = None;
     }
 
@@ -396,49 +454,105 @@ impl Backend {
 
     #[cfg(windows)]
     fn ensure_runtime(&mut self) -> Result<(), String> {
-        if self.runtime.is_some() {
+        if self.runtime.is_some() || self.runtime_initialization.is_some() {
             return Ok(());
         }
-        // 旧运行时刚被丢弃时,其警报服务线程可能尚未释放进程单例
-        // (AlreadyInUse);短暂等待重试而不是直接报错。
-        let mut attempt = 0u8;
-        let (handle, fell_back) = loop {
-            let (wave, fell_back) = resolve_alert_wave(&self.settings)?;
-            let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
-            alert.allow_overlay_capture = self.settings.allow_overlay_capture;
-            match poe_alarm_runtime::RuntimeHandle::start_production(
-                poe_alarm_runtime::ProductionRuntimeConfig { alert },
-            ) {
-                Ok(handle) => break (handle, fell_back),
-                Err(e) => {
-                    let text = e.to_string();
-                    if text.contains("AlreadyInUse") && attempt < 6 {
-                        attempt += 1;
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        continue;
-                    }
-                    return Err(format!("runtime startup failed: {text}"));
-                }
-            }
-        };
-        self.runtime = Some(handle);
-        self.sound_fell_back = fell_back;
+        // WAV paths may be slow or on removable/network storage. All file IO
+        // and service construction happens off GPUI's input/render thread.
+        let settings = self.settings.clone();
+        let (sender, receiver) = channel();
+        std::thread::Builder::new()
+            .name("poe-alarm-initialize".into())
+            .spawn(move || {
+                let result = resolve_alert_wave(&settings).and_then(|(wave, fell_back)| {
+                    let mut alert = poe_alarm_alert_win::AlertServiceConfig::new(wave);
+                    alert.allow_overlay_capture = settings.allow_overlay_capture;
+                    poe_alarm_runtime::RuntimeHandle::start_production(
+                        poe_alarm_runtime::ProductionRuntimeConfig { alert },
+                    )
+                    .map(|handle| (handle, fell_back))
+                    .map_err(|error| format!("runtime startup failed: {error}"))
+                });
+                // A reset/closed UI drops the receiver; any late handle is then
+                // dropped here and shuts itself down without launching old work.
+                let _ = sender.send(result);
+            })
+            .map_err(|error| error.to_string())?;
+        self.runtime_initialization = Some(receiver);
         Ok(())
     }
 
     #[cfg(windows)]
-    pub fn start_monitoring(&mut self) -> Result<(), String> {
+    fn queue_runtime_work(&mut self, work: PendingRuntimeWork) -> Result<(), String> {
         self.ensure_runtime()?;
+        if let Some(runtime) = &self.runtime {
+            return work.send(runtime);
+        }
+        self.local_runtime_events
+            .push(BridgeEvent::State(match &work {
+                PendingRuntimeWork::Start(_) => BridgeState::Starting,
+                PendingRuntimeWork::Check(_) => BridgeState::CheckingItem,
+            }));
+        // Only the latest user intent survives initialization. Stop clears it.
+        self.pending_runtime_work = Some(work);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn collect_runtime_initialization(&mut self, out: &mut Vec<BridgeEvent>) {
+        use std::sync::mpsc::TryRecvError;
+        let result = match self.runtime_initialization.as_ref().map(Receiver::try_recv) {
+            Some(Ok(result)) => result,
+            Some(Err(TryRecvError::Disconnected)) => {
+                Err("runtime initialization worker exited".into())
+            }
+            _ => return,
+        };
+        self.runtime_initialization = None;
+        match result {
+            Ok((runtime, fell_back)) => {
+                self.sound_fell_back = fell_back;
+                // The actor announces Idle once before processing commands.
+                // Do not unlock the editor while a queued Start is in flight.
+                self.discard_initial_idle = self.pending_runtime_work.is_some();
+                if let Some(work) = self.pending_runtime_work.take()
+                    && let Err(detail) = work.send(&runtime)
+                {
+                    out.push(BridgeEvent::State(BridgeState::Faulted));
+                    out.push(BridgeEvent::Fault {
+                        detail,
+                        actionable: false,
+                    });
+                }
+                self.runtime = Some(runtime);
+            }
+            Err(detail) => {
+                let requested = self.pending_runtime_work.take().is_some();
+                if requested {
+                    out.push(BridgeEvent::State(BridgeState::Faulted));
+                    out.push(BridgeEvent::Fault {
+                        detail,
+                        actionable: false,
+                    });
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn start_monitoring(&mut self) -> Result<(), String> {
         let settings = self.settings.clone().normalize();
-        self.runtime
-            .as_ref()
-            .expect("runtime just ensured")
-            .start(settings)
-            .map_err(|e| e.to_string())
+        self.queue_runtime_work(PendingRuntimeWork::Start(settings))
     }
 
     #[cfg(windows)]
     pub fn stop_monitoring(&mut self) -> Result<(), String> {
+        self.pending_runtime_work = None;
+        self.local_runtime_events.clear();
+        if self.runtime_initialization.is_some() {
+            self.local_runtime_events
+                .push(BridgeEvent::State(BridgeState::Idle));
+        }
         match &self.runtime {
             Some(r) => r.stop().map_err(|e| e.to_string()),
             None => Ok(()),
@@ -458,18 +572,13 @@ impl Backend {
     /// 入参是玩家在游戏里 Ctrl+C 复制出来的原文。
     #[cfg(windows)]
     pub fn check_item(&mut self, text: String) -> Result<(), String> {
-        self.ensure_runtime()?;
         let settings = self.settings.clone().normalize();
         let request = poe_alarm_runtime::ItemCheckRequest::new(
             poe_alarm_runtime::RuntimeRequestId(1),
             settings,
             text,
         );
-        self.runtime
-            .as_ref()
-            .expect("runtime just ensured")
-            .check_item(request)
-            .map_err(|e| e.to_string())
+        self.queue_runtime_work(PendingRuntimeWork::Check(request))
     }
 
     #[cfg(not(windows))]
@@ -480,7 +589,8 @@ impl Backend {
     #[cfg(windows)]
     pub fn poll(&mut self) -> Vec<BridgeEvent> {
         use poe_alarm_runtime::RuntimeEvent as E;
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.local_runtime_events);
+        self.collect_runtime_initialization(&mut out);
         if self.sound_fell_back {
             self.sound_fell_back = false;
             out.push(BridgeEvent::SoundFallback);
@@ -490,7 +600,13 @@ impl Backend {
         };
         while let Some(event) = runtime.try_next_event() {
             match event {
-                E::StateChanged { state, .. } => out.push(BridgeEvent::State(state.into())),
+                E::StateChanged { state, .. } => {
+                    let initial_idle = std::mem::take(&mut self.discard_initial_idle)
+                        && state == poe_alarm_runtime::RuntimeState::Idle;
+                    if !initial_idle {
+                        out.push(BridgeEvent::State(state.into()));
+                    }
+                }
                 E::MonitorSnapshot { snapshot, .. } => out.push(BridgeEvent::Snapshot {
                     scan_count: snapshot.scan_count,
                     capture_ms: snapshot.capture_elapsed.as_secs_f64() * 1000.0,
@@ -588,7 +704,13 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
         let config = HotKeyConfig {
             start: StartMonitoringHotKey::parse_or_default(Some(&start_hot_key)),
         };
-        let mut manager = match HotKeyManager::register_for_current_thread(config) {
+        let mut manager = match HotKeyManager::register_actions_for_current_thread(
+            config,
+            &[
+                HotKeyAction::StartMonitoring,
+                HotKeyAction::CheckItemUnderCursor,
+            ],
+        ) {
             Ok(manager) => manager,
             Err(error) => {
                 eprintln!("global hotkey registration failed: {error}");
@@ -596,7 +718,9 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
                 return;
             }
         };
-        manager.unregister(HotKeyAction::StopOrAcknowledge);
+        let _ = tx.send(PlatformEvent::StartHotKeyChanged(
+            config.start.setting_value().to_owned(),
+        ));
         // 建立消息队列后再公布线程 id(GetMessageW 首次调用前队列已由注册创建)。
         let _ = id_tx.send(unsafe { GetCurrentThreadId() });
         let mut message = MSG::default();
@@ -606,9 +730,20 @@ fn spawn_hotkey_thread(tx: Sender<PlatformEvent>, start_hot_key: String) -> Opti
                 if let Some(option) = StartMonitoringHotKey::OPTIONS
                     .get(message.wParam.0)
                     .copied()
-                    && let Err(error) = manager.reconfigure_start(option)
                 {
-                    eprintln!("start hotkey reconfiguration failed: {error}");
+                    match manager.reconfigure_start(option) {
+                        Ok(()) => {
+                            let _ = tx.send(PlatformEvent::StartHotKeyChanged(
+                                option.setting_value().to_owned(),
+                            ));
+                        }
+                        Err(error) => {
+                            let _ = tx.send(PlatformEvent::StartHotKeyFailed {
+                                requested: option.setting_value().to_owned(),
+                                detail: error.to_string(),
+                            });
+                        }
+                    }
                 }
                 continue;
             }
@@ -677,6 +812,87 @@ fn resolve_alert_wave(
     poe_alarm_platform_win::built_in_alert_wave()
         .map(|wave| (wave, settings.custom_alert_sound_path.is_some()))
         .map_err(|error| format!("could not build the bundled alert sound: {error}"))
+}
+
+#[cfg(all(test, windows))]
+mod initialization_tests {
+    use super::*;
+
+    // No Backend::new: these tests must not register hotkeys, create a HUD,
+    // access the real clipboard or read/write the user's settings.
+    fn pending_backend() -> (Backend, Sender<RuntimeInitialization>) {
+        let (platform_tx, platform_rx) = channel();
+        let (sender, receiver) = channel();
+        (
+            Backend {
+                store: SettingsStore::new(
+                    std::env::temp_dir().join("poe-alarm-unused-test-settings.json"),
+                ),
+                settings: AppSettings::default(),
+                read_only: false,
+                platform_rx,
+                platform_tx,
+                hud: None,
+                hotkey_thread: None,
+                runtime: None,
+                runtime_initialization: Some(receiver),
+                pending_runtime_work: None,
+                local_runtime_events: Vec::new(),
+                discard_initial_idle: false,
+                sound_fell_back: false,
+            },
+            sender,
+        )
+    }
+
+    #[test]
+    fn initialization_failure_reports_fault_and_releases_pending_work() {
+        let (mut backend, sender) = pending_backend();
+        backend.start_monitoring().unwrap();
+        assert!(matches!(
+            backend.poll().as_slice(),
+            [BridgeEvent::State(BridgeState::Starting)]
+        ));
+        sender.send(Err("test startup failure".into())).unwrap();
+        let events = backend.poll();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, BridgeEvent::State(BridgeState::Faulted)))
+        );
+        assert!(events.iter().any(|event| matches!(event, BridgeEvent::Fault { detail, .. } if detail == "test startup failure")));
+        assert!(backend.pending_runtime_work.is_none());
+        assert!(backend.runtime_initialization.is_none());
+    }
+
+    #[test]
+    fn stop_during_initialization_discards_start_and_late_failures() {
+        let (mut backend, sender) = pending_backend();
+        backend.start_monitoring().unwrap();
+        backend.stop_monitoring().unwrap();
+        drop(sender);
+        assert!(matches!(
+            backend.poll().as_slice(),
+            [BridgeEvent::State(BridgeState::Idle)]
+        ));
+        assert!(backend.pending_runtime_work.is_none());
+        assert!(backend.runtime_initialization.is_none());
+    }
+
+    #[test]
+    fn reset_rejects_the_old_initializer_and_clears_queued_work() {
+        let (mut backend, sender) = pending_backend();
+        backend.check_item("item A".into()).unwrap();
+        backend.start_monitoring().unwrap();
+        assert!(matches!(
+            backend.pending_runtime_work,
+            Some(PendingRuntimeWork::Start(_))
+        ));
+        backend.reset_runtime();
+        assert!(sender.send(Err("stale initializer".into())).is_err());
+        assert!(backend.poll().is_empty());
+        assert!(backend.pending_runtime_work.is_none());
+    }
 }
 
 #[cfg(not(windows))]

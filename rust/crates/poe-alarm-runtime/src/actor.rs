@@ -11,7 +11,6 @@ use poe_alarm_core::LogicalAffixMatch;
 use poe_alarm_monitoring::{
     EventSink, Monitor, MonitorDetection, MonitorEvent, MonitorPlan, RecognitionResult, SystemClock,
 };
-use poe_alarm_platform_win::game_window_rect;
 
 use crate::backend::{AffixSourceFactory, DynamicSource, ProductionSourceFactory};
 use crate::protection::AlertPresentation;
@@ -337,16 +336,22 @@ impl RuntimeActor {
             self.fault(Some(generation), RuntimeOperation::Start, error.to_string());
             return;
         }
-        if compiled.input_guard_enabled
-            && let Err(error) = self.protection.prepare_pending(generation)
-        {
-            self.protection.stop_pending(generation);
-            self.fault(
-                Some(generation),
-                RuntimeOperation::Start,
-                format!("could not prepare input protection: {error}"),
-            );
-            return;
+        // Install in pass-through mode before the first roll. Fast monitoring
+        // still arms only after a confirmed match; hook-thread startup must not
+        // be part of the match-to-block race.
+        if let Err(error) = self.protection.prepare_pending(generation) {
+            if compiled.input_guard_enabled {
+                self.protection.stop_pending(generation);
+                self.fault(
+                    Some(generation),
+                    RuntimeOperation::Start,
+                    format!("could not prepare input protection: {error}"),
+                );
+                return;
+            }
+            // Preserve the existing fast-mode fallback: retry at latch and
+            // report an unguarded alert if the hook is still unavailable.
+            eprintln!("could not prewarm click protection; will retry at match: {error}");
         }
         let valid = Arc::new(AtomicBool::new(true));
         let bridge = MonitorBridge {
@@ -844,12 +849,9 @@ impl EventSink for MonitorBridge {
                 let presentation = AlertPresentation {
                     copy: self.alert_copy.clone(),
                     detail: alert_detail,
-                    // Asked here rather than at compile time: a rectangle
-                    // captured when the user pressed Start can be minutes stale
-                    // by the time an item rolls, and the client may not even
-                    // have been up. This runs immediately before a fullscreen
-                    // window is painted, so one lookup costs nothing.
-                    anchor_region: game_window_rect(),
+                    // Resolve the current game monitor inside protection,
+                    // after the hook has already blocked the next click.
+                    anchor_region: None,
                 };
                 match self
                     .protection

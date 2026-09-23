@@ -6,9 +6,11 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod backend;
+mod editor;
 #[cfg(windows)]
 mod hud_service;
 mod i18n;
+mod library;
 mod shell;
 mod state;
 mod theme;

@@ -1,10 +1,12 @@
 //! Native half of the clipboard capture path.
 
+use std::cell::RefCell;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::WAIT_OBJECT_0;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HGLOBAL, HWND};
+use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_ELEVATION,
     TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenElevation, TokenIntegrityLevel,
@@ -16,7 +18,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcess, OpenProcessToken,
-    PROCESS_QUERY_LIMITED_INFORMATION, WaitForInputIdle, WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForInputIdle, WaitForSingleObject,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -57,11 +59,6 @@ pub(crate) fn clipboard_sequence_number() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
-/// Sends a synthetic Ctrl+C to the foreground window.
-///
-/// Modifiers the user is physically holding are lifted for the duration and
-/// pressed back afterwards. Continuous crafting holds Shift, and without this
-/// the client receives Ctrl+Shift+C and copies nothing.
 /// Injects the copy chord, leaving the user's held modifiers alone.
 ///
 /// The client answers Ctrl+C with Shift held (field-verified by pressing it by
@@ -74,6 +71,21 @@ pub(crate) fn clipboard_sequence_number() -> u32 {
 /// unshifted and consumed the orb. Not touching the modifiers removes the
 /// entire failure mode.
 fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
+    let inputs = copy_chord_inputs(method, held_modifiers().control);
+    let expected = inputs.len() as u32;
+    // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
+    let delivered = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+    if delivered == expected {
+        Ok(())
+    } else {
+        Err(ClipboardError::InputRejected {
+            delivered,
+            expected,
+        })
+    }
+}
+
+fn copy_chord_inputs(method: KeyMethod, control_held: bool) -> Vec<INPUT> {
     let key = |vk: VIRTUAL_KEY, scan: u16, up: bool| {
         let mut flags = if up {
             KEYEVENTF_KEYUP
@@ -101,37 +113,20 @@ fn send_ctrl_c(method: KeyMethod) -> Result<(), ClipboardError> {
         }
     };
 
-    // The trailing Ctrl-up is omitted when the user is already holding Ctrl.
-    // There is one global key state, so releasing a key they are physically
-    // pressing writes a lie into it that nothing restores — and at a poll every
-    // eleven milliseconds, Ctrl would read as up essentially all the time. That
-    // turns their Ctrl+click, which moves an item to the stash, into a plain
-    // click that picks it up instead. Same failure as the Shift lift this file
-    // used to perform; Ctrl is simply the key the chord itself needs.
-    //
-    // Self-healing: if they release Ctrl in the microseconds between this read
-    // and SendInput, the next chord sends the full four events and clears the
-    // stale down state.
-    let mut inputs = vec![
-        key(VK_CONTROL, SCAN_LCONTROL, false),
-        key(VK_C, SCAN_C, false),
-        key(VK_C, SCAN_C, true),
-    ];
-    if !held_modifiers().control {
+    // Holding either Ctrl already supplies the chord modifier. Do not inject
+    // an unmatched left-Ctrl down: right-Ctrl release cannot clear that key,
+    // and no later copy is guaranteed to arrive to repair it. A release racing
+    // this sample may cause a missed copy, but cannot leave synthetic Ctrl held.
+    let mut inputs = Vec::with_capacity(4);
+    if !control_held {
+        inputs.push(key(VK_CONTROL, SCAN_LCONTROL, false));
+    }
+    inputs.push(key(VK_C, SCAN_C, false));
+    inputs.push(key(VK_C, SCAN_C, true));
+    if !control_held {
         inputs.push(key(VK_CONTROL, SCAN_LCONTROL, true));
     }
-
-    let expected = inputs.len() as u32;
-    // SAFETY: `inputs` is a live slice of correctly sized INPUT records.
-    let delivered = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-    if delivered == expected {
-        Ok(())
-    } else {
-        Err(ClipboardError::InputRejected {
-            delivered,
-            expected,
-        })
-    }
+    inputs
 }
 
 pub(crate) fn copy_hovered_item(
@@ -159,7 +154,11 @@ pub(crate) fn copy_hovered_item(
     let client_round_trip = started.elapsed();
 
     let read_started = Instant::now();
-    let (text, open_attempts) = read_clipboard_text(60).map_err(|error| match error {
+    let ClipboardRead {
+        text,
+        open_attempts,
+        sequence_number,
+    } = read_clipboard_payload(60).map_err(|error| match error {
         ClipboardError::NoTextFormat { .. } => ClipboardError::NoTextFormat {
             formats: available_formats(),
         },
@@ -167,6 +166,7 @@ pub(crate) fn copy_hovered_item(
     })?;
     Ok(CopyOutcome {
         text,
+        sequence_number,
         client_round_trip,
         read_time: read_started.elapsed(),
         open_attempts,
@@ -174,6 +174,16 @@ pub(crate) fn copy_hovered_item(
 }
 
 pub(crate) fn read_clipboard_text(max_attempts: u32) -> Result<(String, u32), ClipboardError> {
+    read_clipboard_payload(max_attempts).map(|read| (read.text, read.open_attempts))
+}
+
+struct ClipboardRead {
+    text: String,
+    open_attempts: u32,
+    sequence_number: u32,
+}
+
+fn read_clipboard_payload(max_attempts: u32) -> Result<ClipboardRead, ClipboardError> {
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -181,9 +191,17 @@ pub(crate) fn read_clipboard_text(max_attempts: u32) -> Result<(String, u32), Cl
         let opened = unsafe { OpenClipboard(Some(HWND::default())) };
         if opened.is_ok() {
             let result = read_open_clipboard();
+            // OpenClipboard prevents another writer replacing this payload
+            // until CloseClipboard. Sample after delayed text rendering and
+            // before releasing that ownership, never from the caller later.
+            let sequence_number = clipboard_sequence_number();
             // SAFETY: the clipboard is open on this thread.
             let _ = unsafe { CloseClipboard() };
-            return result.map(|text| (text, attempts));
+            return result.map(|text| ClipboardRead {
+                text,
+                open_attempts: attempts,
+                sequence_number,
+            });
         }
         if attempts >= max_attempts {
             return Err(ClipboardError::Busy { attempts });
@@ -503,6 +521,83 @@ fn integrity_level(process: HANDLE) -> Option<u32> {
     }
 }
 
+struct CachedProcessIntegrity {
+    pid: u32,
+    process: HANDLE,
+    level: u32,
+}
+
+impl Drop for CachedProcessIntegrity {
+    fn drop(&mut self) {
+        // SAFETY: this cache entry exclusively owns the OpenProcess handle.
+        let _ = unsafe { CloseHandle(self.process) };
+    }
+}
+
+thread_local! {
+    static GAME_INTEGRITY: RefCell<Option<CachedProcessIntegrity>> = const { RefCell::new(None) };
+}
+
+fn cached_integrity_for_process(pid: u32) -> Option<u32> {
+    GAME_INTEGRITY.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(cached) = cache.as_ref()
+            && cached.pid == pid
+            // SAFETY: the retained handle owns this particular process, not a
+            // potentially reused PID. Zero timeout never delays the poll.
+            && unsafe { WaitForSingleObject(cached.process, 0) } == WAIT_TIMEOUT
+        {
+            return Some(cached.level);
+        }
+        *cache = None;
+        // Holding a synchronizable process handle lets us invalidate on exit
+        // before a PID can accidentally reuse another process's cached rights.
+        // If synchronization access is refused, retain the original query-only
+        // behavior rather than inventing a privilege mismatch.
+        let process = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                false,
+                pid,
+            )
+        };
+        match process {
+            Ok(process) => {
+                let mut entry = CachedProcessIntegrity {
+                    pid,
+                    process,
+                    level: 0,
+                };
+                entry.level = integrity_level(process)?;
+                let level = entry.level;
+                *cache = Some(entry);
+                Some(level)
+            }
+            Err(_) => {
+                // SAFETY: pid was freshly obtained from the game HWND.
+                let process =
+                    unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+                let level = integrity_level(process);
+                // SAFETY: this fallback owns the handle and never caches it.
+                let _ = unsafe { CloseHandle(process) };
+                level
+            }
+        }
+    })
+}
+
+fn current_process_integrity() -> Option<u32> {
+    static LEVEL: OnceLock<u32> = OnceLock::new();
+    if let Some(level) = LEVEL.get() {
+        return Some(*level);
+    }
+    // This executable never changes its own primary token. Elevation launches
+    // a new process. Failed queries are deliberately not cached.
+    let level = integrity_level(unsafe { GetCurrentProcess() })?;
+    let _ = LEVEL.set(level);
+    Some(level)
+}
+
 /// Whether the game runs at a higher integrity level than this process.
 ///
 /// Compares the levels rather than asking whether the game's token can be
@@ -520,18 +615,8 @@ pub(crate) fn game_process_outranks_us() -> bool {
     if pid == 0 {
         return false;
     }
-    // SAFETY: a refused open simply yields Err. Being unable to open the game
-    // at all already means it is out of reach.
-    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
-    else {
-        return true;
-    };
-    let game = integrity_level(process);
-    // SAFETY: process came from OpenProcess.
-    let _ = unsafe { CloseHandle(process) };
-
-    // SAFETY: a pseudo-handle needing no close.
-    let ours = integrity_level(unsafe { GetCurrentProcess() });
+    let game = cached_integrity_for_process(pid);
+    let ours = current_process_integrity();
     match (game, ours) {
         (Some(game), Some(ours)) => game > ours,
         // Unreadable is itself a sign of being outranked, and saying so costs
@@ -655,5 +740,77 @@ fn wait_until_running(process: HANDLE, settle: Duration) -> Result<(), ElevateEr
             return Ok(());
         }
         thread::sleep(POLL_INTERVAL);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn held_ctrl_does_not_inject_an_unpaired_left_ctrl_for_either_key_method() {
+        for method in [KeyMethod::VirtualKey, KeyMethod::ScanCode] {
+            let held = copy_chord_inputs(method, true);
+            assert_eq!(held.len(), 2);
+            for (index, input) in held.iter().enumerate() {
+                // SAFETY: copy_chord_inputs only constructs keyboard inputs.
+                let key = unsafe { input.Anonymous.ki };
+                assert_eq!(key.wScan, SCAN_C);
+                assert_eq!(key.dwFlags.contains(KEYEVENTF_KEYUP), index == 1);
+                assert_eq!(key.dwExtraInfo, SYNTHETIC_INPUT_SIGNATURE);
+            }
+            let released = copy_chord_inputs(method, false);
+            assert_eq!(released.len(), 4);
+            let first = unsafe { released[0].Anonymous.ki };
+            let last = unsafe { released[3].Anonymous.ki };
+            assert_eq!((first.wScan, last.wScan), (SCAN_LCONTROL, SCAN_LCONTROL));
+            assert!(!first.dwFlags.contains(KEYEVENTF_KEYUP));
+            assert!(last.dwFlags.contains(KEYEVENTF_KEYUP));
+        }
+    }
+
+    #[test]
+    fn process_integrity_cache_reuses_a_live_handle_and_drops_it_on_identity_change() {
+        let pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+        let first =
+            cached_integrity_for_process(pid).expect("current process token should be readable");
+        assert_eq!(current_process_integrity(), Some(first));
+        let handle = GAME_INTEGRITY.with(|cache| cache.borrow().as_ref().unwrap().process);
+        for _ in 0..100 {
+            assert_eq!(cached_integrity_for_process(pid), Some(first));
+            GAME_INTEGRITY
+                .with(|cache| assert_eq!(cache.borrow().as_ref().unwrap().process, handle));
+        }
+        assert_eq!(cached_integrity_for_process(0), None);
+        GAME_INTEGRITY.with(|cache| assert!(cache.borrow().is_none()));
+    }
+
+    #[test]
+    fn diagnostic_process_integrity_cache_latency() {
+        let pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+        let iterations = 1_000;
+        let uncached_started = Instant::now();
+        for _ in 0..iterations {
+            let process =
+                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.unwrap();
+            std::hint::black_box(integrity_level(process).unwrap());
+            let _ = unsafe { CloseHandle(process) };
+            std::hint::black_box(integrity_level(unsafe { GetCurrentProcess() }).unwrap());
+        }
+        let uncached = uncached_started.elapsed();
+        cached_integrity_for_process(pid).unwrap();
+        current_process_integrity().unwrap();
+        let cached_started = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(cached_integrity_for_process(pid).unwrap());
+            std::hint::black_box(current_process_integrity().unwrap());
+        }
+        let cached = cached_started.elapsed();
+        println!(
+            "integrity_pair n={iterations}: uncached_mean_us={:.3} cached_mean_us={:.3}",
+            uncached.as_secs_f64() * 1_000_000.0 / f64::from(iterations),
+            cached.as_secs_f64() * 1_000_000.0 / f64::from(iterations)
+        );
+        GAME_INTEGRITY.with(|cache| *cache.borrow_mut() = None);
     }
 }

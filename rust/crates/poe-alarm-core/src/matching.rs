@@ -13,6 +13,9 @@ pub enum AffixTokenKind {
     Percent,
     NegativeNumber,
     NegativePercent,
+    /// A template range includes both negative and nonnegative rolls.
+    EitherSignNumber,
+    EitherSignPercent,
 }
 
 impl AffixTokenKind {
@@ -73,6 +76,7 @@ pub fn normalize_numeric_presentation(value: &str) -> String {
 
 /// Converts a PoEDB template or OCR candidate into its strict structural form.
 /// Numeric magnitudes are discarded while sign and percent units remain.
+/// Only a range that spans zero may accept either numeric sign.
 pub fn canonicalize(text: &str) -> CanonicalAffix {
     if text.trim().is_empty() {
         return CanonicalAffix {
@@ -259,7 +263,7 @@ impl FullLineAffixMatcher {
             if expected_ended || actual_ended {
                 return expected_ended && actual_ended;
             }
-            if expected[expected_index].kind != actual[actual_index].kind {
+            if !numeric_kinds_match(expected[expected_index].kind, actual[actual_index].kind) {
                 return false;
             }
             expected_index += 1;
@@ -311,6 +315,20 @@ impl FullLineAffixMatcher {
     }
 }
 
+fn numeric_kinds_match(expected: AffixTokenKind, actual: AffixTokenKind) -> bool {
+    expected == actual
+        || matches!(
+            (expected, actual),
+            (
+                AffixTokenKind::EitherSignNumber,
+                AffixTokenKind::Number | AffixTokenKind::NegativeNumber
+            ) | (
+                AffixTokenKind::EitherSignPercent,
+                AffixTokenKind::Percent | AffixTokenKind::NegativePercent
+            )
+        )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LogicalAffixMatch {
     pub start_line_index: usize,
@@ -357,18 +375,17 @@ fn parse_numeric(chars: &[char], start: usize) -> Option<ParsedNumeric> {
     if chars[start] == '(' {
         let mut cursor = skip_space(chars, start + 1);
         let (first, after_first, negative) = parse_signed_number(chars, cursor)?;
-        let _ = first;
         cursor = skip_space(chars, after_first);
         if cursor >= chars.len() || chars[cursor] != '-' {
             return None;
         }
         cursor = skip_space(chars, cursor + 1);
-        let (_, after_second, _) = parse_signed_number(chars, cursor)?;
+        let (second, after_second, _) = parse_signed_number(chars, cursor)?;
         cursor = skip_space(chars, after_second);
         if cursor >= chars.len() || chars[cursor] != ')' {
             return None;
         }
-        return Some(finish_numeric(chars, cursor + 1, negative, None));
+        return Some(finish_range(chars, cursor + 1, first, second, negative));
     }
 
     // Placeholder, with optional sign and whitespace.
@@ -408,12 +425,31 @@ fn parse_numeric(chars: &[char], start: usize) -> Option<ParsedNumeric> {
     // Plain template range: 6-8. Its bounds are not an observed roll.
     if cursor < chars.len() && chars[cursor] == '-' {
         let second_start = skip_space(chars, cursor + 1);
-        if let Some((_, after_second, _)) = parse_signed_number(chars, second_start) {
-            return Some(finish_numeric(chars, after_second, negative, None));
+        if let Some((second, after_second, _)) = parse_signed_number(chars, second_start) {
+            return Some(finish_range(chars, after_second, first, second, negative));
         }
     }
 
     Some(finish_numeric(chars, after_first, negative, Some(first)))
+}
+
+fn finish_range(
+    chars: &[char],
+    expression_end: usize,
+    first: Decimal,
+    second: Decimal,
+    negative: bool,
+) -> ParsedNumeric {
+    let mut parsed = finish_numeric(chars, expression_end, negative, None);
+    if (first < Decimal::ZERO) != (second < Decimal::ZERO) {
+        parsed.kind = match parsed.kind {
+            AffixTokenKind::Percent | AffixTokenKind::NegativePercent => {
+                AffixTokenKind::EitherSignPercent
+            }
+            _ => AffixTokenKind::EitherSignNumber,
+        };
+    }
+    parsed
 }
 
 fn finish_numeric(
@@ -485,6 +521,8 @@ fn token_text(kind: AffixTokenKind) -> &'static str {
         AffixTokenKind::Percent => "<PCT>",
         AffixTokenKind::NegativeNumber => "<NEG_NUM>",
         AffixTokenKind::NegativePercent => "<NEG_PCT>",
+        AffixTokenKind::EitherSignNumber => "<SIGNED_NUM>",
+        AffixTokenKind::EitherSignPercent => "<SIGNED_PCT>",
     }
 }
 

@@ -1,6 +1,6 @@
 //! Settings compatibility boundary for the Rust POE Alarm preview.
 //!
-//! The public model represents normalized schema 4 settings. Loading accepts the released
+//! The public model represents normalized schema 5 settings. Loading accepts the released
 //! profile-aware schemas, the old flat POE1 layout, and the retired `MonitoringPolicy` field.
 //! A settings file from a future schema is never normalized or overwritten.
 
@@ -19,7 +19,10 @@ use serde::de::{Error as DeError, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+// Schema 5 adds the personal library and incomplete editor drafts. The version
+// bump makes schema-4 releases enter their existing future-schema read-only path
+// instead of silently discarding these fields when saving after a downgrade.
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 const RULE_SET_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_UI_LANGUAGE: &str = "en";
 pub const DEFAULT_OCR_LANGUAGE: &str = "en";
@@ -69,7 +72,7 @@ fn local_app_data_path() -> io::Result<PathBuf> {
         })
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum GameProfile {
     #[default]
     Poe1,
@@ -397,6 +400,31 @@ impl GameProfileSettingsSet {
     }
 }
 
+/// Independent personal library. Inserting an entry into a plan always clones it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LibraryEntry {
+    pub name: String,
+    pub category: String,
+    pub game: GameProfile,
+    pub language: String,
+    pub group: AcceptableResultGroup,
+    pub is_plan: bool,
+}
+
+/// Incomplete numbers remain a draft, never an executable unconstrained rule.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EditorDraft {
+    pub game: GameProfile,
+    pub language: String,
+    pub group: usize,
+    pub condition: usize,
+    pub name: String,
+    pub template: String,
+    pub values: Vec<(NumericConstraintMode, String, String)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct AppSettings {
@@ -409,6 +437,8 @@ pub struct AppSettings {
     pub allow_overlay_capture: bool,
     pub custom_alert_sound_path: Option<String>,
     pub start_monitoring_hot_key: String,
+    pub affix_library: Vec<LibraryEntry>,
+    pub editor_draft: Option<EditorDraft>,
 }
 
 impl Default for AppSettings {
@@ -423,6 +453,8 @@ impl Default for AppSettings {
             allow_overlay_capture: true,
             custom_alert_sound_path: None,
             start_monitoring_hot_key: DEFAULT_START_MONITORING_HOTKEY.to_owned(),
+            affix_library: Vec::new(),
+            editor_draft: None,
         }
     }
 }
@@ -480,6 +512,18 @@ impl AppSettings {
             custom_alert_sound_path: json_string(member_ci(object, "CustomAlertSoundPath")),
             start_monitoring_hot_key: json_string(member_ci(object, "StartMonitoringHotKey"))
                 .unwrap_or_else(|| DEFAULT_START_MONITORING_HOTKEY.to_owned()),
+            affix_library: match member_ci(object, "AffixLibrary") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(value) => {
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid personal library")?
+                }
+            },
+            editor_draft: match member_ci(object, "EditorDraft") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(
+                    serde_json::from_value(value.clone()).map_err(|_| "invalid editor draft")?,
+                ),
+            },
         }
         .normalize())
     }
@@ -559,7 +603,7 @@ pub enum SettingsStoreCompatibility {
     FutureSchemaReadOnly,
 }
 
-/// File-backed schema 4 store. `load` follows the released recovery contract and returns safe
+/// File-backed schema 5 store. `load` follows the released recovery contract and returns safe
 /// defaults for missing, malformed, or unreadable files. `save` remains fallible so callers can
 /// surface persistence failures to the user.
 #[derive(Debug)]
@@ -567,6 +611,7 @@ pub struct SettingsStore {
     settings_path: PathBuf,
     compatibility: SettingsStoreCompatibility,
     detected_schema_version: Option<u32>,
+    recovery_notice: Option<String>,
 }
 
 impl SettingsStore {
@@ -575,6 +620,7 @@ impl SettingsStore {
             settings_path: settings_path.into(),
             compatibility: SettingsStoreCompatibility::Compatible,
             detected_schema_version: None,
+            recovery_notice: None,
         }
     }
 
@@ -627,6 +673,10 @@ impl SettingsStore {
         self.compatibility == SettingsStoreCompatibility::FutureSchemaReadOnly
     }
 
+    pub fn recovery_notice(&self) -> Option<&str> {
+        self.recovery_notice.as_deref()
+    }
+
     pub fn load(&mut self) -> AppSettings {
         let bytes = match fs::read(&self.settings_path) {
             Ok(bytes) => bytes,
@@ -652,11 +702,54 @@ impl SettingsStore {
                 if !self.is_read_only() {
                     self.mark_compatible();
                 }
-                return AppSettings::default();
+                return self.recover_corrupt_file(&bytes);
             }
         }
 
-        serde_json::from_slice::<AppSettings>(&bytes).unwrap_or_default()
+        match serde_json::from_slice::<AppSettings>(&bytes) {
+            Ok(settings) => settings,
+            Err(_) => self.recover_corrupt_file(&bytes),
+        }
+    }
+
+    fn recover_corrupt_file(&mut self, bytes: &[u8]) -> AppSettings {
+        let archived = self.archive_corrupt_bytes(bytes);
+        let backup = self.settings_path.with_extension("json.bak");
+        let recovered = fs::read(&backup).ok().and_then(|bytes| {
+            if scan_schema_version(&bytes)
+                .ok()
+                .flatten()
+                .is_some_and(|v| v > CURRENT_SCHEMA_VERSION)
+            {
+                return None;
+            }
+            serde_json::from_slice::<AppSettings>(&bytes).ok()
+        });
+        self.recovery_notice = Some(match (&archived, recovered.is_some()) {
+            (Ok(path), true) => format!(
+                "Recovered settings from {}; damaged file saved at {}",
+                backup.display(),
+                path.display()
+            ),
+            (Ok(path), false) => format!(
+                "Settings were damaged; original saved at {}",
+                path.display()
+            ),
+            (Err(error), _) => format!("Could not archive damaged settings: {error}"),
+        });
+        recovered.unwrap_or_default()
+    }
+
+    fn archive_corrupt_bytes(&self, bytes: &[u8]) -> io::Result<PathBuf> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = self
+            .settings_path
+            .with_extension(format!("json.{stamp}.bad"));
+        fs::write(&path, bytes)?;
+        Ok(path)
     }
 
     pub fn save(&mut self, settings: &AppSettings) -> Result<(), SettingsError> {
@@ -675,6 +768,18 @@ impl SettingsStore {
             ))
         })?;
         fs::create_dir_all(directory).map_err(SettingsError::Io)?;
+
+        if let Ok(previous) = fs::read(&self.settings_path)
+            && previous != serialized
+        {
+            if serde_json::from_slice::<AppSettings>(&previous).is_ok() {
+                fs::write(self.settings_path.with_extension("json.bak"), previous)
+                    .map_err(SettingsError::Io)?;
+            } else {
+                self.archive_corrupt_bytes(&previous)
+                    .map_err(SettingsError::Io)?;
+            }
+        }
 
         let (temporary_path, mut temporary_file) =
             create_sibling_temporary_file(&self.settings_path).map_err(SettingsError::Io)?;
@@ -1821,5 +1926,199 @@ mod tests {
             rules.groups[0].conditions[0].numeric_constraints[0].minimum,
             Some("3.1000000000000000000001".parse().unwrap())
         );
+    }
+    #[test]
+    fn library_and_invalid_editor_drafts_round_trip_without_relaxing_rules() {
+        let directory = TestDirectory::new();
+        let mut store = SettingsStore::new(directory.settings_path());
+        let mut settings = AppSettings::default();
+        let condition = AffixCondition::new(
+            "Life",
+            "+# to maximum Life",
+            vec![NumericConstraint::at_least(70)],
+        );
+        settings.affix_library.push(LibraryEntry {
+            name: "Life".into(),
+            category: "General".into(),
+            game: GameProfile::Poe2,
+            language: "en".into(),
+            group: AcceptableResultGroup {
+                conditions: vec![condition.clone()],
+                ..Default::default()
+            },
+            is_plan: false,
+        });
+        settings.editor_draft = Some(EditorDraft {
+            game: GameProfile::Poe1,
+            language: "en".into(),
+            group: 0,
+            condition: 0,
+            name: "Life".into(),
+            template: condition.template,
+            values: vec![(NumericConstraintMode::AtLeast, "7O".into(), String::new())],
+        });
+        store.save(&settings).unwrap();
+        // Released schema-4 stores scan this number before deserializing and
+        // refuse writes whenever it is greater than their supported version.
+        let saved = fs::read(store.path()).unwrap();
+        assert_eq!(scan_schema_version(&saved).unwrap(), Some(5));
+        assert!(scan_schema_version(&saved).unwrap().unwrap() > 4);
+        let loaded = store.load();
+        assert_eq!(loaded.affix_library, settings.affix_library);
+        assert_eq!(loaded.editor_draft, settings.editor_draft);
+        assert_eq!(
+            loaded.affix_library[0].group.conditions[0].numeric_constraints[0].minimum,
+            Some(70.into())
+        );
+    }
+
+    #[test]
+    fn malformed_settings_preserve_original_and_recover_last_valid_backup() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let mut store = SettingsStore::new(&path);
+        let original = AppSettings {
+            ui_language: "zh-CN".into(),
+            ..Default::default()
+        };
+        store.save(&original).unwrap();
+        let updated = AppSettings {
+            keep_hud_visible: false,
+            ..original.clone()
+        };
+        store.save(&updated).unwrap();
+        fs::write(&path, b"{ damaged json").unwrap();
+        let recovered = store.load();
+        assert_eq!(recovered, original);
+        assert!(store.recovery_notice().unwrap().contains("Recovered"));
+        assert!(
+            fs::read_dir(&directory.0)
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| entry.path().extension().is_some_and(|ext| ext == "bad"))
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"{ damaged json");
+        store.save(&recovered).unwrap();
+        assert_eq!(store.load(), original);
+    }
+
+    #[test]
+    fn schema_four_upgrades_on_save_without_losing_profiles_or_disabled_conditions() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let mut original = AppSettings {
+            selected_game_profile: GameProfile::Poe2,
+            ui_language: "zh-CN".into(),
+            ..Default::default()
+        };
+        original.profiles.poe1.rules_for_mut("en").target_affix = "poe1 saved rule".into();
+        original.profiles.poe2.ocr_language = "zh-TW".into();
+        original.selected_rules_mut().rule_editor_mode = RuleEditorMode::Structured;
+        original.selected_rules_mut().structured_rule_set = Some(RuleSetDefinition {
+            groups: vec![AcceptableResultGroup {
+                conditions: vec![AffixCondition {
+                    enabled: false,
+                    name: "Stored life".into(),
+                    template: "+# to maximum Life".into(),
+                    numeric_constraints: vec![NumericConstraint::at_least(70)],
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let mut old_document = serde_json::to_value(&original).unwrap();
+        old_document["SchemaVersion"] = serde_json::json!(4);
+        old_document.as_object_mut().unwrap().remove("AffixLibrary");
+        old_document.as_object_mut().unwrap().remove("EditorDraft");
+        let old_bytes = serde_json::to_vec_pretty(&old_document).unwrap();
+        fs::write(&path, &old_bytes).unwrap();
+        let mut store = SettingsStore::new(&path);
+        let loaded = store.load();
+        assert!(!store.is_read_only());
+        assert_eq!(loaded, original);
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            old_bytes,
+            "loading alone does not rewrite old settings"
+        );
+        store.save(&loaded).unwrap();
+        assert_eq!(
+            scan_schema_version(&fs::read(&path).unwrap()).unwrap(),
+            Some(5)
+        );
+        assert_eq!(
+            fs::read(path.with_extension("json.bak")).unwrap(),
+            old_bytes
+        );
+    }
+
+    #[test]
+    fn future_schema_with_unrecognized_library_stays_read_only_before_library_parsing() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let original = br#"{ "SchemaVersion": 6, "AffixLibrary": {"FutureFormat":true} }"#;
+        fs::write(&path, original).unwrap();
+        let mut store = SettingsStore::new(&path);
+        assert_eq!(store.load(), AppSettings::default());
+        assert!(store.is_read_only());
+        assert!(matches!(
+            store.save(&AppSettings::default()),
+            Err(SettingsError::SchemaTooNew {
+                detected: 6,
+                supported: 5
+            })
+        ));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(
+            store.recovery_notice().is_none(),
+            "future data must not be mistaken for corruption"
+        );
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn damaged_library_field_restores_library_backup_and_archives_exact_document() {
+        let directory = TestDirectory::new();
+        let path = directory.settings_path();
+        let mut original = AppSettings::default();
+        original.affix_library.push(LibraryEntry {
+            name: "Life".into(),
+            category: "Personal".into(),
+            game: GameProfile::Poe2,
+            language: "en".into(),
+            is_plan: false,
+            group: AcceptableResultGroup {
+                conditions: vec![AffixCondition::new(
+                    "Life",
+                    "+# to maximum Life",
+                    vec![NumericConstraint::at_least(70)],
+                )],
+                ..Default::default()
+            },
+        });
+        let mut store = SettingsStore::new(&path);
+        store.save(&original).unwrap();
+        let updated = AppSettings {
+            keep_hud_visible: false,
+            ..original.clone()
+        };
+        store.save(&updated).unwrap();
+        let mut damaged = serde_json::to_value(&updated).unwrap();
+        damaged["AffixLibrary"] = serde_json::json!([{"Name":"Life", "Group":"damaged"}]);
+        let bad_bytes = serde_json::to_vec_pretty(&damaged).unwrap();
+        fs::write(&path, &bad_bytes).unwrap();
+        let restored = store.load();
+        assert_eq!(restored, original);
+        assert_eq!(restored.affix_library.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), bad_bytes);
+        let archives: Vec<_> = fs::read_dir(&directory.0)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "bad"))
+            .collect();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(fs::read(archives[0].path()).unwrap(), bad_bytes);
+        store.save(&restored).unwrap();
+        assert_eq!(store.load(), original);
     }
 }

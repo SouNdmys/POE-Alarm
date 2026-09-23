@@ -173,6 +173,18 @@ impl AppShell {
                     .child(micro_title_sm(self.t().rules_title)),
             )
             .child(list)
+            .when(self.undo_rules.is_some(), |this| {
+                this.child(
+                    button(
+                        "undo-rule-delete",
+                        LedgerButton::Quiet,
+                        self.word("撤销删除", "Undo deletion"),
+                        cx,
+                    )
+                    .disabled(self.condition_selection_locked())
+                    .on_click(cx.listener(|this, _, w, cx| this.undo_rule_deletion(w, cx))),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -206,8 +218,8 @@ impl AppShell {
                             .border_r_1()
                             .border_color(c(HAIRLINE_SOFT))
                             .hover(|s| s.bg(c(PRESSED)))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_condition(window, cx);
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_import(cx);
                             }))
                             .child(div().text_color(c(ACCENT)).child("+"))
                             .child(self.t().add_condition),
@@ -242,10 +254,20 @@ impl AppShell {
             .v_flex()
             .bg(c(PANEL))
             .child(self.wb_editor_tabs(cx))
+            .when(self.notice.is_some(), |this| {
+                let (kind, message) = self.notice.as_ref().unwrap();
+                this.child(if *kind == StatusKind::Error {
+                    error_band(message.as_ref())
+                } else {
+                    warning_band(self.t().notice_tag, message.as_ref())
+                })
+            })
             .child(match self.s.editor_tab {
                 EditorTab::Conditions => self.wb_tab_conditions(cx),
                 EditorTab::Settings => self.wb_tab_settings(cx),
                 EditorTab::Help => self.wb_tab_help(cx),
+                EditorTab::Library => self.render_library(cx),
+                EditorTab::Import => self.render_import(cx),
             })
     }
 
@@ -307,6 +329,13 @@ impl AppShell {
                 self.s.editor_tab,
                 cx,
             ))
+            .child(tab(
+                "tab-library",
+                self.word("词缀库", "Library"),
+                EditorTab::Library,
+                self.s.editor_tab,
+                cx,
+            ))
             .child(
                 div()
                     .ml_auto()
@@ -318,27 +347,10 @@ impl AppShell {
                     .font_family(FONT_MONO)
                     .text_size(fs(FS_9_5))
                     .text_color(c(TEXT_META))
-                    .child("settings.json")
-                    .child(match &self.notice {
-                        // An error here means monitoring is not working. It sat
-                        // in the same grey metadata strip as the settings path,
-                        // clipped to one line, and went unread.
-                        Some((StatusKind::Error, notice)) => div()
-                            .flex_1()
-                            .min_w_0()
-                            .px_2()
-                            .py(px(2.))
-                            .bg(c(DANGER_WASH))
-                            .border_l_2()
-                            .border_color(c(DANGER))
-                            .text_color(c(DANGER))
-                            .child(notice.clone()),
-                        Some((kind, notice)) => div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(c(kind.text()))
-                            .child(notice.clone()),
-                        None => div().text_color(c(TEXT_META)).child(text.unchanged),
+                    .child(if self.save_status.is_empty() {
+                        SharedString::from(text.unchanged)
+                    } else {
+                        self.save_status.clone()
                     }),
             )
     }
@@ -721,6 +733,10 @@ impl AppShell {
     fn wb_tab_conditions(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.t();
         let error = self.range_error(cx);
+        let locked = self.condition_selection_locked();
+        if !matches!(self.selected_node(), NodeRef::Condition(..)) {
+            return self.render_plan_summary(cx);
+        }
 
         // 条件名称 + 什么时候提醒
         let name_row = div()
@@ -740,7 +756,7 @@ impl AppShell {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(Input::new(&self.s.name_input)),
+                    .child(Input::new(&self.s.name_input).disabled(locked)),
             )
             .child(
                 div()
@@ -867,7 +883,7 @@ impl AppShell {
                     .min_w_0()
                     .border_l_2()
                     .border_color(c(ACCENT))
-                    .child(Input::new(&self.s.template_input)),
+                    .child(Input::new(&self.s.template_input).disabled(locked)),
             );
 
         let normalized = div()
@@ -985,7 +1001,7 @@ impl AppShell {
                               used: bool| {
                 let mut cell = div().w(px(110.)).flex_none().p(px(5.));
                 if used {
-                    cell = cell.child(Input::new(input));
+                    cell = cell.child(Input::new(input).disabled(locked));
                 } else {
                     cell = cell.child(
                         div()
@@ -1024,61 +1040,67 @@ impl AppShell {
         }
         // 错误行:占位始终保留一行高度,出现时不推挤下方内容。
         table = table.child(match error {
-            Some(msg) => error_band(msg),
+            Some(msg) => error_band(&msg),
             None => div().h(px(H_ROW + 4.)).flex_none().bg(c(WELL)),
         });
 
-        div()
-            .flex_1()
-            .min_h_0()
-            .v_flex()
-            .gap(px(10.))
-            .p_4()
-            .child(name_row)
-            .child(template_row)
-            .child(normalized)
-            .child(
-                div()
-                    .mt(px(SP_8))
-                    .h_flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(micro_title_sm(t.numeric_rules_label))
-                    .child(
-                        div()
-                            .text_size(fs(FS_10))
-                            .text_color(c(TEXT_META))
-                            .whitespace_nowrap()
-                            .child(t.numeric_rules_hint),
-                    )
-                    .child(div().flex_1().h(px(1.)).bg(c(HAIRLINE_SOFT)))
-                    .child(
-                        button(
-                            "wb-del-cond",
-                            LedgerButton::Destructive,
-                            t.delete_condition,
-                            cx,
+        div().flex_1().min_h_0().v_flex().child(
+            div()
+                .id("condition-editor-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .v_flex()
+                .gap(px(10.))
+                .p_4()
+                .when(locked, |this| {
+                    this.child(warning_band(t.notice_tag, t.tree_selection_locked))
+                })
+                .child(name_row)
+                .child(template_row)
+                .child(normalized)
+                .child(
+                    div()
+                        .mt(px(SP_8))
+                        .h_flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(10.))
+                        .child(micro_title_sm(t.numeric_rules_label))
+                        .child(
+                            div()
+                                .text_size(fs(FS_10))
+                                .text_color(c(TEXT_META))
+                                .whitespace_nowrap()
+                                .child(t.numeric_rules_hint),
                         )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.remove_selected_condition(window, cx)
-                        })),
-                    )
-                    .child(
-                        button(
-                            "wb-del-group",
-                            LedgerButton::Destructive,
-                            t.delete_result,
-                            cx,
+                        .child(div().flex_1().h(px(1.)).bg(c(HAIRLINE_SOFT)))
+                        .child(
+                            button(
+                                "wb-del-cond",
+                                LedgerButton::Destructive,
+                                t.delete_condition,
+                                cx,
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.remove_selected_condition(window, cx),
+                            )),
                         )
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.remove_selected_group(window, cx)
-                            }),
+                        .child(
+                            button(
+                                "wb-del-group",
+                                LedgerButton::Destructive,
+                                t.delete_result,
+                                cx,
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.remove_selected_group(window, cx),
+                            )),
                         ),
-                    ),
-            )
-            .child(table)
-            .child(warning_band(t.notice_tag, t.numeric_value_help))
+                )
+                .child(table)
+                .child(warning_band(t.notice_tag, t.numeric_value_help)),
+        )
     }
 
     // -- 右运行栏 318 -------------------------------------------------------
@@ -1192,13 +1214,45 @@ impl AppShell {
                             }),
                     ),
             )
+            .when(!self.check_details.is_empty(), |this| {
+                this.child(
+                    div().px_3().py_1().child(
+                        button(
+                            "toggle-check-details",
+                            LedgerButton::Quiet,
+                            if self.show_check_details {
+                                self.word("收起判定详情", "Hide check details")
+                            } else {
+                                self.word("查看逐条判定详情", "Show check details")
+                            },
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_check_details = !this.show_check_details;
+                            cx.notify();
+                        })),
+                    ),
+                )
+            })
             .child(
                 div().flex_1().min_h_0().child(
                     div()
                         .id("wb-log-scroll")
                         .size_full()
                         .overflow_y_scroll()
-                        .child(self.log_block(200)),
+                        .child(if self.show_check_details {
+                            let mut details = div().v_flex().gap_1().p_3().text_size(fs(FS_11_5));
+                            for line in &self.check_details {
+                                details = details.child(
+                                    div()
+                                        .whitespace_normal()
+                                        .child(SharedString::from(line.clone())),
+                                );
+                            }
+                            details
+                        } else {
+                            self.log_block(200)
+                        }),
                 ),
             )
     }

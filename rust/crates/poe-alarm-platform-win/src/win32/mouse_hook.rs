@@ -927,6 +927,116 @@ mod tests {
         guard.reap_thread();
     }
 
+    #[test]
+    fn prewarmed_hook_stays_passthrough_until_a_confirmed_match() {
+        let _gate = NATIVE_GUARD_TEST_GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(TEST_IGNORE_REAL_INPUT.load(Ordering::Acquire));
+        let mut guard = NativePendingMouseGuard::new();
+        let _reset = TestInjectionReset {
+            token: Some(guard.token),
+        };
+        guard.prepare().expect("pass-through hook should install");
+        shared().state.initialize_released(MouseButtons::NONE);
+        assert!(
+            !shared()
+                .state
+                .process(MouseInput::ButtonDown(MouseButton::Left))
+                .suppress
+        );
+        assert!(
+            !shared()
+                .state
+                .process(MouseInput::ButtonUp(MouseButton::Left))
+                .suppress
+        );
+        // A prepared session may wait arbitrarily long for its first roll. The
+        // release-idle timer must not uninstall a hook that has never armed.
+        thread::sleep(Duration::from_millis(1_050));
+        assert!(guard.is_installed());
+        assert_eq!(guard.snapshot().mode, GuardMode::Released);
+        guard.arm().expect("prewarmed hook should arm");
+        assert!(
+            shared()
+                .state
+                .process(MouseInput::ButtonDown(MouseButton::Left))
+                .suppress
+        );
+        assert!(
+            shared()
+                .state
+                .process(MouseInput::ButtonUp(MouseButton::Left))
+                .suppress
+        );
+        stop_and_reap(&mut guard);
+        assert!(
+            !shared()
+                .state
+                .process(MouseInput::ButtonDown(MouseButton::Right))
+                .suppress
+        );
+        assert!(
+            !shared()
+                .state
+                .process(MouseInput::ButtonUp(MouseButton::Right))
+                .suppress
+        );
+    }
+
+    /// Measures the old install+arm path and the prewarmed arm on this machine.
+    /// cfg(test) makes every real hook callback pass through; only synthetic
+    /// state-machine messages below can be suppressed. No game input is sent.
+    #[test]
+    fn diagnostic_cold_vs_prewarmed_guard_latency() {
+        let _gate = NATIVE_GUARD_TEST_GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(TEST_IGNORE_REAL_INPUT.load(Ordering::Acquire));
+        let mut cold = Vec::new();
+        for _ in 0..100 {
+            let mut guard = NativePendingMouseGuard::new();
+            let _reset = TestInjectionReset {
+                token: Some(guard.token),
+            };
+            let started = Instant::now();
+            guard.prepare().unwrap();
+            guard.arm().unwrap();
+            cold.push(started.elapsed().as_nanos());
+            stop_and_reap(&mut guard);
+        }
+        let mut guard = NativePendingMouseGuard::new();
+        let _reset = TestInjectionReset {
+            token: Some(guard.token),
+        };
+        guard.prepare().unwrap();
+        shared().state.initialize_released(MouseButtons::NONE);
+        let mut warm = Vec::new();
+        for _ in 0..1_000 {
+            let started = Instant::now();
+            guard.arm().unwrap();
+            warm.push(started.elapsed().as_nanos());
+            guard.release();
+        }
+        stop_and_reap(&mut guard);
+        for (label, values) in [
+            ("cold_prepare_arm", &mut cold),
+            ("prewarmed_arm", &mut warm),
+        ] {
+            values.sort_unstable();
+            let micros = |percentile: usize| {
+                values[(values.len() * percentile / 100).min(values.len() - 1)] as f64 / 1_000.0
+            };
+            println!(
+                "{label}: n={} median_us={:.3} p95_us={:.3} p99_us={:.3}",
+                values.len(),
+                micros(50),
+                micros(95),
+                micros(99)
+            );
+        }
+    }
+
     /// Thread and handle leak gate for the pending mouse guard.
     ///
     /// Ignored by default because it is timing-sensitive in a way that says

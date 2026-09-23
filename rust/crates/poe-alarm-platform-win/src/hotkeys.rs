@@ -16,6 +16,7 @@ const ERROR_HOTKEY_ALREADY_REGISTERED: u32 = 1409;
 const ACKNOWLEDGE_ID: i32 = 0x50_4F_45;
 const CHECK_ITEM_ID: i32 = 0x50_4F_46;
 const START_ID: i32 = 0x50_4F_47;
+const ALTERNATE_START_ID: i32 = 0x50_4F_48;
 
 /// Semantic action emitted by the three stable global shortcuts.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -32,14 +33,6 @@ impl HotKeyAction {
         Self::CheckItemUnderCursor,
         Self::StopOrAcknowledge,
     ];
-
-    const fn identifier(self) -> i32 {
-        match self {
-            Self::StartMonitoring => START_ID,
-            Self::CheckItemUnderCursor => CHECK_ITEM_ID,
-            Self::StopOrAcknowledge => ACKNOWLEDGE_ID,
-        }
-    }
 
     const fn index(self) -> usize {
         match self {
@@ -243,6 +236,7 @@ pub struct HotKeyManager {
     target: HotKeyTarget,
     config: HotKeyConfig,
     registered: [bool; 3],
+    identifiers: [i32; 3],
     _thread_bound: PhantomData<Rc<()>>,
 }
 
@@ -250,6 +244,19 @@ impl HotKeyManager {
     /// Registers all three shortcuts for the current thread message queue.
     pub fn register_for_current_thread(config: HotKeyConfig) -> Result<Self, HotKeyError> {
         Self::register_all(HotKeyTarget::CurrentThread, config)
+    }
+
+    /// Registers only the shortcuts owned by this message loop. In particular,
+    /// the app leaves acknowledgement to the native alert service.
+    pub fn register_actions_for_current_thread(
+        config: HotKeyConfig,
+        actions: &[HotKeyAction],
+    ) -> Result<Self, HotKeyError> {
+        let mut manager = Self::unregistered(HotKeyTarget::CurrentThread, config);
+        for action in actions {
+            manager.register(*action)?;
+        }
+        Ok(manager)
     }
 
     /// Registers all three shortcuts for a native window.
@@ -268,6 +275,7 @@ impl HotKeyManager {
             target,
             config,
             registered: [false; 3],
+            identifiers: [START_ID, CHECK_ITEM_ID, ACKNOWLEDGE_ID],
             _thread_bound: PhantomData,
         }
     }
@@ -289,36 +297,69 @@ impl HotKeyManager {
             return Ok(());
         }
         let binding = self.config.binding(action);
-        platform_register(self.target, action.identifier(), binding).map_err(|error| {
-            let kind = if error.win32_code() == Some(ERROR_HOTKEY_ALREADY_REGISTERED) {
-                HotKeyErrorKind::Conflict
-            } else {
-                HotKeyErrorKind::Platform(error)
-            };
-            HotKeyError {
-                action,
-                binding,
-                kind,
-            }
-        })?;
+        platform_register(self.target, self.identifiers[action.index()], binding).map_err(
+            |error| {
+                let kind = if error.win32_code() == Some(ERROR_HOTKEY_ALREADY_REGISTERED) {
+                    HotKeyErrorKind::Conflict
+                } else {
+                    HotKeyErrorKind::Platform(error)
+                };
+                HotKeyError {
+                    action,
+                    binding,
+                    kind,
+                }
+            },
+        )?;
         self.registered[action.index()] = true;
         Ok(())
     }
 
-    /// Replaces the configurable F10 shortcut. Like the 1.0 UI, a conflict
-    /// leaves start monitoring unregistered while F11/F12 remain available.
+    /// Acquires the new shortcut before releasing the old one. A conflict
+    /// therefore preserves both the old registration and the saved config.
     pub fn reconfigure_start(&mut self, start: StartMonitoringHotKey) -> Result<(), HotKeyError> {
+        self.reconfigure_start_with(start, platform_register, platform_unregister)
+    }
+
+    fn reconfigure_start_with(
+        &mut self,
+        start: StartMonitoringHotKey,
+        mut register: impl FnMut(HotKeyTarget, i32, HotKeyBinding) -> Result<(), PlatformError>,
+        mut unregister: impl FnMut(HotKeyTarget, i32),
+    ) -> Result<(), HotKeyError> {
         if self.config.start == start && self.is_registered(HotKeyAction::StartMonitoring) {
             return Ok(());
         }
-        self.unregister(HotKeyAction::StartMonitoring);
+        let action = HotKeyAction::StartMonitoring;
+        let index = action.index();
+        let old_identifier = self.identifiers[index];
+        let identifier = if old_identifier == START_ID {
+            ALTERNATE_START_ID
+        } else {
+            START_ID
+        };
+        let binding = start.binding();
+        register(self.target, identifier, binding).map_err(|error| HotKeyError {
+            action,
+            binding,
+            kind: if error.win32_code() == Some(ERROR_HOTKEY_ALREADY_REGISTERED) {
+                HotKeyErrorKind::Conflict
+            } else {
+                HotKeyErrorKind::Platform(error)
+            },
+        })?;
+        if self.registered[index] {
+            unregister(self.target, old_identifier);
+        }
+        self.identifiers[index] = identifier;
+        self.registered[index] = true;
         self.config.start = start;
-        self.register(HotKeyAction::StartMonitoring)
+        Ok(())
     }
 
     pub fn unregister(&mut self, action: HotKeyAction) {
         if self.registered[action.index()] {
-            platform_unregister(self.target, action.identifier());
+            platform_unregister(self.target, self.identifiers[action.index()]);
             self.registered[action.index()] = false;
         }
     }
@@ -346,7 +387,7 @@ impl HotKeyManager {
             return None;
         }
         HotKeyAction::ALL.into_iter().find(|action| {
-            self.registered[action.index()] && wparam == action.identifier() as usize
+            self.registered[action.index()] && wparam == self.identifiers[action.index()] as usize
         })
     }
 }
@@ -382,6 +423,71 @@ fn platform_unregister(target: HotKeyTarget, identifier: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conflicting_reconfiguration_keeps_the_working_shortcut_and_config() {
+        let mut manager =
+            HotKeyManager::unregistered(HotKeyTarget::CurrentThread, HotKeyConfig::default());
+        manager.registered[0] = true;
+        let result = manager.reconfigure_start_with(
+            StartMonitoringHotKey::AltF10,
+            |_, _, _| {
+                Err(PlatformError::Win32 {
+                    operation: "RegisterHotKey",
+                    code: ERROR_HOTKEY_ALREADY_REGISTERED,
+                    message: "test conflict".to_owned(),
+                })
+            },
+            |_, _| panic!("the old working shortcut must not be released on conflict"),
+        );
+        assert_eq!(result.unwrap_err().kind, HotKeyErrorKind::Conflict);
+        assert_eq!(manager.config(), HotKeyConfig::default());
+        assert_eq!(
+            manager.action_for_message(WM_HOTKEY, START_ID as usize),
+            Some(HotKeyAction::StartMonitoring)
+        );
+        manager.registered = [false; 3];
+    }
+
+    #[test]
+    fn successive_reconfigurations_acquire_first_and_only_dispatch_current_identifier() {
+        let mut manager =
+            HotKeyManager::unregistered(HotKeyTarget::CurrentThread, HotKeyConfig::default());
+        manager.registered[0] = true;
+        let calls = std::cell::RefCell::new(Vec::new());
+        for start in [
+            StartMonitoringHotKey::AltF10,
+            StartMonitoringHotKey::ControlAltF10,
+        ] {
+            let old_id = manager.identifiers[0];
+            manager
+                .reconfigure_start_with(
+                    start,
+                    |_, id, _| {
+                        calls.borrow_mut().push((true, id));
+                        Ok(())
+                    },
+                    |_, id| calls.borrow_mut().push((false, id)),
+                )
+                .unwrap();
+            assert_eq!(manager.action_for_message(WM_HOTKEY, old_id as usize), None);
+            assert_eq!(
+                manager.action_for_message(WM_HOTKEY, manager.identifiers[0] as usize),
+                Some(HotKeyAction::StartMonitoring)
+            );
+            assert_eq!(manager.config().start, start);
+        }
+        assert_eq!(
+            *calls.borrow(),
+            vec![
+                (true, ALTERNATE_START_ID),
+                (false, START_ID),
+                (true, START_ID),
+                (false, ALTERNATE_START_ID)
+            ]
+        );
+        manager.registered = [false; 3];
+    }
 
     #[test]
     fn invalid_start_setting_uses_stable_default() {

@@ -75,6 +75,143 @@ fn every_numeric_constraint_mode_has_inclusive_boundaries() {
 }
 
 #[test]
+fn cross_zero_ranges_use_the_displayed_signed_roll_for_numeric_constraints() {
+    let rules = one_condition(
+        "Breaches in Map have (-10—20)% reduced Pack Size",
+        vec![NumericConstraint::range(-10, 20)],
+    );
+    for value in [-11, -10, -1, 0, 1, 20, 21] {
+        for roll in [value.to_string(), format!("{value}(-10-20)")] {
+            let result =
+                rules.evaluate(&[format!("Breaches in Map have {roll}% reduced Pack Size")]);
+            assert_eq!(result.is_match, (-10..=20).contains(&value), "{roll}");
+            assert_eq!(
+                result.groups[0].conditions[0].numeric_slots[0].actual_value,
+                Some(Decimal::from(value))
+            );
+        }
+    }
+    let positive = one_condition(
+        "Breaches in Map have (-10—20)% reduced Pack Size",
+        vec![NumericConstraint::at_least(10)],
+    );
+    assert!(
+        positive
+            .evaluate(&["Breaches in Map have 20% reduced Pack Size".into()])
+            .is_match
+    );
+    assert!(
+        !positive
+            .evaluate(&["Breaches in Map have -10% reduced Pack Size".into()])
+            .is_match
+    );
+}
+
+#[test]
+fn saved_unchecked_rules_do_not_consume_monitoring_budgets() {
+    use poe_alarm_core::rules::{MAXIMUM_SAVED_CONDITIONS, MAXIMUM_SAVED_GROUPS};
+
+    let inactive = AffixCondition {
+        enabled: false,
+        ..Default::default()
+    };
+    let mut definition = RuleSetDefinition {
+        groups: (0..MAXIMUM_SAVED_GROUPS)
+            .map(|_| AcceptableResultGroup {
+                conditions: vec![inactive.clone(); MAXIMUM_SAVED_CONDITIONS / MAXIMUM_SAVED_GROUPS],
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let last_group = definition.groups.len() - 1;
+    let last_condition = definition.groups[last_group].conditions.len() - 1;
+    definition.groups[last_group].conditions[last_condition] = AffixCondition::new(
+        "life",
+        "+# to maximum Life",
+        vec![NumericConstraint::at_least(70)],
+    );
+    let rules = CompiledRuleSet::compile(definition.clone()).unwrap();
+    assert_eq!(rules.definition(), &definition);
+    assert_eq!(rules.targets().len(), 1);
+    let result = rules.evaluate(&["+70 to maximum Life".into()]);
+    assert_eq!(result.matched_group_index, Some(last_group));
+    assert_eq!(
+        result.matched_group().unwrap().conditions[0].condition_index,
+        last_condition
+    );
+    assert!(!rules.evaluate(&["+69 to maximum Life".into()]).is_match);
+
+    let mut too_many_conditions = definition.clone();
+    too_many_conditions.groups[0]
+        .conditions
+        .push(inactive.clone());
+    assert!(
+        CompiledRuleSet::compile(too_many_conditions)
+            .unwrap_err()
+            .to_string()
+            .contains("save at most 1024 conditions")
+    );
+    definition.groups.push(AcceptableResultGroup {
+        conditions: vec![inactive],
+        ..Default::default()
+    });
+    assert!(
+        CompiledRuleSet::compile(definition)
+            .unwrap_err()
+            .to_string()
+            .contains("save at most 128 acceptable results")
+    );
+}
+
+#[test]
+fn active_rule_budgets_still_reject_excess_enabled_conditions_or_groups() {
+    use poe_alarm_core::rules::{MAXIMUM_CONDITIONS, MAXIMUM_GROUPS};
+
+    let mut definition = RuleSetDefinition {
+        groups: vec![AcceptableResultGroup {
+            conditions: (0..MAXIMUM_CONDITIONS)
+                .map(|index| {
+                    AffixCondition::new(format!("life {index}"), "+# to maximum Life", vec![])
+                })
+                .collect(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    assert!(CompiledRuleSet::compile(definition.clone()).is_ok());
+    definition.groups[0].conditions.push(AffixCondition::new(
+        "one too many",
+        "+# to maximum Mana",
+        vec![],
+    ));
+    assert!(
+        CompiledRuleSet::compile(definition)
+            .unwrap_err()
+            .to_string()
+            .contains("at most 32 enabled conditions")
+    );
+
+    let mut definition = RuleSetDefinition {
+        groups: (0..MAXIMUM_GROUPS)
+            .map(|_| AcceptableResultGroup {
+                conditions: vec![AffixCondition::new("life", "+# to maximum Life", vec![])],
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    };
+    assert!(CompiledRuleSet::compile(definition.clone()).is_ok());
+    definition.groups.push(definition.groups[0].clone());
+    assert!(
+        CompiledRuleSet::compile(definition)
+            .unwrap_err()
+            .to_string()
+            .contains("at most 8 acceptable results at once")
+    );
+}
+
+#[test]
 fn rolled_ranges_expose_only_displayed_rolls_in_slot_order() {
     let rules = one_condition(
         "Adds # to # Physical Damage",

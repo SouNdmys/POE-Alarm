@@ -25,6 +25,44 @@ fn sign_and_numeric_slot_structure_remain_strict() {
 }
 
 #[test]
+fn only_a_range_spanning_zero_accepts_both_signs_and_keeps_units_strict() {
+    for template in [
+        "Breaches in Map have (-10—20)% reduced Pack Size",
+        "Breaches in Map have -10-20% reduced Pack Size",
+        "Breaches in Map have (-10—0)% reduced Pack Size",
+    ] {
+        let matcher = FullLineAffixMatcher::new(template).unwrap();
+        for value in [-10, -1, 0, 1, 20] {
+            assert!(
+                matcher.is_match(&format!("Breaches in Map have {value}% reduced Pack Size")),
+                "{template}: {value}"
+            );
+        }
+        assert!(!matcher.is_match("Breaches in Map have 10 reduced Pack Size"));
+        assert!(!matcher.is_match("Breaches in Map have 10% increased Pack Size"));
+    }
+    let flat = FullLineAffixMatcher::new("(-10—20) to maximum Life").unwrap();
+    assert!(flat.is_match("-1 to maximum Life"));
+    assert!(flat.is_match("0 to maximum Life"));
+    assert!(flat.is_match("20 to maximum Life"));
+    assert!(!flat.is_match("20% to maximum Life"));
+
+    for template in ["-#%", "(-20—-10)%", "-15(-20—-10)%"] {
+        let matcher = FullLineAffixMatcher::new(format!("{template} to Fire Resistance")).unwrap();
+        assert!(matcher.is_match("-15% to Fire Resistance"));
+        assert!(!matcher.is_match("0% to Fire Resistance"));
+        assert!(!matcher.is_match("15% to Fire Resistance"));
+        // A displayed roll's sign wins over the trailing tier range.
+        assert!(!matcher.is_match("15(-10-20)% to Fire Resistance"));
+    }
+    for template in ["#%", "+#%", "(0—20)%", "(10—20)%"] {
+        let matcher = FullLineAffixMatcher::new(format!("{template} to Fire Resistance")).unwrap();
+        assert!(!matcher.is_match("-15% to Fire Resistance"));
+        assert!(matcher.is_match("15% to Fire Resistance"));
+    }
+}
+
+#[test]
 fn full_width_and_ocr_glyph_confusions_are_narrowly_recovered() {
     let matcher = FullLineAffixMatcher::new("#% increased attack speed").unwrap();
     assert!(matcher.is_match("８％ ＩＮＣＲＥＡＳＥＤ ＡＴＴＡＣＫ ＳＰＥＥＤ"));

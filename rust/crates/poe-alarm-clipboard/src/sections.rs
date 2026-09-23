@@ -127,14 +127,15 @@ fn is_decoration(line: &str) -> bool {
     trimmed.starts_with('(') || trimmed.starts_with('\u{ff08}')
 }
 
-/// A `key: value` line, which is a property rather than a modifier.
+/// A `key: value` line in an unannotated section, likely to be a property.
 ///
 /// Maps put `Monster Level: 83` in its own section after the item level, where
 /// it would otherwise read as a modifier. Judged by shape rather than keyword —
 /// property names run to dozens per item class, differ per locale, and a
-/// keyword list would rot the moment GGG adds one. The colon alone is enough:
-/// not one of the 340 annotated modifier lines in the corpus contains one, and
-/// this is only ever applied where every line in a section agrees.
+/// keyword list would rot the moment GGG adds one. This is only applied where
+/// every line in a section agrees and no modifier annotation is present.
+/// Annotated modifiers may legitimately contain a colon (for example POE2's
+/// `Weapon: 25% increased Fire Damage`), and their explicit metadata wins.
 fn is_property(line: &str) -> bool {
     line.contains(':') || line.contains('\u{ff1a}')
 }
@@ -308,6 +309,9 @@ fn modifier_sections<'a>(sections: &'a [Vec<&'a str>]) -> Vec<&'a Vec<&'a str>> 
             let Some(first) = section.first() else {
                 return false;
             };
+            if section.iter().any(|line| is_annotation(line)) {
+                return true;
+            }
             !starts_with_any(&compact(first), TRAILER_KEYS)
                 && !section.iter().all(|line| is_flag(line))
                 && !section.iter().all(|line| is_prose(line))

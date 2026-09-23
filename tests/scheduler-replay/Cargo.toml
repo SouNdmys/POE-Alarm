@@ -1,0 +1,14 @@
+[package]
+name = "scheduler-replay"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+poe-alarm-core = { path = "../../rust/crates/poe-alarm-core" }
+poe-alarm-clipboard = { path = "../../rust/crates/poe-alarm-clipboard" }
+poe-alarm-monitoring = { path = "../../rust/crates/poe-alarm-monitoring" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

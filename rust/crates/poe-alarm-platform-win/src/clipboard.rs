@@ -136,6 +136,9 @@ impl ClipboardError {
 pub struct CopyOutcome {
     /// Raw clipboard payload.
     pub text: String,
+    /// Sequence belonging to this payload, sampled while the clipboard was
+    /// still open. A later global sample could acknowledge unread new text.
+    pub sequence_number: u32,
     /// `SendInput` returning to the sequence number changing.
     pub client_round_trip: Duration,
     /// Time spent opening and draining the clipboard afterwards.
@@ -250,6 +253,8 @@ pub fn sequence_number() -> u32 {
 /// Nothing is written to the clipboard first. The sequence number already
 /// reports whether the client responded, and skipping the clear saves an
 /// open/close pair on the hot path.
+/// `timeout` also bounds retries opening a busy clipboard after the response;
+/// it does not add a separate 60 ms retry window to short monitoring copies.
 pub fn copy_hovered_item(
     timeout: Duration,
     method: KeyMethod,

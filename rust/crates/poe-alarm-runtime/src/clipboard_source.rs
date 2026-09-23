@@ -353,9 +353,12 @@ impl AffixSource for ClipboardSource {
     fn read(
         &mut self,
         _plan: &MonitorPlan,
-        _cancellation: &CancellationToken,
+        cancellation: &CancellationToken,
     ) -> Result<RecognitionResult, Self::Error> {
         let started = Instant::now();
+        if cancellation.is_cancelled() {
+            return Ok(Self::unchanged(Duration::ZERO));
+        }
 
         // Privacy boundary: while the game is not the foreground window the
         // clipboard belongs to whatever else the user is doing, and this
@@ -411,6 +414,9 @@ impl AffixSource for ClipboardSource {
             match read_text(CLIPBOARD_OPEN_ATTEMPTS) {
                 Ok((text, _attempts)) => {
                     self.last_sequence = Some(sequence);
+                    if cancellation.is_cancelled() || !game_is_foreground() {
+                        return Ok(Self::unchanged(started.elapsed()));
+                    }
                     match self.ingest(text, started, CopyOrigin::Manual) {
                         Ingested::Evidence(result) | Ingested::Settled(result) => {
                             // Evidence arriving while a click's copy is still
@@ -477,6 +483,9 @@ impl AffixSource for ClipboardSource {
             return Ok(Self::unchanged(started.elapsed()));
         }
 
+        if cancellation.is_cancelled() || !game_is_foreground() {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
         self.copies_this_click += 1;
         let outcome = match copy_hovered_item(COPY_DEADLINE, self.key_method) {
             Ok(outcome) => outcome,
@@ -499,7 +508,12 @@ impl AffixSource for ClipboardSource {
             }
             Err(error) => return Err(SourceError::Clipboard(error)),
         };
-        self.last_sequence = Some(sequence_number());
+        // This sequence belongs to the returned text. A later global sample
+        // could mark a newer clipboard update as read without inspecting it.
+        self.last_sequence = Some(outcome.sequence_number);
+        if cancellation.is_cancelled() || !game_is_foreground() {
+            return Ok(Self::unchanged(started.elapsed()));
+        }
 
         let origin = if self.baseline == Baseline::Running {
             CopyOrigin::StartBaseline

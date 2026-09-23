@@ -236,6 +236,9 @@ pub fn warning_band(tag: &str, text: &str) -> Div {
 /// 校验错误行:红点 + 文案,底 DANGER_WASH。占位恒定一行高。
 pub fn error_band(text: &str) -> Div {
     div()
+        .w_full()
+        .min_w_0()
+        .flex_none()
         .h_flex()
         .items_center()
         .gap_2()
@@ -247,6 +250,9 @@ pub fn error_band(text: &str) -> Div {
         .child(div().size(px(6.)).flex_none().rounded_full().bg(c(DANGER)))
         .child(
             div()
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
                 .text_size(fs(FS_11_5))
                 .text_color(c(DANGER_TEXT))
                 .child(SharedString::from(text.to_string())),
@@ -285,7 +291,7 @@ pub enum LedgerButton {
 
 /// 构造 Ledger 风格按钮(基于 gpui-component Button:保留焦点环/键盘/禁用逻辑,
 /// 颜色与几何全部覆盖为 token)。
-pub fn button(id: &'static str, kind: LedgerButton, label: &str, cx: &App) -> Button {
+pub fn button(id: impl Into<gpui::ElementId>, kind: LedgerButton, label: &str, cx: &App) -> Button {
     use gpui_component::ActiveTheme as _;
     let _ = cx.theme();
     let (variant, height) = match kind {

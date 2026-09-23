@@ -50,9 +50,180 @@ pub struct AppShell {
     pub capture_ms: f64,
     pub ocr_ms: f64,
     pub ocr_cached: bool,
+    last_editor: Option<poe_alarm_settings::EditorDraft>,
+    save_due: Option<Instant>,
+    pub save_status: SharedString,
+    pub check_details: Vec<String>,
+    pub show_check_details: bool,
+    pub undo_rules: Option<poe_alarm_core::RuleSetDefinition>,
+    pub undo_library: Option<(usize, poe_alarm_settings::LibraryEntry)>,
 }
 
 impl AppShell {
+    pub(crate) fn word(&self, chinese: &'static str, english: &'static str) -> &'static str {
+        if self
+            .backend
+            .as_ref()
+            .is_some_and(|b| b.settings.ui_language.starts_with("en"))
+        {
+            english
+        } else {
+            chinese
+        }
+    }
+
+    fn editor_constraints(&self, cx: &Context<Self>) -> Result<Vec<NumericConstraint>, String> {
+        if !matches!(self.selected_node(), NodeRef::Condition(..)) {
+            return Ok(Vec::new());
+        }
+        (0..Self::slot_count(&self.template_value(cx)))
+            .map(|index| {
+                let Some(row) = self.s.value_rows.get(index) else {
+                    return Ok(NumericConstraint::default());
+                };
+                crate::editor::parse_constraint(
+                    row.mode,
+                    &row.min.read(cx).value(),
+                    &row.max.read(cx).value(),
+                )
+                .map_err(|error| {
+                    format!(
+                        "{} {}: {}",
+                        self.word("数值", "Value"),
+                        index + 1,
+                        if error == "reversed_range" {
+                            self.t().range_error
+                        } else {
+                            self.word(
+                                "请填写有效数字；不限制请明确选择“不限制”",
+                                "Enter a valid number, or explicitly choose Unrestricted",
+                            )
+                        }
+                    )
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn validate_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Err(error) = self.editor_constraints(cx) {
+            self.notice = Some((StatusKind::Error, error.into()));
+            cx.notify();
+            false
+        } else {
+            true
+        }
+    }
+
+    fn editor_draft(&self, cx: &Context<Self>) -> Option<poe_alarm_settings::EditorDraft> {
+        let NodeRef::Condition(group, condition) = self.selected_node() else {
+            return None;
+        };
+        let settings = &self.backend.as_ref()?.settings;
+        Some(poe_alarm_settings::EditorDraft {
+            game: settings.selected_game_profile,
+            language: settings.selected_profile().ocr_language.clone(),
+            group,
+            condition,
+            name: self.s.name_input.read(cx).value().to_string(),
+            template: self.s.template_input.read(cx).value().to_string(),
+            values: self
+                .s
+                .value_rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.mode,
+                        row.min.read(cx).value().to_string(),
+                        row.max.read(cx).value().to_string(),
+                    )
+                })
+                .collect(),
+        })
+    }
+
+    pub fn flush_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.backend.as_ref().is_some_and(|b| b.read_only) {
+            return true;
+        }
+        let invalid = self.editor_constraints(cx).is_err();
+        let draft = invalid.then(|| self.editor_draft(cx)).flatten();
+        if !invalid {
+            self.apply_editor_to_selection(cx);
+            if self.notice.as_ref().is_some_and(|(kind, message)| {
+                *kind == StatusKind::Error
+                    && (message.starts_with("数值 ") || message.starts_with("Value "))
+            }) {
+                self.notice = None;
+            }
+        }
+        if let Some(backend) = &mut self.backend {
+            backend.settings.editor_draft = draft;
+            if let Err(error) = backend.save() {
+                self.save_status = self.word("保存失败", "Save failed").into();
+                self.notice = Some((
+                    StatusKind::Error,
+                    format!("{}: {error}", self.t().notice_save_failed_prefix).into(),
+                ));
+                cx.notify();
+                return false;
+            }
+        }
+        self.save_status = if invalid {
+            self.word("草稿已保存 · 请修正数值", "Draft saved · fix values")
+        } else {
+            self.word("已保存", "Saved")
+        }
+        .into();
+        self.last_editor = self.editor_draft(cx);
+        self.save_due = None;
+        cx.notify();
+        true
+    }
+
+    fn restore_editor_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self
+            .backend
+            .as_ref()
+            .and_then(|b| b.settings.editor_draft.clone())
+        else {
+            return;
+        };
+        if !self.backend.as_ref().is_some_and(|b| {
+            b.settings.selected_game_profile == draft.game
+                && b.settings.selected_profile().ocr_language == draft.language
+        }) {
+            return;
+        }
+        let Some(index) = self
+            .s
+            .tree
+            .iter()
+            .position(|n| n.node == NodeRef::Condition(draft.group, draft.condition))
+        else {
+            return;
+        };
+        self.s.selected = index;
+        self.s
+            .name_input
+            .update(cx, |input, cx| input.set_value(draft.name, window, cx));
+        self.s
+            .template_input
+            .update(cx, |input, cx| input.set_value(draft.template, window, cx));
+        self.s.value_rows = draft
+            .values
+            .into_iter()
+            .map(|(mode, min, max)| ValueRow {
+                mode,
+                min: cx.new(|cx| InputState::new(window, cx).default_value(min)),
+                max: cx.new(|cx| InputState::new(window, cx).default_value(max)),
+            })
+            .collect();
+        self.save_status = self
+            .word("已恢复待修正草稿", "Restored incomplete draft")
+            .into();
+    }
+
     /// 当前界面语言的文案目录。
     pub fn t(&self) -> &'static i18n::Text {
         let english = self
@@ -133,6 +304,18 @@ impl AppShell {
             .unwrap_or(0);
         let notice = match &backend {
             Some(b) if b.read_only => Some((StatusKind::Warning, text.notice_read_only.into())),
+            Some(b) if b.recovery_notice().is_some() => Some((
+                StatusKind::Warning,
+                SharedString::from(format!(
+                    "{} · {}",
+                    if text.game_poe1 == i18n::ZH.game_poe1 {
+                        "配置已恢复，请检查规则"
+                    } else {
+                        "Settings recovered; review your rules"
+                    },
+                    b.recovery_notice().unwrap_or_default()
+                )),
+            )),
             None => Some((StatusKind::Error, text.notice_backend_failed.into())),
             _ => None,
         };
@@ -164,6 +347,12 @@ impl AppShell {
                 template_input,
                 item_text_input,
                 value_rows: Vec::new(),
+                library_search: cx.new(|cx| InputState::new(window, cx)),
+                library_category: cx.new(|cx| InputState::new(window, cx)),
+                library_name: cx.new(|cx| InputState::new(window, cx)),
+                library_selected: None,
+                import_groups: Vec::new(),
+                import_grouping_exact: false,
                 elapsed: "--:--".into(),
                 hit_count: 0,
             },
@@ -181,8 +370,27 @@ impl AppShell {
             capture_ms: 0.0,
             ocr_ms: 0.0,
             ocr_cached: false,
+            last_editor: None,
+            save_due: None,
+            save_status: "".into(),
+            check_details: Vec::new(),
+            show_check_details: false,
+            undo_rules: None,
+            undo_library: None,
         };
         shell.sync_editor_from_selection(window, cx);
+        shell.restore_editor_draft(window, cx);
+        shell.last_editor = shell.editor_draft(cx);
+        cx.subscribe(
+            &shell.s.library_search,
+            |_, _, _: &gpui_component::input::InputEvent, cx| cx.notify(),
+        )
+        .detach();
+        let weak = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            weak.update(cx, |shell, cx| shell.flush_editor(cx))
+                .unwrap_or(true)
+        });
         shell
     }
 
@@ -223,7 +431,7 @@ impl AppShell {
     }
 
     /// 从设置里的结构化规则集合成树显示。
-    fn tree_from_settings(backend: Option<&Backend>) -> Vec<RuleNode> {
+    pub(crate) fn tree_from_settings(backend: Option<&Backend>) -> Vec<RuleNode> {
         let text = Self::text_for(backend);
         let mut tree = Vec::new();
         let Some(backend) = backend else {
@@ -347,6 +555,25 @@ impl AppShell {
                     self.notice = Some((StatusKind::Error, detail.into()));
                     self.push_log(LogKind::Meta, detail.to_owned());
                 }
+                PlatformEvent::StartHotKeyChanged(hotkey) => {
+                    if let Some(backend) = &mut self.backend {
+                        backend.settings.start_monitoring_hot_key = hotkey;
+                    }
+                    self.persist();
+                }
+                PlatformEvent::StartHotKeyFailed { requested, detail } => {
+                    self.notice = Some((
+                        StatusKind::Error,
+                        format!(
+                            "{} {requested}: {detail}",
+                            self.word(
+                                "热键设置失败，原热键保持不变",
+                                "Hotkey change failed; previous binding retained"
+                            )
+                        )
+                        .into(),
+                    ));
+                }
                 PlatformEvent::GameNotFocused => {
                     self.notice =
                         Some((StatusKind::Warning, self.t().notice_game_not_focused.into()));
@@ -380,13 +607,9 @@ impl AppShell {
                         self.push_log(LogKind::Meta, format!("{}:{detail}", text.log_error_prefix));
                     }
                 }
-                PlatformEvent::HudMoved(rx, ry) => {
+                PlatformEvent::HudMoved(placement) => {
                     if let Some(backend) = &mut self.backend {
-                        backend.settings.hud_placement = poe_alarm_settings::HudPlacement {
-                            monitor_device_name: None,
-                            relative_x: Some(rx),
-                            relative_y: Some(ry),
-                        };
+                        backend.settings.hud_placement = placement;
                         if backend.save().is_ok() {
                             self.push_log(LogKind::Meta, self.t().log_hud_moved.to_owned());
                         }
@@ -525,6 +748,20 @@ impl AppShell {
             }
             changed = true;
         }
+        if !self.condition_selection_locked() {
+            let draft = self.editor_draft(cx);
+            if draft != self.last_editor {
+                self.last_editor = draft;
+                self.save_due = Some(Instant::now() + Duration::from_millis(480));
+                self.save_status = self.word("未保存", "Unsaved").into();
+                changed = true;
+            }
+            if self.save_due.is_some_and(|due| Instant::now() >= due) {
+                self.save_due = None;
+                self.flush_editor(cx);
+                changed = true;
+            }
+        }
         // 编辑器 → 树标签实时同步:粘贴模板后左树与面包屑立即刷新,不等切换选中。
         if let NodeRef::Condition(..) = self.selected_node() {
             let text = self.t();
@@ -652,6 +889,9 @@ impl AppShell {
     pub fn toggle_run(&mut self, cx: &mut Context<Self>) {
         // 先把编辑内容写回设置,保证 runtime 拿到的是屏幕上的内容。
         if self.s.run == RunPhase::Idle {
+            if !self.validate_editor(cx) {
+                return;
+            }
             self.apply_editor_to_selection(cx);
             if let Some(notice) = self.rule_selection_notice() {
                 self.notice = Some((StatusKind::Warning, notice));
@@ -698,7 +938,7 @@ impl AppShell {
 
     // ---- 结构化多词缀编辑(树 ↔ 编辑器) ----------------------------------
 
-    fn selected_node(&self) -> NodeRef {
+    pub(crate) fn selected_node(&self) -> NodeRef {
         self.s
             .tree
             .get(self.s.selected)
@@ -739,6 +979,21 @@ impl AppShell {
             .structured_rule_set
             .as_ref()?;
         let text = self.t();
+        let active_groups = set
+            .groups
+            .iter()
+            .filter(|group| group.enabled_condition_count() > 0)
+            .count();
+        let active_conditions: usize = set
+            .groups
+            .iter()
+            .map(|group| group.enabled_condition_count())
+            .sum();
+        if active_groups > poe_alarm_core::rules::MAXIMUM_GROUPS
+            || active_conditions > poe_alarm_core::rules::MAXIMUM_CONDITIONS
+        {
+            return Some(self.word("本次最多监控 8 个方案、32 条词缀；取消勾选即可保留其余内容", "Monitor up to 8 plans and 32 affixes at once; uncheck others to keep them saved").into());
+        }
         if !set
             .groups
             .iter()
@@ -877,10 +1132,12 @@ impl AppShell {
                 max: cx.new(|cx| InputState::new(window, cx).default_value(max)),
             })
             .collect();
+        self.last_editor = self.editor_draft(cx);
+        self.save_due = None;
     }
 
     /// 静默落盘(自动保存,无手动按钮);失败才提示。
-    fn persist(&mut self) {
+    pub(crate) fn persist(&mut self) -> bool {
         let text = self.t();
         if let Some(backend) = &mut self.backend
             && let Err(e) = backend.save()
@@ -889,77 +1146,31 @@ impl AppShell {
                 StatusKind::Error,
                 format!("{}:{e}", text.notice_save_failed_prefix).into(),
             ));
+            self.save_status = self.word("保存失败", "Save failed").into();
+            return false;
         }
+        true
     }
 
-    /// 把编辑器内容写回选中的条件,返回是否有实际改动。约束按占位数落盘;
-    /// "范围"缺一边时宽松降级(只有下限→至少,只有上限→至多,全空→不限制),
-    /// 保证不会因为空输入卡住启动。
+    /// Commit valid editor content without weakening numeric requirements.
+    /// Incomplete or invalid numbers remain a separate draft until corrected.
     pub fn apply_editor_to_selection(&mut self, cx: &mut Context<Self>) -> bool {
-        use NumericConstraintMode as M;
         let NodeRef::Condition(g, c) = self.selected_node() else {
             return false;
         };
         let name = self.s.name_input.read(cx).value().trim().to_string();
         let template = self.template_value(cx);
-        let slots = Self::slot_count(&template);
-        let parse = |entity: &gpui::Entity<InputState>| {
-            entity
-                .read(cx)
-                .value()
-                .trim()
-                .parse::<poe_alarm_core::Decimal>()
-                .ok()
+        let constraints = match self.editor_constraints(cx) {
+            Ok(constraints) => constraints,
+            Err(error) => {
+                self.notice = Some((StatusKind::Error, error.into()));
+                return false;
+            }
         };
-        let constraints: Vec<NumericConstraint> = (0..slots)
-            .map(|ix| match self.s.value_rows.get(ix) {
-                None => NumericConstraint::default(),
-                Some(row) => {
-                    let min = parse(&row.min);
-                    let max = parse(&row.max);
-                    match row.mode {
-                        M::Ignore => NumericConstraint::default(),
-                        M::AtLeast => NumericConstraint {
-                            mode: if min.is_some() { M::AtLeast } else { M::Ignore },
-                            minimum: min,
-                            ..Default::default()
-                        },
-                        M::AtMost => NumericConstraint {
-                            mode: if max.is_some() { M::AtMost } else { M::Ignore },
-                            maximum: max,
-                            ..Default::default()
-                        },
-                        M::Exactly => NumericConstraint {
-                            mode: if min.is_some() { M::Exactly } else { M::Ignore },
-                            expected: min,
-                            ..Default::default()
-                        },
-                        M::RangeInclusive => match (min, max) {
-                            (Some(a), Some(b)) => NumericConstraint {
-                                mode: M::RangeInclusive,
-                                minimum: Some(a.min(b)),
-                                maximum: Some(a.max(b)),
-                                ..Default::default()
-                            },
-                            (Some(a), None) => NumericConstraint {
-                                mode: M::AtLeast,
-                                minimum: Some(a),
-                                ..Default::default()
-                            },
-                            (None, Some(b)) => NumericConstraint {
-                                mode: M::AtMost,
-                                maximum: Some(b),
-                                ..Default::default()
-                            },
-                            (None, None) => NumericConstraint::default(),
-                        },
-                    }
-                }
-            })
-            .collect();
         let Some(backend) = &mut self.backend else {
             return false;
         };
+        backend.settings.editor_draft = None;
         let Some(cond) = backend
             .settings
             .selected_rules_mut()
@@ -976,11 +1187,17 @@ impl AppShell {
         cond.name = name;
         cond.template = template;
         cond.numeric_constraints = constraints;
+        if modified {
+            self.undo_rules = None;
+        }
         modified
     }
 
     /// 树点选:先落盘当前编辑(有改动即自动保存),再切换选中并载入。
     pub fn select_tree_node(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.validate_editor(cx) {
+            return;
+        }
         if self.apply_editor_to_selection(cx) {
             self.persist();
         }
@@ -1003,9 +1220,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.condition_selection_locked() {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
             return;
         }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let Some(condition) = self
             .backend
@@ -1032,6 +1250,10 @@ impl AppShell {
 
     /// 结构化操作:+方案 / +词缀 / 删除词缀 / 删除方案 / 组模式与条数。
     pub fn add_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let Some(backend) = &mut self.backend else {
             return;
@@ -1054,6 +1276,10 @@ impl AppShell {
     }
 
     pub fn add_condition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
@@ -1094,6 +1320,16 @@ impl AppShell {
 
     /// 删除词缀:只删当前词缀,组保留(空组会以"空"标出并阻止启动)。
     pub fn remove_selected_condition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.condition_selection_locked() {
+            return;
+        }
+        if let Some(backend) = &mut self.backend {
+            backend.settings.editor_draft = None;
+        }
+        self.undo_rules = self
+            .backend
+            .as_ref()
+            .and_then(|b| b.settings.selected_rules().structured_rule_set.clone());
         let NodeRef::Condition(g, c) = self.selected_node() else {
             return;
         };
@@ -1126,6 +1362,16 @@ impl AppShell {
 
     /// 删除方案:删除选中方案及其全部词缀。
     pub fn remove_selected_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.condition_selection_locked() {
+            return;
+        }
+        if let Some(backend) = &mut self.backend {
+            backend.settings.editor_draft = None;
+        }
+        self.undo_rules = self
+            .backend
+            .as_ref()
+            .and_then(|b| b.settings.selected_rules().structured_rule_set.clone());
         let g = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
             NodeRef::Game => return,
@@ -1164,6 +1410,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
@@ -1198,6 +1448,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let group_ix = match self.selected_node() {
             NodeRef::Group(g) | NodeRef::Condition(g, _) => g,
@@ -1229,6 +1483,9 @@ impl AppShell {
         mode: NumericConstraintMode,
         cx: &mut Context<Self>,
     ) {
+        if self.condition_selection_locked() {
+            return;
+        }
         if let Some(row) = self.s.value_rows.get_mut(ix) {
             row.mode = mode;
             if self.apply_editor_to_selection(cx) {
@@ -1238,14 +1495,18 @@ impl AppShell {
         }
     }
 
-    fn refresh_tree_select_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_tree_select_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.s.tree = Self::tree_from_settings(self.backend.as_ref());
         self.s.selected = self.s.tree.len().saturating_sub(1);
         self.sync_editor_from_selection(window, cx);
         cx.notify();
     }
 
-    fn refresh_tree_keep_selection(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_tree_keep_selection(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let node = self.selected_node();
         self.s.tree = Self::tree_from_settings(self.backend.as_ref());
         if let Some(ix) = self.s.tree.iter().position(|n| n.node == node) {
@@ -1321,6 +1582,9 @@ impl AppShell {
     /// `origin` names the source in the log so a hotkey check and a pasted one
     /// stay tellable apart.
     fn run_item_check(&mut self, item_text: String, origin: &'static str, cx: &mut Context<Self>) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
         if self.apply_editor_to_selection(cx) {
             self.persist();
         }
@@ -1329,6 +1593,7 @@ impl AppShell {
             cx.notify();
             return;
         }
+        self.build_check_details(&item_text);
         let text = self.t();
         if let Some(backend) = &mut self.backend {
             // A condition without a template cannot compile, and the compiler's
@@ -1373,6 +1638,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.condition_selection_locked() || !self.validate_editor(cx) {
+            return;
+        }
+        self.undo_rules = None;
         self.apply_editor_to_selection(cx);
         let Some(backend) = &mut self.backend else {
             return;
@@ -1480,20 +1749,8 @@ impl AppShell {
     // -- shared chrome ------------------------------------------------------
 
     /// 校验数值范围;返回错误文案(空间稳定:错误行占位恒定)。
-    pub fn range_error(&self, cx: &Context<Self>) -> Option<&'static str> {
-        for row in &self.s.value_rows {
-            if row.mode != NumericConstraintMode::RangeInclusive {
-                continue;
-            }
-            let min = row.min.read(cx).value().parse::<f64>().ok();
-            let max = row.max.read(cx).value().parse::<f64>().ok();
-            if let (Some(a), Some(b)) = (min, max)
-                && a > b
-            {
-                return Some(self.t().range_error);
-            }
-        }
-        None
+    pub fn range_error(&self, cx: &Context<Self>) -> Option<String> {
+        self.editor_constraints(cx).err()
     }
 
     pub fn ocr_ms_text(&self) -> String {

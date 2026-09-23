@@ -6,8 +6,8 @@ use std::sync::mpsc::{Sender, channel};
 use std::time::Duration;
 
 use poe_alarm_platform_win::{
-    CaptureAffinity, HudInteractionMode, HudWindow, HudWindowConfig, HudWindowPolicy, RectI, SizeI,
-    resolve_hud_position,
+    CaptureAffinity, HudInteractionMode, HudWindow, HudWindowConfig, HudWindowPolicy, PointI,
+    RectI, SizeI, resolve_hud_position,
 };
 
 use crate::backend::PlatformEvent;
@@ -41,8 +41,10 @@ impl HudService {
         let (tx, rx) = channel::<HudCommand>();
         std::thread::spawn(move || {
             use windows::Win32::UI::WindowsAndMessaging::{
-                DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage,
+                DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage, WM_DISPLAYCHANGE,
+                WM_SETTINGCHANGE,
             };
+            let mut placement = placement;
             let policy = HudWindowPolicy {
                 interaction: HudInteractionMode::Passive,
                 capture_affinity: if allow_overlay_capture {
@@ -51,17 +53,7 @@ impl HudService {
                     CaptureAffinity::Exclude
                 },
             };
-            let size = SizeI::new(HUD_WIDTH, HUD_HEIGHT).expect("HUD size is positive");
-            let work = work_area();
-            let native_placement = match (placement.relative_x, placement.relative_y) {
-                (Some(x), Some(y)) => {
-                    poe_alarm_platform_win::HudPlacement::manual(x, y).unwrap_or_default()
-                }
-                _ => poe_alarm_platform_win::HudPlacement::Automatic,
-            };
-            let origin = resolve_hud_position(work, size, native_placement, None);
-            let bounds = RectI::new(origin.x, origin.y, HUD_WIDTH, HUD_HEIGHT)
-                .expect("HUD bounds are positive");
+            let bounds = placement_bounds(&monitor_work_areas(), &placement);
             let mut window = match HudWindow::create(HudWindowConfig {
                 bounds,
                 policy,
@@ -84,21 +76,31 @@ impl HudService {
             loop {
                 // 泵本线程消息(WM_PAINT / 拖动等)。
                 let mut message = MSG::default();
+                let mut displays_changed = false;
                 // SAFETY: standard thread-local message pump.
                 while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+                    displays_changed |=
+                        matches!(message.message, WM_DISPLAYCHANGE | WM_SETTINGCHANGE);
                     unsafe {
                         let _ = TranslateMessage(&message);
                         DispatchMessageW(&message);
                     }
                 }
+                if displays_changed {
+                    // Keep the saved device name when a display is unplugged:
+                    // show on the primary for now and restore when it returns.
+                    let _ = window.set_bounds(placement_bounds(&monitor_work_areas(), &placement));
+                }
                 // 拖动结束:换算为工作区相对坐标(0..=1)回投给 UI。
                 if let Some(point) = window.take_user_move() {
-                    let work = work_area();
-                    let span_x = (work.width - HUD_WIDTH).max(1) as f64;
-                    let span_y = (work.height - HUD_HEIGHT).max(1) as f64;
-                    let rx = (f64::from(point.x - work.x) / span_x).clamp(0.0, 1.0);
-                    let ry = (f64::from(point.y - work.y) / span_y).clamp(0.0, 1.0);
-                    let _ = events.send(PlatformEvent::HudMoved(rx, ry));
+                    let monitors = monitor_work_areas();
+                    if let Some(moved) = placement_for_move(&monitors, point) {
+                        placement = moved;
+                        // Clamp a partly offscreen drop to its chosen work
+                        // area so the saved and currently visible positions agree.
+                        let _ = window.set_bounds(placement_bounds(&monitors, &placement));
+                        let _ = events.send(PlatformEvent::HudMoved(placement.clone()));
+                    }
                 }
                 match rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(HudCommand::Content(content)) => {
@@ -153,8 +155,174 @@ impl HudService {
     }
 }
 
-/// 主显示器工作区(排除任务栏)。失败时退回 1080p 全屏。
-fn work_area() -> RectI {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MonitorWorkArea {
+    device_name: Option<String>,
+    bounds: RectI,
+    work: RectI,
+    primary: bool,
+}
+
+fn preferred_monitor<'a>(
+    monitors: &'a [MonitorWorkArea],
+    device_name: Option<&str>,
+) -> Option<&'a MonitorWorkArea> {
+    device_name
+        .and_then(|name| {
+            monitors.iter().find(|monitor| {
+                monitor
+                    .device_name
+                    .as_deref()
+                    .is_some_and(|device| device.eq_ignore_ascii_case(name))
+            })
+        })
+        .or_else(|| monitors.iter().find(|monitor| monitor.primary))
+        .or_else(|| monitors.first())
+}
+
+fn placement_bounds(
+    monitors: &[MonitorWorkArea],
+    placement: &poe_alarm_settings::HudPlacement,
+) -> RectI {
+    let work = preferred_monitor(monitors, placement.monitor_device_name.as_deref())
+        .map_or_else(fallback_work_area, |monitor| monitor.work);
+    let native_placement = match (placement.relative_x, placement.relative_y) {
+        (Some(x), Some(y)) => {
+            poe_alarm_platform_win::HudPlacement::manual(x, y).unwrap_or_default()
+        }
+        _ => poe_alarm_platform_win::HudPlacement::Automatic,
+    };
+    let size = SizeI::new(HUD_WIDTH, HUD_HEIGHT).expect("HUD size is positive");
+    let origin = resolve_hud_position(work, size, native_placement, None);
+    RectI::new(origin.x, origin.y, HUD_WIDTH, HUD_HEIGHT).expect("HUD bounds are positive")
+}
+
+fn placement_for_move(
+    monitors: &[MonitorWorkArea],
+    point: PointI,
+) -> Option<poe_alarm_settings::HudPlacement> {
+    let bounds = RectI::new(point.x, point.y, HUD_WIDTH, HUD_HEIGHT)?;
+    // Like MonitorFromRect: prefer the largest intersecting area, then the
+    // nearest display if the rectangle lies in a gap between displays.
+    let monitor = monitors.iter().min_by_key(|monitor| {
+        let width = (i64::from(bounds.right().min(monitor.bounds.right()))
+            - i64::from(bounds.x.max(monitor.bounds.x)))
+        .max(0);
+        let height = (i64::from(bounds.bottom().min(monitor.bounds.bottom()))
+            - i64::from(bounds.y.max(monitor.bounds.y)))
+        .max(0);
+        let cx = i64::from(bounds.x) + i64::from(bounds.width) / 2;
+        let cy = i64::from(bounds.y) + i64::from(bounds.height) / 2;
+        let dx = i128::from(
+            cx - cx.clamp(
+                i64::from(monitor.bounds.x),
+                i64::from(monitor.bounds.right()),
+            ),
+        );
+        let dy = i128::from(
+            cy - cy.clamp(
+                i64::from(monitor.bounds.y),
+                i64::from(monitor.bounds.bottom()),
+            ),
+        );
+        (-(width * height), dx * dx + dy * dy, !monitor.primary)
+    })?;
+    let relative = |position: i32, origin: i32, span: i32| {
+        ((f64::from(position) - f64::from(origin)) / f64::from(span.max(1))).clamp(0.0, 1.0)
+    };
+    // An enumeration failure must not erase a previously saved monitor name.
+    // Keep the visible drag but wait for an identifiable display before saving.
+    let device_name = monitor.device_name.clone()?;
+    Some(poe_alarm_settings::HudPlacement {
+        monitor_device_name: Some(device_name),
+        relative_x: Some(relative(
+            point.x,
+            monitor.work.x,
+            monitor.work.width - HUD_WIDTH,
+        )),
+        relative_y: Some(relative(
+            point.y,
+            monitor.work.y,
+            monitor.work.height - HUD_HEIGHT,
+        )),
+    })
+}
+
+fn monitor_work_areas() -> Vec<MonitorWorkArea> {
+    use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::Graphics::Gdi::EnumDisplayMonitors;
+    let mut monitors = Vec::<MonitorWorkArea>::new();
+    // SAFETY: the callback borrows this vector only during synchronous enumeration.
+    let _ = unsafe {
+        EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect_monitor),
+            LPARAM((&raw mut monitors) as isize),
+        )
+    };
+    if monitors.is_empty() {
+        let work = fallback_work_area();
+        monitors.push(MonitorWorkArea {
+            device_name: None,
+            bounds: work,
+            work,
+            primary: true,
+        });
+    }
+    monitors
+}
+
+unsafe extern "system" fn collect_monitor(
+    monitor: windows::Win32::Graphics::Gdi::HMONITOR,
+    _dc: windows::Win32::Graphics::Gdi::HDC,
+    _rect: *mut windows::Win32::Foundation::RECT,
+    state: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO, MONITORINFOEXW};
+    use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
+    let mut info = MONITORINFOEXW {
+        monitorInfo: MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFOEXW>() as u32,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // SAFETY: MONITORINFOEXW starts with MONITORINFO, and cbSize includes szDevice.
+    if unsafe { GetMonitorInfoW(monitor, &raw mut info.monitorInfo) }.as_bool() {
+        let convert = |rect: windows::Win32::Foundation::RECT| {
+            RectI::new(
+                rect.left,
+                rect.top,
+                rect.right.checked_sub(rect.left)?,
+                rect.bottom.checked_sub(rect.top)?,
+            )
+        };
+        if let (Some(bounds), Some(work)) = (
+            convert(info.monitorInfo.rcMonitor),
+            convert(info.monitorInfo.rcWork),
+        ) {
+            let length = info
+                .szDevice
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(info.szDevice.len());
+            let device_name =
+                (length > 0).then(|| String::from_utf16_lossy(&info.szDevice[..length]));
+            // SAFETY: state is the live vector passed to EnumDisplayMonitors above.
+            unsafe { &mut *(state.0 as *mut Vec<MonitorWorkArea>) }.push(MonitorWorkArea {
+                device_name,
+                bounds,
+                work,
+                primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+            });
+        }
+    }
+    true.into()
+}
+
+/// Enumeration failure fallback: retain the system primary work area when available.
+fn fallback_work_area() -> RectI {
     use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::WindowsAndMessaging::{
         SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
@@ -181,4 +349,101 @@ fn work_area() -> RectI {
         return area;
     }
     RectI::new(0, 0, 1920, 1080).expect("fallback work area is positive")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn displays() -> Vec<MonitorWorkArea> {
+        vec![
+            MonitorWorkArea {
+                device_name: Some("\\\\.\\DISPLAY2".to_owned()),
+                bounds: RectI::new(-1920, -200, 1920, 1080).unwrap(),
+                work: RectI::new(-1920, -160, 1920, 1040).unwrap(),
+                primary: false,
+            },
+            MonitorWorkArea {
+                device_name: Some("\\\\.\\DISPLAY1".to_owned()),
+                bounds: RectI::new(0, 0, 2560, 1440).unwrap(),
+                work: RectI::new(0, 0, 2560, 1400).unwrap(),
+                primary: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn saved_monitor_restores_relative_position_in_its_own_work_area() {
+        let monitors = displays();
+        let placement = poe_alarm_settings::HudPlacement {
+            monitor_device_name: Some("\\\\.\\display2".to_owned()),
+            relative_x: Some(0.5),
+            relative_y: Some(0.5),
+        };
+        let bounds = placement_bounds(&monitors, &placement);
+        assert_eq!(bounds.x, -1920 + (1920 - HUD_WIDTH) / 2);
+        assert_eq!(bounds.y, -160 + (1040 - HUD_HEIGHT) / 2);
+        assert!(bounds.right() <= 0);
+    }
+
+    #[test]
+    fn dragging_to_a_negative_coordinate_display_round_trips_its_device_and_position() {
+        let monitors = displays();
+        let point = PointI::new(-1567, 321);
+        let placement = placement_for_move(&monitors, point).unwrap();
+        assert_eq!(
+            placement.monitor_device_name.as_deref(),
+            Some("\\\\.\\DISPLAY2")
+        );
+        let restored = placement_bounds(&monitors, &placement);
+        assert_eq!((restored.x, restored.y), (point.x, point.y));
+        assert!(placement.is_valid());
+    }
+
+    #[test]
+    fn missing_display_falls_back_without_forgetting_the_saved_device() {
+        let monitors = displays();
+        let placement = poe_alarm_settings::HudPlacement {
+            monitor_device_name: Some("\\\\.\\DISPLAY2".to_owned()),
+            relative_x: Some(1.0),
+            relative_y: Some(1.0),
+        };
+        let fallback = placement_bounds(&monitors[1..], &placement);
+        assert_eq!((fallback.right(), fallback.bottom()), (2560, 1400));
+        let reconnected = placement_bounds(&monitors, &placement);
+        assert_eq!((reconnected.right(), reconnected.bottom()), (0, 880));
+        assert_eq!(
+            placement.monitor_device_name.as_deref(),
+            Some("\\\\.\\DISPLAY2")
+        );
+        assert!(preferred_monitor(&[], None).is_none());
+        assert!(preferred_monitor(&monitors, None).unwrap().primary);
+    }
+
+    #[test]
+    fn crossing_or_offscreen_drops_choose_visible_monitor_and_clamp_inside_work_area() {
+        let monitors = displays();
+        // More of the HUD is on DISPLAY2 even though it crosses the seam.
+        let crossing = placement_for_move(&monitors, PointI::new(-200, 100)).unwrap();
+        assert_eq!(
+            crossing.monitor_device_name.as_deref(),
+            Some("\\\\.\\DISPLAY2")
+        );
+        assert_eq!(placement_bounds(&monitors, &crossing).right(), 0);
+        // A drop beyond the left display remains reachable on that nearest display.
+        let offscreen = placement_for_move(&monitors, PointI::new(-2500, -500)).unwrap();
+        assert_eq!(
+            offscreen.monitor_device_name.as_deref(),
+            Some("\\\\.\\DISPLAY2")
+        );
+        let clamped = placement_bounds(&monitors, &offscreen);
+        assert_eq!((clamped.x, clamped.y), (-1920, -160));
+    }
+
+    #[test]
+    fn unavailable_monitor_identity_does_not_generate_a_destructive_save() {
+        let mut monitors = displays();
+        monitors[0].device_name = None;
+        assert!(placement_for_move(&monitors, PointI::new(-1500, 100)).is_none());
+    }
 }

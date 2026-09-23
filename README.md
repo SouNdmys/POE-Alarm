@@ -13,17 +13,27 @@
 
 A local crafting alarm for Path of Exile 1 & 2. It reads the item under your cursor by asking the game client for it — the same text you get with Ctrl+C — and the moment your target affix combination appears it loops an alert sound and throws up a red lock screen that blocks further mouse clicks, so a fast crafting hand cannot click away the roll you just hit.
 
-Current release: **1.1.4**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
+Current release: **1.2.0**, a fully native Rust build (no .NET, no Tauri, no WebView). Windows 10/11 x64. Supports the English and Traditional Chinese clients of both POE 1 and POE 2. No network access, no accounts, no telemetry.
 
 Monitoring synthesizes input only in answer to your own presses: one `Ctrl+C` follows each click you make (with a bounded retry when the client answers late), and a manual `Ctrl+C` is honored as well. Nothing is sent on a timer and nothing is sent while you are idle — see [Safety boundaries](#safety-boundaries).
 
 **It does make crafting faster, and that is the point.** Without it, every roll costs you a look at the tooltip and a decision about what you are seeing. With it you can click straight through a stack of currency without reading anything, and be interrupted only when the combination you asked for actually appears. Not having to read is the whole gain, and in practice it is a large one.
 
-**The timing that decides a catch is the copy delay, and it tunes itself.** After each click the app waits for the server round trip, then copies and judges. The delay adapts: a copy that needed retries raises it decisively, a fresh first answer probes it back down, bounded to 40–150ms; `POE_ALARM_COPY_DELAY_MS` pins it and turns adaptation off. The session also holds the Windows timer at 1ms so scheduling jitter stops eating the margin. If rolls still get past you, slow your clicking down.
+**Catching a roll depends on when the game makes its text available.** The app starts with an 80ms click-to-copy delay and adapts within 40–150ms: a result needing retries raises it, while a fresh first answer probes it lower. `POE_ALARM_COPY_DELAY_MS` pins the delay and disables adaptation. Version 1.2.0 preserves the existing copy schedule and prepares the mouse guard in pass-through mode before monitoring, then arms it only on a confirmed match. None of this removes server latency or can undo a click already sent to the game. No click interval, including 150ms, is guaranteed safe.
 
-**Suggested use:** start monitoring — button or hotkey, either works — and just click, by hand. Every roll is judged, the first included; starting while hovering the item adds a baseline copy that makes the first judgement steadier. Do not use auto-clicker macros: timed triggering is exactly what the rules prohibit, and this tool neither needs nor launders one. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls start getting past the alarm, slow down — and when an alert fails to block the next click for a reason other than timing, the app says so explicitly in its log.
+**Suggested use:** start monitoring while hovering the item, then click by hand at a pace your connection can sustain. Starting reads a baseline; subsequent changed item text is evaluated. Delayed or overlapping copies can still miss rolls. Stop monitoring when you are not crafting, so stray clicks don't spend copies. If rolls get past the alarm, slow down. When an alert cannot arm its click guard, the app reports that explicitly in its log.
 
 The UI ships in English and 简体中文 — switch instantly in Settings; the UI language is independent from the affix language of your game client.
+
+## New in 1.2.0
+
+- **Personal library:** save an affix or a whole plan, name and categorize it, search, import/export JSON, and reuse independent copies. Start from **+ Affix → From library** or the library tab.
+- **Build rules from an item:** paste the item text and use **+ Affix → Read modifiers**, select complete modifiers, then set their numeric requirements. Advanced descriptions preserve hybrid modifier groups; plain text imports display a grouping reminder.
+- **Explain manual checks:** expand the test result to see which full modifier and numeric requirements matched. This work stays outside automatic monitoring.
+- **Safer editing:** numeric errors are explicit, edits save automatically, invalid drafts survive restart, deletions can be undone until the next edit, and rules are locked during a monitoring session. Saved disabled affixes no longer consume the active 32-affix/8-plan limit.
+- **Reliability:** bind copied text to its exact clipboard sequence, recheck foreground/cancellation before evaluating it, keep the previous hotkey if a replacement conflicts, preserve physically held Ctrl, and restore the HUD on its saved display.
+
+Settings now use schema 5. A schema-4 release opens them read-only to protect the new personal library. Corrupt settings are preserved as `.bad`; a valid `.bak` is restored when available. See [the 1.2.0 validation report](docs/validation-1.2.0.md) for measured results and test limitations.
 
 
 ## Why 1.1.0 exists: compliance with GGG's developer rules
@@ -129,10 +139,10 @@ The app keeps no affix database and needs no updates when GGG adds modifiers. Th
 ## Safety boundaries
 
 - **Every chord answers a press of yours.** A pass-through `WH_MOUSE_LL` hook counts your left clicks — it suppresses nothing and synthesizes nothing, and every event passes straight through. Each click is followed by one `Ctrl+C` after an adaptive delay (`POE_ALARM_COPY_DELAY_MS` pins it); if the client answers with stale text or not at all, at most two spaced retries follow, then the click is given up. Hard ceiling: three chords per click, enforced by a pinned constant. No clicks, no chords — idle monitoring sends nothing, ever.
-- **The one synthesized input in the whole app is the manual check hotkey.** `Ctrl+Shift+F11` sends a single `Ctrl+C` chord per press — one `SendInput` call carrying four key events (three when you already hold Ctrl, because releasing a key you are physically pressing would corrupt Windows' key state). One manual press, one fixed function, one action. The GUI framework this links (GPUI) carries its own Alt-key `SendInput` in a window-activation path this app never calls, so the precise claim is that `Ctrl+C` is the only input **this project's own code** synthesizes.
+- **Ctrl+C is the only input this project's own code synthesizes.** A manual check sends one chord; click-triggered reading uses the bounded attempts above. It carries four key events, or just C-down/C-up when Ctrl is already physically held, preserving both left and right Ctrl. The GUI framework this links (GPUI) carries its own Alt-key `SendInput` in a window-activation path this app never calls.
 - **The clipboard is read only while the game is in the foreground.** That gate is a privacy boundary: tab out, and the app stops reading clipboard content entirely — a copy made in another program is never read, and cannot be misread as a roll when you tab back in. Clicks made outside the game are written off the same way.
 - **Nothing else touches the game.** No memory reads or writes, no DLL injection, no packet inspection, no overlay hooked into the renderer, no network traffic of any kind. The app talks to Windows and to the clipboard.
-- The one call site is `send_ctrl_c` in `rust/crates/poe-alarm-platform-win/src/win32/clipboard.rs:126`. Check it yourself: `grep -rn SendInput rust/crates` returns eight lines — that call, its `use` import, four mentions in doc comments and error text, and two in the `poe-alarm-clip-only` README. Exactly one of the eight executes anything.
+- The native input call is `send_ctrl_c` in `rust/crates/poe-alarm-platform-win/src/win32/clipboard.rs`.
 - Reading the clipboard means overwriting whatever you had on it. That is a real cost of this design and there is no way around it while the client only offers text this way.
 - No low-level mouse guard is armed before a confirmed match; every click passes straight to the game while the app is reading.
 - At the instant of a confirmed match a hook-level click block arms, so the very next click cannot take the roll away while the red layer is still appearing. The layer is then presented and *verified* visible, clickable, and covering the whole virtual desktop; the block hands over to the verified layer, or fails open on a bounded timeout and reports the error instead of pretending a hidden window protects you. No block of any kind exists before a confirmed match.

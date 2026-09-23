@@ -34,6 +34,8 @@ pub enum EditorTab {
     Conditions,
     Settings,
     Help,
+    Library,
+    Import,
 }
 
 /// 树节点指向的设置对象。
@@ -82,6 +84,12 @@ pub struct ViewState {
     /// 粘贴物品文本的多行输入框。
     pub item_text_input: Entity<InputState>,
     pub value_rows: Vec<ValueRow>,
+    pub library_search: Entity<InputState>,
+    pub library_category: Entity<InputState>,
+    pub library_name: Entity<InputState>,
+    pub library_selected: Option<usize>,
+    pub import_groups: Vec<(bool, String)>,
+    pub import_grouping_exact: bool,
 
     /// 运行侧展示数据
     pub elapsed: SharedString,

@@ -10,8 +10,11 @@ use crate::matching::{
 };
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+/// Monitoring budgets count enabled rules only; saved unchecked rules remain reusable.
 pub const MAXIMUM_GROUPS: usize = 8;
 pub const MAXIMUM_CONDITIONS: usize = 32;
+pub const MAXIMUM_SAVED_GROUPS: usize = 128;
+pub const MAXIMUM_SAVED_CONDITIONS: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -423,9 +426,9 @@ fn validate_definition(
             definition.schema_version
         ));
     }
-    if !(1..=MAXIMUM_GROUPS).contains(&definition.groups.len()) {
+    if definition.groups.len() > MAXIMUM_SAVED_GROUPS {
         errors.push(format!(
-            "a rule set must contain 1-{MAXIMUM_GROUPS} acceptable results"
+            "a rule set may save at most {MAXIMUM_SAVED_GROUPS} acceptable results"
         ));
     }
     let total_conditions = definition
@@ -433,16 +436,29 @@ fn validate_definition(
         .iter()
         .map(|group| group.conditions.len())
         .sum::<usize>();
-    if total_conditions > MAXIMUM_CONDITIONS {
+    if total_conditions > MAXIMUM_SAVED_CONDITIONS {
         errors.push(format!(
-            "a rule set may contain at most {MAXIMUM_CONDITIONS} conditions"
+            "a rule set may save at most {MAXIMUM_SAVED_CONDITIONS} conditions"
         ));
     }
-    if !definition
+    let enabled_counts = definition
         .groups
         .iter()
-        .any(|group| group.enabled_condition_count() > 0)
-    {
+        .map(AcceptableResultGroup::enabled_condition_count)
+        .collect::<Vec<_>>();
+    let active_groups = enabled_counts.iter().filter(|&&count| count > 0).count();
+    if active_groups > MAXIMUM_GROUPS {
+        errors.push(format!(
+            "a rule set may monitor at most {MAXIMUM_GROUPS} acceptable results at once"
+        ));
+    }
+    let enabled_conditions = enabled_counts.iter().sum::<usize>();
+    if enabled_conditions > MAXIMUM_CONDITIONS {
+        errors.push(format!(
+            "a rule set may monitor at most {MAXIMUM_CONDITIONS} enabled conditions at once"
+        ));
+    }
+    if enabled_conditions == 0 {
         errors.push("a rule set must contain at least one enabled condition".to_owned());
     }
 

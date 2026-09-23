@@ -147,6 +147,7 @@ enum SafetyCall {
 #[derive(Default)]
 struct FakeProtection {
     calls: Mutex<Vec<SafetyCall>>,
+    fail_prepare: AtomicBool,
     fail_latch: AtomicBool,
     /// When set, latches succeed but report the click-block hook as failed.
     unguarded_reason: Mutex<Option<String>>,
@@ -173,7 +174,13 @@ impl ProtectionService for FakeProtection {
             .lock()
             .unwrap()
             .push(SafetyCall::Prepare(generation));
-        Ok(())
+        if self.fail_prepare.load(Ordering::Acquire) {
+            Err(ProtectionError(
+                "injected hook preparation failure".to_owned(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     fn arm_pending(&self, generation: RuntimeGeneration) -> Result<(), ProtectionError> {
@@ -455,7 +462,7 @@ const TWO_SEPARATE_AFFIXES: &str = concat!(
 );
 
 #[test]
-fn cached_readings_keep_the_session_running_without_a_pending_guard() {
+fn cached_readings_keep_the_session_running_without_arming_a_pending_guard() {
     let sources = FakeSources::new(vec![result(&["not it"])]);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
@@ -469,17 +476,16 @@ fn cached_readings_keep_the_session_running_without_a_pending_guard() {
     });
     let calls = protection.calls.lock().unwrap().clone();
     assert!(
-        !calls.iter().any(|call| matches!(
-            call,
-            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-        )),
+        !calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_))),
         "POE1 English must retain the 1.0 no-short-guard behavior: {calls:?}"
     );
     shutdown(&handle);
 }
 
 #[test]
-fn fast_match_latches_alert_without_a_pending_mouse_guard() {
+fn fast_match_prepares_before_reading_and_arms_only_inside_latch() {
     let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
@@ -497,12 +503,16 @@ fn fast_match_latches_alert_without_a_pending_mouse_guard() {
         .position(|call| matches!(call, SafetyCall::Begin(_)))
         .unwrap();
     assert!(begin < latch, "calls: {calls:?}");
+    let prepare = calls
+        .iter()
+        .position(|call| matches!(call, SafetyCall::Prepare(_)))
+        .unwrap();
+    assert!(begin < prepare && prepare < latch, "calls: {calls:?}");
     assert!(
-        !calls.iter().any(|call| matches!(
-            call,
-            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-        )),
-        "fast mode must not touch the pending mouse guard: {calls:?}"
+        !calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_))),
+        "fast mode must not arm before the confirmed-match latch: {calls:?}"
     );
     shutdown(&handle);
 }
@@ -539,11 +549,10 @@ fn stop_cancels_a_blocked_reading_without_a_late_match() {
         .rposition(|call| matches!(call, SafetyCall::StopPending(_)))
         .expect("runtime stop still closes the alert ownership session");
     assert!(
-        !calls[..terminal_stop].iter().any(|call| matches!(
-            call,
-            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-        )),
-        "stopping fast mode must not reveal a hidden pending guard: {calls:?}"
+        !calls[..terminal_stop]
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_))),
+        "stopping fast mode must not reveal a guard armed before a match: {calls:?}"
     );
     thread::sleep(Duration::from_millis(30));
     while let Some(event) = handle.try_next_event() {
@@ -553,7 +562,7 @@ fn stop_cancels_a_blocked_reading_without_a_late_match() {
 }
 
 #[test]
-fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
+fn alert_failure_emits_explicit_fault_without_arming_a_pending_guard() {
     let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
     let protection = Arc::new(FakeProtection::default());
     protection.fail_latch.store(true, Ordering::Release);
@@ -569,10 +578,35 @@ fn alert_failure_emits_explicit_fault_without_a_pending_guard() {
         )
     });
     let calls = protection.calls.lock().unwrap().clone();
-    assert!(!calls.iter().any(|call| matches!(
-        call,
-        SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-    )));
+    assert!(
+        !calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_)))
+    );
+    shutdown(&handle);
+}
+
+#[test]
+fn failed_prewarm_does_not_prevent_fast_mode_from_latching_a_match() {
+    let sources = FakeSources::new(vec![result(&["+3.73% to Critical Hit Chance"])]);
+    let protection = Arc::new(FakeProtection::default());
+    protection.fail_prepare.store(true, Ordering::Release);
+    let handle = runtime(&sources, &protection);
+    handle.start(poe2_quick_settings()).unwrap();
+    wait_for(&handle, Duration::from_secs(2), |event| {
+        matches!(event, RuntimeEvent::MatchFound { .. })
+    });
+    let calls = protection.calls.lock().unwrap().clone();
+    assert!(
+        calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Prepare(_)))
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Latch(_)))
+    );
     shutdown(&handle);
 }
 
@@ -649,7 +683,7 @@ fn sound_failure_is_non_fatal_while_red_alert_remains_latched() {
 }
 
 #[test]
-fn poe2_fast_monitoring_never_prepares_the_dormant_guard() {
+fn poe2_fast_monitoring_prewarms_without_arming_and_releases_on_stop() {
     let sources = FakeSources::new(vec![result(&["not it"])]);
     let protection = Arc::new(FakeProtection::default());
     let handle = runtime(&sources, &protection);
@@ -663,18 +697,32 @@ fn poe2_fast_monitoring_never_prepares_the_dormant_guard() {
             }
         )
     });
+    let calls = protection.calls.lock().unwrap().clone();
+    let generation = calls
+        .iter()
+        .find_map(|call| match call {
+            SafetyCall::Begin(generation) => Some(*generation),
+            _ => None,
+        })
+        .unwrap();
+    assert!(calls.contains(&SafetyCall::Prepare(generation)));
     assert!(
-        !protection.calls.lock().unwrap().iter().any(|call| matches!(
-            call,
-            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-        )),
-        "POE2 fast monitoring must not prepare the dormant pending guard"
+        !calls
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_)))
     );
     shutdown(&handle);
+    assert!(
+        protection
+            .calls
+            .lock()
+            .unwrap()
+            .contains(&SafetyCall::StopPending(generation))
+    );
 }
 
 #[test]
-fn monitor_start_failure_does_not_prepare_the_dormant_guard() {
+fn monitor_start_failure_releases_the_prepared_passthrough_guard() {
     let sources = FakeSources::new(vec![result(&["not it"])]);
     sources.state.structured_support.store(0, Ordering::Release);
     let protection = Arc::new(FakeProtection::default());
@@ -695,11 +743,15 @@ fn monitor_start_failure_does_not_prepare_the_dormant_guard() {
         .position(|call| matches!(call, SafetyCall::StopPending(_)))
         .unwrap();
     assert!(
-        !calls[..stop].iter().any(|call| matches!(
-            call,
-            SafetyCall::Prepare(_) | SafetyCall::Arm(_) | SafetyCall::Release(_)
-        )),
+        !calls[..stop]
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Arm(_) | SafetyCall::Release(_))),
         "calls: {calls:?}"
+    );
+    assert!(
+        calls[..stop]
+            .iter()
+            .any(|call| matches!(call, SafetyCall::Prepare(_)))
     );
     assert_eq!(sources.state.reads.load(Ordering::Acquire), 0);
     shutdown(&handle);
