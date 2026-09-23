@@ -29,6 +29,8 @@ The UI ships in English and 简体中文 — switch instantly in Settings; the U
 
 Five user-supplied POE2 items exposed two parsing issues: fixed-value annotations such as **+4(3) to Level of all Attack Skills** now produce one numeric slot with actual value **4**, and the **Sanctified** status is no longer offered as an importable modifier. Copy scheduling and input interception are unchanged. See [the sample test report](docs/poe2-user-samples-20260923.md) for exact combination results and numeric boundaries.
 
+The affected staff was already Sanctified, outside the user's active crafting workflow. These are completed-item import/manual-check compatibility fixes, not an explanation or solution for rapid-click misses during ordinary crafting.
+
 If an older version saved a rule for this fixed-value format with two numeric constraints, reopen it and check the single actual-value field. Excess constraints are rejected rather than silently ignored.
 
 ## New in 1.2.0
